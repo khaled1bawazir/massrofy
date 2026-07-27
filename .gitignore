@@ -50,3 +50,9 @@ android/app/*.keystore
 *.jks
 secrets.properties
 
+# Local MCP server config — may contain a bearer token for servers whose OAuth
+# flow doesn't work in this environment (e.g. the GitHub Copilot MCP endpoint).
+# The token itself lives in ~/.claude/settings.json (env.MASSROFY_GITHUB_PAT),
+# referenced here via ${MASSROFY_GITHUB_PAT} substitution, never committed.
+.mcp.json
+
