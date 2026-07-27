@@ -12,8 +12,13 @@ import 'wrapped_key.dart';
 /// backing — are not reachable from pure Dart; there is no `dart:` or pub
 /// package that talks to `android.security.keystore.KeyGenParameterSpec`.
 /// [KeystoreChannel.kt] is real, hand-written Kotlin implementing AES-256-GCM
-/// key generation and wrap/unwrap against that API, exactly as ADR-004
-/// specifies (alias `massrofy.dbkek`, `setInvalidatedByBiometricEnrollment(true)`).
+/// key generation and wrap/unwrap against that API (alias `massrofy.dbkek`
+/// for the DB Master Key, `massrofy.auditchain` for ADR-010's audit chain
+/// key — see [keyAlias] below) — see that file's doc comment for the two
+/// deliberate, documented departures from ADR-004's literal text in this P1
+/// slice: a time-bound (not per-operation) authentication window, and
+/// `setInvalidatedByBiometricEnrollment(false)` until a real recovery path
+/// exists.
 ///
 /// **Test-coverage honesty note (see the PR description for the full
 /// statement):** this class's Dart-side contract (method names, argument
@@ -36,11 +41,14 @@ class AndroidKeystoreKeyManager implements KeyManager {
     : channel = channel ?? _channel;
 
   @override
-  Future<WrappedKey> wrapWithKeystoreKek(List<int> dbMasterKey) async {
+  Future<WrappedKey> wrapWithKeystoreKek(
+    List<int> secretBytes, {
+    String keyAlias = kDbMasterKeyKeystoreAlias,
+  }) async {
     final Map<Object?, Object?>? result = await channel
         .invokeMapMethod<Object?, Object?>(
           'wrapWithKeystoreKek',
-          <String, Object?>{'keyBytes': dbMasterKey},
+          <String, Object?>{'keyBytes': secretBytes, 'keyAlias': keyAlias},
         );
     if (result == null) {
       throw PlatformException(
@@ -59,13 +67,17 @@ class AndroidKeystoreKeyManager implements KeyManager {
   }
 
   @override
-  Future<List<int>> unwrapWithKeystoreKek(WrappedKey wrapped) async {
+  Future<List<int>> unwrapWithKeystoreKek(
+    WrappedKey wrapped, {
+    String keyAlias = kDbMasterKeyKeystoreAlias,
+  }) async {
     try {
       final List<Object?>? result = await channel.invokeListMethod<Object?>(
         'unwrapWithKeystoreKek',
         <String, Object?>{
           'ciphertext': wrapped.ciphertext,
           'nonce': wrapped.nonce,
+          'keyAlias': keyAlias,
         },
       );
       if (result == null) {
@@ -84,7 +96,11 @@ class AndroidKeystoreKeyManager implements KeyManager {
   }
 
   @override
-  Future<void> deleteKeystoreKek() async {
-    await channel.invokeMethod<void>('deleteKeystoreKek');
+  Future<void> deleteKeystoreKek({
+    String keyAlias = kDbMasterKeyKeystoreAlias,
+  }) async {
+    await channel.invokeMethod<void>('deleteKeystoreKek', <String, Object?>{
+      'keyAlias': keyAlias,
+    });
   }
 }

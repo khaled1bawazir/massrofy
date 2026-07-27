@@ -118,4 +118,70 @@ void main() {
     await manager.deleteKeystoreKek();
     expect(received.method, 'deleteKeystoreKek');
   });
+
+  group('keyAlias (item 4 — the same channel now backs both the DB Master '
+      'Key KEK and ADR-010\'s separate audit-chain KEK)', () {
+    test('wrapWithKeystoreKek defaults to the DB Master Key alias when none '
+        'is given', () async {
+      late MethodCall received;
+      mockHandler((MethodCall call) async {
+        received = call;
+        return <String, Object?>{
+          'ciphertext': <int>[1],
+          'nonce': <int>[2],
+        };
+      });
+
+      await manager.wrapWithKeystoreKek(<int>[1, 2, 3]);
+      expect(received.arguments['keyAlias'], 'massrofy.dbkek');
+    });
+
+    test('wrapWithKeystoreKek forwards an explicit keyAlias (e.g. the '
+        'audit-chain alias)', () async {
+      late MethodCall received;
+      mockHandler((MethodCall call) async {
+        received = call;
+        return <String, Object?>{
+          'ciphertext': <int>[1],
+          'nonce': <int>[2],
+        };
+      });
+
+      await manager.wrapWithKeystoreKek(<int>[
+        1,
+        2,
+        3,
+      ], keyAlias: 'massrofy.auditchain');
+      expect(received.arguments['keyAlias'], 'massrofy.auditchain');
+    });
+
+    test('unwrapWithKeystoreKek forwards an explicit keyAlias', () async {
+      late MethodCall received;
+      mockHandler((MethodCall call) async {
+        received = call;
+        return <int>[9];
+      });
+
+      final WrappedKey wrapped = WrappedKey(
+        ciphertext: Uint8List.fromList(<int>[1]),
+        nonce: Uint8List.fromList(<int>[2]),
+      );
+      await manager.unwrapWithKeystoreKek(
+        wrapped,
+        keyAlias: 'massrofy.auditchain',
+      );
+      expect(received.arguments['keyAlias'], 'massrofy.auditchain');
+    });
+
+    test('deleteKeystoreKek forwards an explicit keyAlias', () async {
+      late MethodCall received;
+      mockHandler((MethodCall call) async {
+        received = call;
+        return null;
+      });
+
+      await manager.deleteKeystoreKek(keyAlias: 'massrofy.auditchain');
+      expect(received.arguments['keyAlias'], 'massrofy.auditchain');
+    });
+  });
 }

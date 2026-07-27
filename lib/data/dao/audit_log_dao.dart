@@ -75,33 +75,50 @@ class AuditLogDao extends DatabaseAccessor<AppDatabase>
     required DateTime changedAt,
     required List<AuditFieldChange> fieldChanges,
   }) async {
-    final String prevHash = await _latestHash();
-    final String canonicalPayload = _canonicalize(
-      entityType: entityType,
-      entityId: entityId,
-      action: action,
-      actor: actor,
-      actorDetail: actorDetail,
-      changedAt: changedAt,
-      fieldChanges: fieldChanges,
-    );
-    final String entryHash = _computeHash(prevHash, canonicalPayload);
-
-    return into(auditEntries).insert(
-      AuditEntriesCompanion.insert(
+    // Read-latest-hash-then-insert is two separate statements, and without
+    // wrapping them together, either of two things could break the hash
+    // chain: (a) a crash/kill between the read and the write leaves nothing
+    // committed, which is actually fine on its own — but (b) two concurrent
+    // `append()` calls could both read the *same* `prevHash` before either
+    // insert commits, then both insert rows chained to that same
+    // now-stale predecessor, silently forking the chain instead of forming
+    // a single linear one. Wrapping both steps in Drift's `transaction()`
+    // closes both gaps: SQLite serialises concurrent writers against the
+    // same connection, and a crash mid-way rolls the whole unit back
+    // instead of leaving a half-written entry. Drift transactions nest via
+    // savepoints automatically, so this is equally correct whether `append`
+    // is called on its own or (as `TransactionDao` already does) from
+    // inside a caller's own `transaction()` block alongside the ledger row
+    // it accompanies.
+    return transaction<int>(() async {
+      final String prevHash = await _latestHash();
+      final String canonicalPayload = _canonicalize(
         entityType: entityType,
         entityId: entityId,
         action: action,
         actor: actor,
-        actorDetail: Value<String?>(actorDetail),
+        actorDetail: actorDetail,
         changedAt: changedAt,
-        fieldChangesJson: jsonEncode(
-          fieldChanges.map((AuditFieldChange c) => c.toJson()).toList(),
+        fieldChanges: fieldChanges,
+      );
+      final String entryHash = _computeHash(prevHash, canonicalPayload);
+
+      return into(auditEntries).insert(
+        AuditEntriesCompanion.insert(
+          entityType: entityType,
+          entityId: entityId,
+          action: action,
+          actor: actor,
+          actorDetail: Value<String?>(actorDetail),
+          changedAt: changedAt,
+          fieldChangesJson: jsonEncode(
+            fieldChanges.map((AuditFieldChange c) => c.toJson()).toList(),
+          ),
+          prevHash: prevHash,
+          entryHash: entryHash,
         ),
-        prevHash: prevHash,
-        entryHash: entryHash,
-      ),
-    );
+      );
+    });
   }
 
   /// All audit entries for one entity, oldest first — matches ADR-010's

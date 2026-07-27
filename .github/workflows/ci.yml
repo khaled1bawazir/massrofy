@@ -101,7 +101,31 @@ jobs:
 
       - name: flutter test --coverage
         if: steps.detect.outputs.exists == 'true'
-        run: flutter test --coverage
+        # --exclude-tags=release_mode_guard: excludes exactly one file,
+        # test/features/security/privacy_overlay_release_mode_test.dart,
+        # which self-checks and deliberately FAILS under a plain
+        # `flutter test` (see its doc comment and dart_test.yaml) — it only
+        # makes sense run with dart.vm.product=true, which the dedicated
+        # step immediately below this one supplies.
+        run: flutter test --coverage --exclude-tags=release_mode_guard
+
+      - name: "ADR-014: app-switcher privacy overlay guard under genuine release-mode semantics"
+        if: steps.detect.outputs.exists == 'true'
+        # This is a SEPARATE `flutter test` invocation, deliberately: passing
+        # --dart-define=dart.vm.product=true genuinely flips `kReleaseMode`
+        # to true for this process (verified empirically — see
+        # test/features/security/privacy_overlay_release_mode_test.dart's
+        # doc comment), which is exactly the release-mode semantics ADR-014's
+        # "no shipped bypass" guarantee depends on. Running it mixed into the
+        # main `flutter test --coverage` step above would make every OTHER
+        # test in the suite unknowingly run under dart.vm.product=true too,
+        # which is not what "flutter test --coverage" should mean for the
+        # rest of this suite.
+        run: >
+          flutter test
+          --dart-define=dart.vm.product=true
+          --dart-define=MASSROFY_DISABLE_PRIVACY_OVERLAY=true
+          test/features/security/privacy_overlay_release_mode_test.dart
 
       - name: Upload coverage report
         if: steps.detect.outputs.exists == 'true'
@@ -165,6 +189,79 @@ jobs:
         run: bash .github/scripts/check_money_type_ban.sh
 
   # ---------------------------------------------------------------------------
+  # 4b. ADR-003: SQLCipher encryption, exercised for real on Android.
+  #
+  # `flutter test` (job 1 above) runs on the HOST runner's Dart VM, where
+  # this Android-only app has no genuine SQLCipher native library to load —
+  # see test/data/db/app_database_encryption_test.dart's doc comment. Those
+  # tests are honestly marked skipped in that environment rather than
+  # forced green. THIS job is the real, required, gating coverage: it boots
+  # an actual headless Android emulator and runs
+  # integration_test/db_encryption_test.dart against it, where
+  # `sqlcipher_flutter_libs`' precompiled Android binary genuinely is
+  # present — the exact same binary the shipped app uses. If SQLCipher is
+  # ever misconfigured, this job fails; it never silently skips.
+  # ---------------------------------------------------------------------------
+  android-sqlcipher-integration-test:
+    name: "ADR-003: SQLCipher integration test (Android emulator)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check whether the Flutter project exists yet
+        id: detect
+        run: |
+          if [ -f pubspec.yaml ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No pubspec.yaml at repo root yet — nothing to run. Will activate once the Flutter project exists."
+          fi
+
+      # GitHub-hosted ubuntu runners support hardware-accelerated
+      # (KVM-backed) Android emulators, but the kvm device node needs its
+      # permissions relaxed first — this is the standard, documented setup
+      # step for reactivecircus/android-emulator-runner on GitHub Actions.
+      - name: Enable KVM group permissions
+        if: steps.detect.outputs.exists == 'true'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Set up Java (required by the Android toolchain)
+        if: steps.detect.outputs.exists == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        if: steps.detect.outputs.exists == 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+
+      - name: flutter pub get
+        if: steps.detect.outputs.exists == 'true'
+        run: flutter pub get
+
+      - name: Run the SQLCipher integration test on a headless Android emulator
+        if: steps.detect.outputs.exists == 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          disable-spellchecker: true
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: flutter test integration_test/db_encryption_test.dart -d emulator-5554
+
+  # ---------------------------------------------------------------------------
   # 4. ADR-001: release build must never declare INTERNET / ACCESS_NETWORK_STATE.
   # ---------------------------------------------------------------------------
   no-network-permission-guard:
@@ -203,11 +300,13 @@ jobs:
       - dependency-scan
       - money-type-guard
       - no-network-permission-guard
+      - android-sqlcipher-integration-test
     runs-on: ubuntu-latest
     steps:
       - name: Confirm every required job passed (or was legitimately skipped)
         run: |
           echo "flutter-build-test: ${{ needs.flutter-build-test.result }}"
+          echo "android-sqlcipher-integration-test: ${{ needs.android-sqlcipher-integration-test.result }}"
           echo "dependency-scan: ${{ needs.dependency-scan.result }}"
           echo "money-type-guard: ${{ needs.money-type-guard.result }}"
           echo "no-network-permission-guard: ${{ needs.no-network-permission-guard.result }}"

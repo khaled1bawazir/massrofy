@@ -20,23 +20,51 @@ import 'wrapped_key.dart';
 /// a documented stub until Epic I (backup, P8) actually builds the
 /// recovery-secret generation and confirmation flow — see that file's doc
 /// comment.
+
+/// The default Keystore alias — the DB Master Key's own KEK, exactly as
+/// ADR-004 names it. Every method below accepts an explicit [keyAlias] so
+/// the **same** Keystore-wrapping mechanism can also back ADR-010's
+/// separate `auditChainKey` (alias `massrofy.auditchain`, see
+/// `audit_chain_key_store.dart`) without a second, near-duplicate Kotlin
+/// implementation — one generic "wrap/unwrap bytes under a named Keystore
+/// AES-256-GCM key" primitive, reused for both purposes.
+const String kDbMasterKeyKeystoreAlias = 'massrofy.dbkek';
+
 abstract interface class KeyManager {
   /// Generates (on first call) or reuses an Android Keystore AES-256-GCM
-  /// key aliased `massrofy.dbkek`, with:
+  /// key aliased [keyAlias] (defaults to [kDbMasterKeyKeystoreAlias]), with:
   ///  - `setUserAuthenticationRequired(true)`
-  ///  - `setInvalidatedByBiometricEnrollment(true)` (ADR-004: deliberately
-  ///    accepted friction — enrolling a new fingerprint forces one
-  ///    recovery-secret entry, which is the secure default; the insecure
-  ///    alternative would let anyone who can add a biometric to the device
-  ///    silently inherit access to the database key)
+  ///  - a *time-bound* authentication window (see
+  ///    `android/.../KeystoreChannel.kt`'s doc comment for exactly why it
+  ///    must be time-bound rather than per-operation, given how this
+  ///    interface's callers actually invoke it)
+  ///  - `setInvalidatedByBiometricEnrollment(false)` **for this P1 slice,
+  ///    deliberately** — ADR-004 names `true` as the eventual secure
+  ///    default, but that default is only safe once a real recovery path
+  ///    exists for the data it would otherwise strand, and
+  ///    `DbMasterKeyStore.unwrapWithRecoverySecret` is still a documented
+  ///    stub (Epic I / P8). Shipping `true` today would mean the first
+  ///    biometric re-enrollment permanently destroys the encrypted
+  ///    database with no way back — see the Kotlin implementation's doc
+  ///    comment for the full tradeoff and the follow-up this defers.
   ///
-  /// and wraps [dbMasterKey] with it. This is real Android Keystore
+  /// and wraps [secretBytes] with it. This is real Android Keystore
   /// hardware/TEE-backed key material on-device (see
   /// `android/.../KeystoreChannel.kt`) — there is no Dart-side fallback for
   /// production use; this method is only meaningfully callable on Android.
-  Future<WrappedKey> wrapWithKeystoreKek(List<int> dbMasterKey);
+  ///
+  /// [keyAlias] selects *which* Keystore-held AES key wraps [secretBytes] —
+  /// each distinct alias is an entirely separate Keystore key with its own
+  /// lifecycle (own invalidation, own deletion). Callers must pass the same
+  /// [keyAlias] to the matching [unwrapWithKeystoreKek]/[deleteKeystoreKek]
+  /// call that they used here.
+  Future<WrappedKey> wrapWithKeystoreKek(
+    List<int> secretBytes, {
+    String keyAlias = kDbMasterKeyKeystoreAlias,
+  });
 
-  /// Unwraps a [WrappedKey] previously produced by [wrapWithKeystoreKek].
+  /// Unwraps a [WrappedKey] previously produced by [wrapWithKeystoreKek]
+  /// under the same [keyAlias].
   ///
   /// Throws [KeystoreKeyInvalidatedException] if the underlying Keystore
   /// key has been invalidated (new biometric enrolled, device credential
@@ -56,9 +84,12 @@ abstract interface class KeyManager {
   /// therefore cannot be opened without a real, OS-enforced authentication
   /// having occurred, not merely without the app's own UI having *shown* a
   /// lock screen.
-  Future<List<int>> unwrapWithKeystoreKek(WrappedKey wrapped);
+  Future<List<int>> unwrapWithKeystoreKek(
+    WrappedKey wrapped, {
+    String keyAlias = kDbMasterKeyKeystoreAlias,
+  });
 
   /// Deletes the Keystore alias entirely — used by erase-all (ADR-011) and
   /// by the recovery flow just before generating a fresh Keystore KEK.
-  Future<void> deleteKeystoreKek();
+  Future<void> deleteKeystoreKek({String keyAlias = kDbMasterKeyKeystoreAlias});
 }

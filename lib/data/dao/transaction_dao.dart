@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import '../../core/money/currency_exponents.dart';
 import '../../core/money/money.dart';
 import '../db/app_database.dart';
 import '../db/tables/transaction_table.dart';
@@ -198,15 +199,20 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
 
   /// Best-effort derivation of the non-authoritative `_minor` column
   /// (ADR-002) for indexing/range filters only — **never** used for
-  /// arithmetic. Assumes a 2-decimal exponent (SAR and most currencies);
-  /// the full per-currency exponent table (needed for KWD/BHD/JOD's 3
-  /// decimals) lands with the P3 domain model, per this table's scope note.
+  /// arithmetic. Looks up the *actual* currency's minor-unit exponent via
+  /// [minorUnitExponentFor] (`lib/core/money/currency_exponents.dart`) —
+  /// previously this hard-coded a 2-decimal exponent for every currency,
+  /// which silently produced a wrong (100x too large, then truncated)
+  /// `_minor` value for 0-decimal currencies like JPY and a wrong (10x too
+  /// small) value for 3-decimal currencies like KWD/BHD/JOD.
   int _toMinorUnitsBestEffort(Money amount) {
+    final int exponent = minorUnitExponentFor(amount.currencyCode);
     final List<String> parts = amount.toCanonicalString().split('.');
     final String wholePart = parts[0];
-    final String fractionPart = parts.length > 1
-        ? parts[1].padRight(2, '0').substring(0, 2)
-        : '00';
+    final String rawFractionPart = parts.length > 1 ? parts[1] : '';
+    final String fractionPart = exponent == 0
+        ? ''
+        : rawFractionPart.padRight(exponent, '0').substring(0, exponent);
     final int sign = wholePart.startsWith('-') ? -1 : 1;
     final String digits = '${wholePart.replaceFirst('-', '')}$fractionPart';
     return sign * int.parse(digits);

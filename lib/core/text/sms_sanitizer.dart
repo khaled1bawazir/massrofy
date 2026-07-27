@@ -67,8 +67,37 @@ abstract final class SmsSanitizer {
   // "هو", a colon, a space) without risking runaway backtracking (the
   // quantifier is bounded, not unbounded, so there is no catastrophic
   // backtracking risk here).
-  static final RegExp _secretKeywordPattern = RegExp(
-    r'(CVV|CVC|PIN|OTP|رمز التحقق|رمز|الرقم السري|كلمة المرور)[^\d]{0,20}(\d{3,8})',
+  //
+  // The keyword list also covers common OTP-specific synonyms beyond the
+  // original CVV/PIN/OTP set — "verification code"/"one-time password"/
+  // "access code" in English, and "رمز الدخول"/"رمز التفعيل" in Arabic —
+  // since real bank OTP messages phrase the same concept many ways, and
+  // under-redacting any of them is exactly the failure mode this class
+  // exists to prevent (see [_keywordAfterDigitsPattern] below for the other
+  // half of the OTP under-redaction fix: many real Arabic OTP messages put
+  // the digits *before* the keyword, which this pattern alone would miss
+  // entirely).
+  static final RegExp _keywordBeforeDigitsPattern = RegExp(
+    r'(CVV|CVC|PIN|OTP|one[- ]time password|verification code|access code|'
+    r'رمز التحقق|رمز الدخول|رمز التفعيل|رمز|الرقم السري|كلمة المرور)'
+    r'[^\d]{0,20}(\d{3,8})',
+    caseSensitive: false,
+  );
+
+  // The mirror image of [_keywordBeforeDigitsPattern]: the digits appear
+  // *first*, then the keyword — the ordinary phrasing of a very common
+  // Arabic OTP message shape, e.g. "١٢٣٤٥٦ هو رمز التحقق الخاص بك" ("123456
+  // is your verification code"). A pattern that only ever looks for
+  // "keyword, then digits" never matches this at all, which is precisely
+  // the OTP-under-redaction gap this fix closes: without this second
+  // pattern, a 6-digit OTP phrased this (extremely common) way would sail
+  // through [sanitize] completely unredacted, unless it also happened to
+  // be a Luhn-valid 13-19 digit PAN candidate (it almost never is — OTPs
+  // are typically 4-6 digits).
+  static final RegExp _digitsBeforeKeywordPattern = RegExp(
+    r'(\d{3,8})[^\d]{0,20}'
+    r'(CVV|CVC|PIN|OTP|one[- ]time password|verification code|access code|'
+    r'رمز التحقق|رمز الدخول|رمز التفعيل|رمز|الرقم السري|كلمة المرور)',
     caseSensitive: false,
   );
 
@@ -113,8 +142,12 @@ abstract final class SmsSanitizer {
     });
 
     // 3) CVV / PIN / OTP / password-shaped secrets, wherever the keyword
-    // (English or Arabic) appears.
-    text = text.replaceAllMapped(_secretKeywordPattern, (Match match) {
+    // (English or Arabic) appears — in **either** order relative to the
+    // digits, since real bank messages use both ("Your OTP is 123456" and
+    // "123456 هو رمز التحقق"). Running both directions is what actually
+    // closes the OTP-under-redaction gap; a single direction silently
+    // missed a whole common phrasing (see the pattern doc comments above).
+    text = text.replaceAllMapped(_keywordBeforeDigitsPattern, (Match match) {
       final String keyword = match.group(1)!;
       final String between = match
           .group(0)!
@@ -123,6 +156,14 @@ abstract final class SmsSanitizer {
             match.group(0)!.length - match.group(2)!.length,
           );
       return '$keyword$between[REDACTED]';
+    });
+    text = text.replaceAllMapped(_digitsBeforeKeywordPattern, (Match match) {
+      final String digits = match.group(1)!;
+      final String keyword = match.group(2)!;
+      final String between = match
+          .group(0)!
+          .substring(digits.length, match.group(0)!.length - keyword.length);
+      return '[REDACTED]$between$keyword';
     });
 
     // 4) Per-bank additional patterns from a rule pack (ADR-007), if any.

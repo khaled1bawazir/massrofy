@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:riverpod/riverpod.dart';
 
 import '../../core/crypto/db_master_key_store.dart';
+import '../../core/crypto/lockout_state_repository.dart';
 import '../../core/crypto/wrapped_key.dart'
     show KeystoreKeyInvalidatedException;
 import '../../core/logging/log_event.dart';
@@ -32,9 +33,19 @@ class AppLockController extends Notifier<AppLockState> {
   BiometricGate? _biometricGate;
   DbMasterKeyRepository? _keyStore;
   SafeLogger? _logger;
+  LockoutStateRepository? _lockoutStateRepository;
 
   int _consecutiveFailures = 0;
   Uint8List? _unlockedKeyBytes;
+
+  // Set true the first time this controller has rehydrated its lockout
+  // counter from [_lockoutStateRepository] — see [_ensureLockoutStateLoaded].
+  // A `Notifier`'s `build()` must stay synchronous (Riverpod does not
+  // support an async `build()` for a plain `Notifier`), so this state
+  // cannot be loaded there; instead it is lazily loaded the first time
+  // [authenticate] runs, which is early enough that a persisted lockout
+  // from a previous process is honoured before any new attempt is allowed.
+  bool _lockoutStateLoaded = false;
 
   @override
   AppLockState build() {
@@ -56,10 +67,12 @@ class AppLockController extends Notifier<AppLockState> {
     required BiometricGate biometricGate,
     required DbMasterKeyRepository keyStore,
     required SafeLogger logger,
+    required LockoutStateRepository lockoutStateRepository,
   }) {
     _biometricGate = biometricGate;
     _keyStore = keyStore;
     _logger = logger;
+    _lockoutStateRepository = lockoutStateRepository;
   }
 
   /// The unwrapped DB Master Key, in hex form ready for
@@ -84,6 +97,16 @@ class AppLockController extends Notifier<AppLockState> {
       'keyStore',
     );
     final SafeLogger logger = _requireConfigured(_logger, 'logger');
+    _requireConfigured(_lockoutStateRepository, 'lockoutStateRepository');
+
+    // ADR-005: the lockout counter must survive an app restart, not just
+    // live as long as this `Notifier` does — otherwise force-quitting and
+    // reopening the app during an active cooldown resets the attacker's
+    // budget back to zero, defeating the whole point of a lockout. This
+    // rehydrates once, the first time `authenticate()` runs after this
+    // controller was (re-)created, so a persisted lockout from a previous
+    // process is honoured before the check below ever runs.
+    await _ensureLockoutStateLoaded();
 
     if (state.status == AppLockStatus.lockedOut) {
       final DateTime? until = state.lockedOutUntil;
@@ -98,7 +121,7 @@ class AppLockController extends Notifier<AppLockState> {
       reason: 'Unlock to view your data',
     );
     if (!authenticated) {
-      _handleFailure(logger);
+      await _handleFailure(logger);
       return;
     }
 
@@ -110,6 +133,11 @@ class AppLockController extends Notifier<AppLockState> {
 
       _unlockedKeyBytes = keyBytes;
       _consecutiveFailures = 0;
+      // A successful unlock is the one moment it's safe to forget the
+      // lockout history entirely — clear the persisted counter along with
+      // the in-memory one, so the next failure (whenever it happens, even
+      // after a restart) starts counting from zero again.
+      await _lockoutStateRepository!.clear();
       state = const AppLockState(status: AppLockStatus.unlocked);
       logger.info(
         LogEvent(
@@ -127,25 +155,54 @@ class AppLockController extends Notifier<AppLockState> {
       logger.warning(const LogEvent(category: 'lock.keystore_invalidated'));
       state = const AppLockState(status: AppLockStatus.failed);
     } catch (_) {
-      _handleFailure(logger);
+      await _handleFailure(logger);
     }
   }
 
-  void _handleFailure(SafeLogger logger) {
+  Future<void> _handleFailure(SafeLogger logger) async {
     _consecutiveFailures++;
     logger.warning(
       LogEvent(category: 'lock.auth_failed', count: _consecutiveFailures),
     );
+    DateTime? lockedOutUntil;
     if (_consecutiveFailures >= _failuresBeforeBackoff) {
       final int extraFailures = _consecutiveFailures - _failuresBeforeBackoff;
       final int backoffSeconds =
           30 * (1 << extraFailures.clamp(0, 6)); // exponential, capped
+      lockedOutUntil = DateTime.now().add(Duration(seconds: backoffSeconds));
       state = AppLockState(
         status: AppLockStatus.lockedOut,
-        lockedOutUntil: DateTime.now().add(Duration(seconds: backoffSeconds)),
+        lockedOutUntil: lockedOutUntil,
       );
     } else {
       state = const AppLockState(status: AppLockStatus.failed);
+    }
+
+    // Persist immediately (not just on the eventual successful unlock) —
+    // this is the fix for ADR-005's lockout counter surviving a restart.
+    await _lockoutStateRepository!.write(
+      LockoutState(
+        consecutiveFailures: _consecutiveFailures,
+        lockedOutUntil: lockedOutUntil,
+      ),
+    );
+  }
+
+  /// Loads any previously-persisted lockout state exactly once per
+  /// controller lifetime — see [_lockoutStateLoaded]'s doc comment for why
+  /// this can't happen in [build] instead.
+  Future<void> _ensureLockoutStateLoaded() async {
+    if (_lockoutStateLoaded) return;
+    _lockoutStateLoaded = true;
+
+    final LockoutState persisted = await _lockoutStateRepository!.read();
+    _consecutiveFailures = persisted.consecutiveFailures;
+    final DateTime? until = persisted.lockedOutUntil;
+    if (until != null && DateTime.now().isBefore(until)) {
+      state = AppLockState(
+        status: AppLockStatus.lockedOut,
+        lockedOutUntil: until,
+      );
     }
   }
 

@@ -67,6 +67,49 @@ void main() {
       expect(result.value, isNot(contains('998877')));
       expect(result.value, contains('[REDACTED]'));
     });
+
+    // --- OTP under-redaction fix — the digits-before-keyword direction ---
+    // A very common real-world Arabic OTP phrasing puts the code BEFORE the
+    // keyword ("123456 is your verification code"), which the
+    // keyword-then-digits pattern alone would never match at all — a
+    // genuine, silent under-redaction gap, not a cosmetic one.
+    test('redacts an OTP that appears BEFORE the Arabic keyword (the common '
+        '"<code> هو رمز التحقق" phrasing)', () {
+      final SanitizedSmsText result = SmsSanitizer.sanitize(
+        '445566 هو رمز التحقق الخاص بك، لا تشاركه مع أحد',
+      );
+      expect(result.value, isNot(contains('445566')));
+      expect(result.value, contains('[REDACTED]'));
+    });
+
+    test('redacts an OTP that appears BEFORE the English keyword '
+        '("123456 is your verification code")', () {
+      final SanitizedSmsText result = SmsSanitizer.sanitize(
+        '123456 is your verification code, valid for 5 minutes',
+      );
+      expect(result.value, isNot(contains('123456')));
+      expect(result.value, contains('[REDACTED]'));
+    });
+
+    test('redacts a one-time password using the "one-time password" '
+        'synonym, keyword-then-digits', () {
+      final SanitizedSmsText result = SmsSanitizer.sanitize(
+        'Your one-time password is 778899',
+      );
+      expect(result.value, isNot(contains('778899')));
+      expect(result.value, contains('[REDACTED]'));
+    });
+
+    test(
+      'redacts a code using the Arabic "رمز الدخول" (access code) synonym',
+      () {
+        final SanitizedSmsText result = SmsSanitizer.sanitize(
+          'رمز الدخول: 112233',
+        );
+        expect(result.value, isNot(contains('112233')));
+        expect(result.value, contains('[REDACTED]'));
+      },
+    );
   });
 
   group('SmsSanitizer — Saudi IBAN redaction', () {

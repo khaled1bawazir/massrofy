@@ -15,17 +15,23 @@ class _FakeKeyManager implements KeyManager {
   bool throwInvalidated = false;
 
   @override
-  Future<WrappedKey> wrapWithKeystoreKek(List<int> dbMasterKey) async {
+  Future<WrappedKey> wrapWithKeystoreKek(
+    List<int> secretBytes, {
+    String keyAlias = kDbMasterKeyKeystoreAlias,
+  }) async {
     return WrappedKey(
       ciphertext: Uint8List.fromList(
-        dbMasterKey.map((int b) => b ^ 0xFF).toList(),
+        secretBytes.map((int b) => b ^ 0xFF).toList(),
       ),
       nonce: Uint8List.fromList(<int>[0, 1, 2]),
     );
   }
 
   @override
-  Future<List<int>> unwrapWithKeystoreKek(WrappedKey wrapped) async {
+  Future<List<int>> unwrapWithKeystoreKek(
+    WrappedKey wrapped, {
+    String keyAlias = kDbMasterKeyKeystoreAlias,
+  }) async {
     if (throwInvalidated) {
       throw const KeystoreKeyInvalidatedException();
     }
@@ -33,7 +39,9 @@ class _FakeKeyManager implements KeyManager {
   }
 
   @override
-  Future<void> deleteKeystoreKek() async {}
+  Future<void> deleteKeystoreKek({
+    String keyAlias = kDbMasterKeyKeystoreAlias,
+  }) async {}
 }
 
 void main() {
@@ -104,6 +112,22 @@ void main() {
       store.unlockWithKeystore(),
       throwsA(isA<KeystoreKeyInvalidatedException>()),
     );
+  });
+
+  test('provisionNewDatabaseKey never has an injectable, non-CSPRNG source '
+      '(item 12) — two independently provisioned keys must not collide, '
+      'which they would systematically if a predictable generator were ever '
+      'reachable here', () async {
+    final Uint8List keyA = await DbMasterKeyStore(
+      keyManager: _FakeKeyManager(),
+      passphraseKeyDeriver: const Hkdf256PassphraseKeyDeriver(),
+    ).provisionNewDatabaseKey();
+    final Uint8List keyB = await DbMasterKeyStore(
+      keyManager: _FakeKeyManager(),
+      passphraseKeyDeriver: const Hkdf256PassphraseKeyDeriver(),
+    ).provisionNewDatabaseKey();
+
+    expect(keyA, isNot(keyB));
   });
 
   group('DbMasterKeyStore.bytesToHex / zeroize (ADR-005 memory hygiene)', () {

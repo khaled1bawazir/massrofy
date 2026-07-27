@@ -76,6 +76,19 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # `integration_test/db_encryption_test.dart` — ADR-003's genuine,
+  # on-device SQLCipher coverage. Unlike `flutter_test` (which runs on the
+  # HOST machine's Dart VM, where this Android-only app has no real
+  # SQLCipher native library to load — see
+  # test/data/db/app_database_encryption_test.dart's doc comment),
+  # `integration_test` compiles and runs the app on an actual Android
+  # device/emulator, where `sqlcipher_flutter_libs`' precompiled Android
+  # binary is genuinely present. Run via the dedicated
+  # `android-sqlcipher-integration-test` CI job (`.github/workflows/ci.yml`),
+  # which boots a headless Android emulator specifically so this can execute
+  # for real, not just compile.
+  integration_test:
+    sdk: flutter
   flutter_lints: ^5.0.0
   # Matches the `drift: 2.31.0` pin above (see that comment for the full
   # sqlite3/native-assets/flutter-test story).

@@ -100,8 +100,43 @@ QueryExecutor openEncryptedMemoryConnection({required String rawKeyHex}) {
   );
 }
 
+/// Matches exactly what ADR-003's raw key is allowed to look like: 64
+/// lowercase hex characters (32 bytes / 256 bits), nothing else.
+final RegExp _rawKeyHexPattern = RegExp(r'^[0-9a-f]{64}$');
+
 void _applyEncryptionPragmas(sqlite3.Database db, String rawKeyHex) {
-  // ADR-003's exact configuration, applied on every connection open:
+  // `PRAGMA key = ...` cannot be issued as a parameterised/bound statement
+  // — SQLite's PRAGMA machinery only accepts a literal value inlined into
+  // the SQL text, unlike an ordinary `INSERT`/`SELECT`. That means the
+  // string below is unavoidably built by interpolation, which is exactly
+  // the shape of bug class SQL injection normally lives in. Today's only
+  // caller passes a value we generated ourselves
+  // (`DbMasterKeyStore.bytesToHex`/`AuditChainKeyStore` — always exactly
+  // 32 CSPRNG bytes hex-encoded), so there is no *live* attacker-controlled
+  // path here — but "safe today because of who happens to call it" is not
+  // a property this function should rely on to stay safe tomorrow. So we
+  // validate the *shape* of [rawKeyHex] ourselves, right here, before it
+  // ever reaches string interpolation: exactly 64 lowercase hex
+  // characters, full stop. Anything else — too short, too long, containing
+  // a quote character, containing anything non-hex — is rejected with a
+  // clear error instead of being silently interpolated into a PRAGMA
+  // statement. This is also what makes the ADR-003 "32-byte/256-bit raw
+  // key" requirement structurally enforced rather than merely documented:
+  // a 31-byte key (see the encryption test's fixed-bug commit) is now
+  // physically refused here, not just wrong in a way nothing checks for.
+  if (!_rawKeyHexPattern.hasMatch(rawKeyHex)) {
+    throw ArgumentError.value(
+      rawKeyHex,
+      'rawKeyHex',
+      'must be exactly 64 lowercase hex characters (a 256-bit / 32-byte '
+          'SQLCipher raw key, per ADR-003) — refusing to interpolate an '
+          'unvalidated value into a PRAGMA statement',
+    );
+  }
+
+  // ADR-003's exact configuration, applied on every connection open. Safe
+  // to interpolate now that the pattern above has proven rawKeyHex
+  // contains only the characters [0-9a-f], nothing else.
   db.execute("PRAGMA key = \"x'$rawKeyHex'\";");
 
   // Defensive check straight from sqlcipher_flutter_libs' own docs: the

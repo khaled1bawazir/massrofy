@@ -8,10 +8,23 @@ import 'package:sqlite3/sqlite3.dart' as sqlite3;
 
 import '../../support/plain_test_database.dart';
 
+// ADR-003 requires a raw **32-byte (256-bit)** key — i.e. exactly 64 hex
+// characters. The two constants below were previously 62 hex characters
+// (31 bytes) each — one byte short. SQLCipher does not reject a
+// wrong-length `PRAGMA key = "x'...'"` value; it silently falls back to
+// treating the hex string as a *passphrase* run through its own PBKDF2, not
+// as the raw key ADR-003 specifies ("we supply a raw 32-byte key ...
+// bypassing SQLCipher's own PBKDF2"). That fallback still "worked" (the
+// database still opened and was still encrypted with *something*), which
+// is exactly why this was easy to miss — the tests never actually asserted
+// the key length, so a 31-byte value never failed anything. Fixed here to
+// be genuinely 64 hex characters (verified by the `RegExp` assertion in
+// `setUpAll` below, so a future accidental truncation fails loudly instead
+// of silently degrading to passphrase mode again).
 const String _testKeyHex =
-    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd';
+    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const String _wrongKeyHex =
-    'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+    'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
 
 /// Whether a genuine SQLCipher-capable `sqlite3` native library resolved
 /// successfully in *this* test run. Populated once in `setUpAll`.
@@ -24,13 +37,49 @@ const String _wrongKeyHex =
 /// runners, which this Android-only app does not have. Where that build
 /// isn't available, the tests in the first group below are marked
 /// **skipped**, with the reason printed, rather than silently reported as
-/// passing or dishonestly forced green — see the PR description for the
-/// full statement of what this means for local/CI coverage versus a real
-/// Android device.
+/// passing or dishonestly forced green.
+///
+/// **This is not where the real, required, gating SQLCipher coverage
+/// lives.** That is `integration_test/db_encryption_test.dart`, which runs
+/// the same three assertions as an on-device Android integration test —
+/// executed for real (never skipped) by the dedicated
+/// `android-sqlcipher-integration-test` CI job
+/// (`.github/workflows/ci.yml`), which boots a headless Android emulator
+/// specifically so `sqlcipher_flutter_libs`' real, precompiled Android
+/// binary is genuinely exercised on every PR. The tests in *this* file are
+/// a best-effort desktop-side check, kept because they're cheap and catch
+/// obvious regressions instantly wherever a desktop cipher build happens
+/// to be available — they were never the load-bearing guarantee.
 bool _cipherAvailable = false;
 String? _cipherUnavailableReason;
 
 void main() {
+  // Guard the guard: assert both fixture keys are genuinely 64 hex
+  // characters (32 bytes / 256 bits) *before* anything else in this file
+  // runs, so a future accidental edit that shortens either constant fails
+  // immediately and loudly (a `TestFailure` at the very top of the run)
+  // instead of silently degrading SQLCipher into passphrase-KDF mode again
+  // — precisely the bug this file previously shipped with undetected.
+  final RegExp rawKeyPattern = RegExp(r'^[0-9a-f]{64}$');
+  test('fixture keys are exactly 64 lowercase hex chars (ADR-003 sanity '
+      'check on the test data itself)', () {
+    expect(
+      rawKeyPattern.hasMatch(_testKeyHex),
+      isTrue,
+      reason: '_testKeyHex must be a 256-bit (64 hex char) raw key',
+    );
+    expect(
+      rawKeyPattern.hasMatch(_wrongKeyHex),
+      isTrue,
+      reason: '_wrongKeyHex must be a 256-bit (64 hex char) raw key',
+    );
+    expect(
+      _testKeyHex,
+      isNot(_wrongKeyHex),
+      reason: 'the two fixture keys must actually differ',
+    );
+  });
+
   setUpAll(() async {
     try {
       final Directory probeDir = await Directory.systemTemp.createTemp(
@@ -147,6 +196,76 @@ void main() {
           .get();
       expect(rows, isNotEmpty); // schema tables are readable with the right key
       await reopened.close();
+    });
+  });
+
+  group('PRAGMA-key interpolation is guarded by shape validation, not trusted '
+      'blindly (the SQL-injection-shaped-risk fix) — this group needs no real '
+      'cipher library, because the validation runs before any SQL touches '
+      'the connection', () {
+    late Directory tempDir;
+    late File dbFile;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp(
+        'massrofy_db_keyvalidation_test_',
+      );
+      dbFile = File(p.join(tempDir.path, 'test.sqlite'));
+    });
+
+    tearDown(() async {
+      if (tempDir.existsSync()) {
+        tempDir.deleteSync(recursive: true);
+      }
+    });
+
+    Future<void> expectRejected(String badKeyHex) async {
+      final AppDatabase db = AppDatabase(
+        openEncryptedConnectionAtFile(file: dbFile, rawKeyHex: badKeyHex),
+      );
+      await expectLater(
+        db.customStatement('PRAGMA user_version;'),
+        throwsA(isA<ArgumentError>()),
+      );
+    }
+
+    test('a key one hex character short of 64 is rejected', () async {
+      await expectRejected(_testKeyHex.substring(0, 63));
+    });
+
+    test('a key one hex character too long is rejected', () async {
+      await expectRejected('${_testKeyHex}0');
+    });
+
+    test('a value containing a quote character (an actual injection attempt) '
+        'is rejected outright, never interpolated', () async {
+      await expectRejected("${_testKeyHex.substring(0, 60)}'; --");
+    });
+
+    test('upper-case hex is rejected (only the exact lower-case form '
+        'DbMasterKeyStore.bytesToHex produces is accepted)', () async {
+      await expectRejected(_testKeyHex.toUpperCase());
+    });
+
+    test('a validly-shaped 64-char lower-case hex key is never rejected by '
+        'the shape check itself (any failure past this point would be a '
+        'different, environment-dependent error — e.g. no cipher library '
+        '— never ArgumentError)', () async {
+      final AppDatabase db = AppDatabase(
+        openEncryptedConnectionAtFile(file: dbFile, rawKeyHex: _testKeyHex),
+      );
+      try {
+        await db.customStatement('PRAGMA user_version;');
+      } catch (e) {
+        expect(
+          e,
+          isNot(isA<ArgumentError>()),
+          reason:
+              'a well-formed key must never fail the shape validation '
+              'itself — only environment-dependent cipher availability '
+              'may still fail here',
+        );
+      }
     });
   });
 

@@ -1,0 +1,18 @@
+# Test-suite configuration (read by `package:test`, which `flutter test`
+# uses under the hood).
+#
+# `release_mode_guard` tags exactly one file:
+# `test/features/security/privacy_overlay_release_mode_test.dart`. That
+# test is only meaningful when run with
+# `--dart-define=dart.vm.product=true` (it self-checks and fails loudly
+# otherwise — see its doc comment) — a define that must NOT apply to every
+# other test in the suite. It is therefore excluded from the general
+# `flutter test --coverage` sweep (`.github/workflows/ci.yml`'s
+# `flutter-build-test` job passes `--exclude-tags=release_mode_guard`) and
+# run instead by its own dedicated CI step, which targets the file
+# directly with the exact dart-defines it needs.
+tags:
+  release_mode_guard:
+    description: >-
+      Only meaningful when run with --dart-define=dart.vm.product=true;
+      excluded from the general test sweep and run by a dedicated CI step.

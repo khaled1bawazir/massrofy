@@ -6,9 +6,12 @@ import 'package:massrofy/data/db/app_database.dart';
 /// under test is trigger/DAO/audit-chain/soft-delete behaviour, which is
 /// identical regardless of whether the underlying bytes happen to be
 /// SQLCipher-encrypted. Encryption is a bottom-layer `PRAGMA key` concern
-/// (see `lib/data/db/db_connection.dart`); the dedicated test of that
-/// specific property lives in `test/data/db/app_database_encryption_test.dart`
-/// (ADR-003).
+/// (see `lib/data/db/db_connection.dart`); a best-effort desktop-side check
+/// of that property lives in
+/// `test/data/db/app_database_encryption_test.dart`, but the real,
+/// required, gating coverage is
+/// `integration_test/db_encryption_test.dart`, run on-device by CI's
+/// `android-sqlcipher-integration-test` job (ADR-003).
 ///
 /// **Why this file exists (read before assuming it's an oversight):** on
 /// this project's current CI/dev toolchain, `sqlcipher_flutter_libs`'

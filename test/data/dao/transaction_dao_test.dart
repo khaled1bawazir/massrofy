@@ -129,6 +129,57 @@ void main() {
     });
   });
 
+  group('_toMinorUnitsBestEffort respects the actual currency exponent (item 7 '
+      '— previously hard-coded to 2 for every currency, which was silently '
+      'wrong for 0- and 3-decimal currencies)', () {
+    test('SAR (2-decimal, the common case) still derives correctly', () async {
+      final int id = await transactionDao.create(
+        amount: Money.parse('45.67', currency: 'SAR'),
+        actor: 'user',
+      );
+      final TransactionRow row = await transactionDao.byId(id);
+      expect(row.amountMinor, 4567);
+    });
+
+    test(
+      'JPY (0-decimal) does not inflate the minor-units value 100x',
+      () async {
+        final int id = await transactionDao.create(
+          amount: Money.parse('1500', currency: 'JPY'),
+          actor: 'user',
+        );
+        final TransactionRow row = await transactionDao.byId(id);
+        // Previously (hard-coded exponent=2) this would have produced
+        // 150000 — a JPY amount has no fractional part at all.
+        expect(row.amountMinor, 1500);
+      },
+    );
+
+    test(
+      'KWD (3-decimal) does not truncate the third fractional digit',
+      () async {
+        final int id = await transactionDao.create(
+          amount: Money.parse('12.345', currency: 'KWD'),
+          actor: 'user',
+        );
+        final TransactionRow row = await transactionDao.byId(id);
+        // Previously (hard-coded exponent=2) this would have produced
+        // 1234 (truncated to 2 decimals) instead of the correct 12345
+        // (3 decimals — the fils, KWD's actual minor unit).
+        expect(row.amountMinor, 12345);
+      },
+    );
+
+    test('a negative KWD amount preserves its sign correctly', () async {
+      final int id = await transactionDao.create(
+        amount: Money.parse('-1.500', currency: 'KWD'),
+        actor: 'user',
+      );
+      final TransactionRow row = await transactionDao.byId(id);
+      expect(row.amountMinor, -1500);
+    });
+  });
+
   test('the ledger row and its audit entry are written atomically — an error '
       'mid-mutation leaves neither committed (NFR-R6)', () async {
     // updateCategory() on a non-existent id: the SELECT ..getSingle()

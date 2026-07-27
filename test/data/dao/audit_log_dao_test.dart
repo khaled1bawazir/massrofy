@@ -174,6 +174,45 @@ void main() {
     },
   );
 
+  group('append() is atomic (item 8 — read-latest-hash-then-insert used to be '
+      'two separate statements; concurrent appends could both read the same '
+      'stale prevHash and fork the chain instead of forming a single linear '
+      'one)', () {
+    test('many concurrent append() calls still produce a single, valid, '
+        'unbroken hash chain — not a fork', () async {
+      const int concurrentAppends = 20;
+      await Future.wait(
+        List<Future<int>>.generate(
+          concurrentAppends,
+          (int i) => dao.append(
+            entityType: 'transaction',
+            entityId: '$i',
+            action: 'create',
+            actor: 'user',
+            changedAt: DateTime.utc(2026, 1, 1),
+            fieldChanges: const <AuditFieldChange>[],
+          ),
+        ),
+      );
+
+      // If two appends had ever read the same prevHash (the race this
+      // fix closes), the chain would be forked — some later entry's
+      // prevHash would not match any earlier entry's entryHash, and
+      // verifyChainIntegrity() (which walks ALL rows in strict id
+      // order and checks every prevHash against the immediately
+      // preceding row's entryHash) would find the break and return
+      // false.
+      expect(await dao.verifyChainIntegrity(), isTrue);
+
+      // Every one of the N concurrent appends must still have landed
+      // as its own row — atomicity must not have silently dropped or
+      // merged any of them.
+      for (int i = 0; i < concurrentAppends; i++) {
+        expect(await dao.queryFor('transaction', '$i'), hasLength(1));
+      }
+    });
+  });
+
   group('Hash chain (ADR-010 tamper evidence)', () {
     test('a freshly written chain verifies as intact', () async {
       for (int i = 0; i < 5; i++) {

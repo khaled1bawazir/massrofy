@@ -50,15 +50,29 @@ class DbMasterKeyStore implements DbMasterKeyRepository {
   final KeyManager keyManager;
   final PassphraseKeyDeriver passphraseKeyDeriver;
   final FlutterSecureStorage secureStorage;
-  final Random _random;
+
+  // Deliberately **not** an injectable constructor parameter. The DB Master
+  // Key generated below is the single key that ultimately opens the whole
+  // encrypted database (ADR-003/ADR-004) — a security-sensitive value that
+  // must always come from a cryptographically-secure random source, never
+  // a caller-supplied one. `Random` and `Random.secure()` share the exact
+  // same Dart type, so an optional `Random? random` constructor parameter
+  // (as this class used to have) type-checks identically whether the
+  // caller passes a real CSPRNG or a predictable, seedable
+  // `Random(seed)` — the compiler cannot tell them apart, only a careful
+  // reviewer reading every call site can, and that is precisely the kind
+  // of mistake that must be made structurally impossible in a banking app.
+  // `Random.secure()` is therefore hard-coded here as the only source this
+  // class will ever use; a test that needs deterministic bytes should
+  // assert on shape (`key.length == 32`) or on the wrap/unwrap round-trip,
+  // never on exact key bytes (see `db_master_key_store_test.dart`).
+  final Random _random = Random.secure();
 
   DbMasterKeyStore({
     required this.keyManager,
     required this.passphraseKeyDeriver,
     FlutterSecureStorage? secureStorage,
-    Random? random,
-  }) : secureStorage = secureStorage ?? const FlutterSecureStorage(),
-       _random = random ?? Random.secure();
+  }) : secureStorage = secureStorage ?? const FlutterSecureStorage();
 
   /// True once a DB Master Key has been generated and wrapped at least
   /// once (i.e. this is not a first run).
