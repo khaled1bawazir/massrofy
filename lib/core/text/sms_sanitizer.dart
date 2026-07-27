@@ -47,11 +47,47 @@ class SanitizedSmsText {
 /// its input — so a single shared instance (or, as here, `static` methods)
 /// is all that's needed; there is nothing to construct.
 abstract final class SmsSanitizer {
+  // --- What counts as a "digit" here -------------------------------------
+  //
+  // Dart's `\d` in a RegExp is **ASCII-only** (`[0-9]`) — it does NOT match
+  // Eastern Arabic-Indic numerals (٠١٢٣٤٥٦٧٨٩, U+0660–U+0669) or the
+  // Extended/Persian forms (۰۱۲۳۴۵۶۷۸۹, U+06F0–U+06F9). That matters for an
+  // Arabic-first product: a `\d`-based OTP pattern would silently fail to
+  // redact "١٢٣٤٥٦ هو رمز التحقق" and write a live one-time code into the
+  // database in cleartext.
+  //
+  // Which digit form actually arrives in real SMS is genuinely unknown to
+  // us: `docs/PRD.md` §3.4 deliberately does **not** reproduce the sample
+  // bank messages (NFR-M3 forbids committing real bank SMS), and
+  // `docs/brand.md` §"Numerals" mandates Western digits only for what the
+  // *UI renders* — a display rule, which says nothing about what a bank
+  // puts on the wire. So rather than guess, we match all three digit
+  // families. Over-redacting is the safe failure mode for a banking app
+  // (the same principle ADR-017 applies elsewhere); under-redacting leaks a
+  // secret permanently.
+  //
+  // This is a character-class *body*, interpolated into the patterns below
+  // (and negated as `[^$_digitChars]`) so every pattern in this file agrees
+  // on what a digit is — the previous mix of `\d` and `[^\d]` was where the
+  // inconsistency could creep back in.
+  //
+  // Written as `\uXXXX` escapes rather than literal ٠-٩ / ۰-۹ glyphs on
+  // purpose: the two Arabic-Indic families are visually near-identical
+  // (compare ٤ and ۴), so a literal range is genuinely unreviewable by eye
+  // and a mistyped endpoint would silently narrow what gets redacted. The
+  // escapes are also immune to any re-encoding of this source file. Dart's
+  // RegExp understands `\uXXXX` inside a character class, and in a raw
+  // string (`r'...'`) the backslash reaches the regex engine intact.
+  static const String _digitChars =
+      r'0-9' // ASCII 0-9
+      r'\u0660-\u0669' // Arabic-Indic ٠١٢٣٤٥٦٧٨٩
+      r'\u06F0-\u06F9'; // Extended/Persian Arabic-Indic ۰۱۲۳۴۵۶۷۸۹
+
   // Matches a Saudi IBAN: "SA" followed by exactly 22 digits (2 check
   // digits + 20 BBAN digits, per the Saudi IBAN standard). Case-insensitive
   // so a lower-case "sa" prefix (unlikely, but cheap to cover) is caught too.
   static final RegExp _saudiIbanPattern = RegExp(
-    r'SA\d{22}',
+    'SA[$_digitChars]{22}',
     caseSensitive: false,
   );
 
@@ -59,28 +95,43 @@ abstract final class SmsSanitizer {
   // ADR-013 specifies for PAN candidates and Luhn-check each candidate,
   // rather than trying to write one clever-but-fragile regex that both
   // finds digit runs *and* validates Luhn in one step.
-  static final RegExp _digitRunPattern = RegExp(r'\d+');
+  static final RegExp _digitRunPattern = RegExp('[$_digitChars]+');
 
-  // A secret-bearing keyword (English or Arabic), followed — somewhere in
-  // the next few characters — by the 3-8 digit secret itself. The bounded
-  // `{0,20}` gap is generous enough for a short connecting phrase ("is",
-  // "هو", a colon, a space) without risking runaway backtracking (the
-  // quantifier is bounded, not unbounded, so there is no catastrophic
-  // backtracking risk here).
+  // The secret-bearing keywords, English and Arabic, shared by both of the
+  // OTP patterns below so the two directions can never drift apart. Covers
+  // common OTP synonyms beyond the original CVV/PIN/OTP set —
+  // "verification code"/"one-time password"/"access code" in English, and
+  // "رمز الدخول"/"رمز التفعيل" in Arabic — since real bank OTP messages
+  // phrase the same concept many ways, and under-redacting any of them is
+  // exactly the failure mode this class exists to prevent.
+  static const String _secretKeywords =
+      r'CVV|CVC|PIN|OTP|one[- ]time password|verification code|access code|'
+      r'رمز التحقق|رمز الدخول|رمز التفعيل|رمز|الرقم السري|كلمة المرور';
+
+  // A secret-bearing keyword, followed — somewhere in the next few
+  // characters — by the secret digits themselves. Three capture groups:
+  // (1) the keyword, (2) the connecting gap, (3) the digit run.
   //
-  // The keyword list also covers common OTP-specific synonyms beyond the
-  // original CVV/PIN/OTP set — "verification code"/"one-time password"/
-  // "access code" in English, and "رمز الدخول"/"رمز التفعيل" in Arabic —
-  // since real bank OTP messages phrase the same concept many ways, and
-  // under-redacting any of them is exactly the failure mode this class
-  // exists to prevent (see [_keywordAfterDigitsPattern] below for the other
-  // half of the OTP under-redaction fix: many real Arabic OTP messages put
-  // the digits *before* the keyword, which this pattern alone would miss
-  // entirely).
+  // ## Why the digit run is `{3,}` and NOT `{3,8}`
+  // A bounded upper limit leaks. With `(\d{3,8})`, the input
+  // "OTP: 123456789 is your code" matched only the first EIGHT digits and
+  // produced "OTP: [REDACTED]9" — publishing the tail of a live code. OTP
+  // lengths genuinely vary between banks (4, 5, 6, 8... ), so raising the
+  // bound just moves the leak rather than closing it. An unbounded `{3,}`
+  // is greedy, so it consumes the **entire contiguous digit run**, leaving
+  // no remainder at either end. See the 9-digit regression tests in
+  // test/core/text/sms_sanitizer_test.dart.
+  //
+  // The gap is `[^$_digitChars]{0,20}` — generous enough for a short
+  // connecting phrase ("is", "هو", a colon, a space) while, crucially,
+  // being unable to match a digit. That is what guarantees the digit run
+  // this pattern finds is genuinely adjacent to the keyword, and it also
+  // keeps the quantifier bounded, so there is no catastrophic-backtracking
+  // risk.
   static final RegExp _keywordBeforeDigitsPattern = RegExp(
-    r'(CVV|CVC|PIN|OTP|one[- ]time password|verification code|access code|'
-    r'رمز التحقق|رمز الدخول|رمز التفعيل|رمز|الرقم السري|كلمة المرور)'
-    r'[^\d]{0,20}(\d{3,8})',
+    '($_secretKeywords)'
+    '([^$_digitChars]{0,20})'
+    '([$_digitChars]{3,})',
     caseSensitive: false,
   );
 
@@ -89,15 +140,22 @@ abstract final class SmsSanitizer {
   // Arabic OTP message shape, e.g. "١٢٣٤٥٦ هو رمز التحقق الخاص بك" ("123456
   // is your verification code"). A pattern that only ever looks for
   // "keyword, then digits" never matches this at all, which is precisely
-  // the OTP-under-redaction gap this fix closes: without this second
-  // pattern, a 6-digit OTP phrased this (extremely common) way would sail
-  // through [sanitize] completely unredacted, unless it also happened to
-  // be a Luhn-valid 13-19 digit PAN candidate (it almost never is — OTPs
-  // are typically 4-6 digits).
+  // the OTP-under-redaction gap this closes: without this second pattern, a
+  // 6-digit OTP phrased this (extremely common) way would sail through
+  // [sanitize] completely unredacted, unless it also happened to be a
+  // Luhn-valid 13-19 digit PAN candidate (it almost never is — OTPs are
+  // typically 4-6 digits).
+  //
+  // The same unbounded-`{3,}` reasoning applies here, and this direction is
+  // where a bounded quantifier leaked from the *front*: "123456789 is your
+  // OTP" used to produce "1[REDACTED] is your OTP", because the engine gave
+  // up on matching 8 digits at offset 0 and simply restarted one character
+  // later. Greedy-and-unbounded matches the whole run from its true start.
+  // Groups: (1) the digit run, (2) the gap, (3) the keyword.
   static final RegExp _digitsBeforeKeywordPattern = RegExp(
-    r'(\d{3,8})[^\d]{0,20}'
-    r'(CVV|CVC|PIN|OTP|one[- ]time password|verification code|access code|'
-    r'رمز التحقق|رمز الدخول|رمز التفعيل|رمز|الرقم السري|كلمة المرور)',
+    '([$_digitChars]{3,})'
+    '([^$_digitChars]{0,20})'
+    '($_secretKeywords)',
     caseSensitive: false,
   );
 
@@ -147,23 +205,19 @@ abstract final class SmsSanitizer {
     // "123456 هو رمز التحقق"). Running both directions is what actually
     // closes the OTP-under-redaction gap; a single direction silently
     // missed a whole common phrasing (see the pattern doc comments above).
+    //
+    // Both patterns capture the connecting gap as its own group, so the
+    // replacement is a straight reassembly of "everything except the digit
+    // run". (An earlier version recomputed the gap with `substring` index
+    // arithmetic over group lengths — correct, but fragile enough that it
+    // was worth removing now that the quantifiers are variable-length.)
+    // Group 3 / group 1 respectively — the digit run — is simply dropped
+    // and replaced wholesale, so no digit of it can survive.
     text = text.replaceAllMapped(_keywordBeforeDigitsPattern, (Match match) {
-      final String keyword = match.group(1)!;
-      final String between = match
-          .group(0)!
-          .substring(
-            keyword.length,
-            match.group(0)!.length - match.group(2)!.length,
-          );
-      return '$keyword$between[REDACTED]';
+      return '${match.group(1)}${match.group(2)}[REDACTED]';
     });
     text = text.replaceAllMapped(_digitsBeforeKeywordPattern, (Match match) {
-      final String digits = match.group(1)!;
-      final String keyword = match.group(2)!;
-      final String between = match
-          .group(0)!
-          .substring(digits.length, match.group(0)!.length - keyword.length);
-      return '[REDACTED]$between$keyword';
+      return '[REDACTED]${match.group(2)}${match.group(3)}';
     });
 
     // 4) Per-bank additional patterns from a rule pack (ADR-007), if any.
@@ -180,15 +234,44 @@ abstract final class SmsSanitizer {
     return SanitizedSmsText._(text, panRedacted);
   }
 
+  /// The numeric value 0-9 of a single digit character, in any of the three
+  /// digit families [_digitChars] accepts (ASCII, Arabic-Indic,
+  /// Extended/Persian Arabic-Indic).
+  ///
+  /// Needed because the old `codeUnit - 0x30` trick only works for ASCII:
+  /// applied to '٥' (U+0665) it yields 1589, which would silently corrupt
+  /// the Luhn sum below into meaningless arithmetic rather than failing
+  /// loudly. Each family is a contiguous, in-order block, so subtracting
+  /// the block's base is all that's required.
+  ///
+  /// Returns `null` for anything that isn't a digit — callers treat that as
+  /// "not a PAN candidate" rather than guessing.
+  static int? _digitValue(int codeUnit) {
+    if (codeUnit >= 0x30 && codeUnit <= 0x39) return codeUnit - 0x30; // 0-9
+    if (codeUnit >= 0x0660 && codeUnit <= 0x0669) {
+      return codeUnit - 0x0660; // ٠-٩
+    }
+    if (codeUnit >= 0x06F0 && codeUnit <= 0x06F9) {
+      return codeUnit - 0x06F0; // ۰-۹
+    }
+    return null;
+  }
+
   /// Standard Luhn checksum (ISO/IEC 7812-1), used to tell a real card-like
   /// number apart from an ordinary long digit string (a reference number, a
   /// phone number run into an amount, etc.) so we redact precisely rather
   /// than indiscriminately.
+  ///
+  /// Script-agnostic: a PAN written in Arabic-Indic numerals checksums
+  /// exactly like the same PAN in ASCII, so a card number does not escape
+  /// redaction merely by arriving in a different digit family.
   static bool _isLuhnValid(String digits) {
     int sum = 0;
     bool doubleThisDigit = false;
     for (int i = digits.length - 1; i >= 0; i--) {
-      int digit = digits.codeUnitAt(i) - 0x30;
+      final int? digitValue = _digitValue(digits.codeUnitAt(i));
+      if (digitValue == null) return false; // not a digit run we understand
+      int digit = digitValue;
       if (doubleThisDigit) {
         digit *= 2;
         if (digit > 9) {

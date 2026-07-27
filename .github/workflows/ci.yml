@@ -229,6 +229,29 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      # The ubuntu-latest runner ships ~25 GB of preinstalled toolchains this
+      # job never touches (.NET, GHC/Haskell, CodeQL bundles, Android NDK,
+      # cached Docker images). Left in place, the runner had ~7.2 GB free —
+      # and the emulator aborted at boot with a FATAL
+      # "Not enough space to create userdata partition. Available: 7219.46 MB
+      # ... need 7372.80 MB", so the integration test never executed at all.
+      # Reclaiming this space (plus the explicit `disk-size` below) is what
+      # makes the emulator genuinely bootable; it does not weaken the test in
+      # any way. Everything removed here is unrelated to a Flutter/Android
+      # build: the Android SDK itself and Java are untouched.
+      - name: Free disk space for the Android emulator
+        if: steps.detect.outputs.exists == 'true'
+        run: |
+          echo "Disk before cleanup:"
+          df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /usr/local/lib/android/sdk/ndk /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/powershell /usr/local/share/chromium \
+            /usr/local/lib/node_modules || true
+          sudo docker image prune --all --force || true
+          echo "Disk after cleanup:"
+          df -h /
+
       - name: Set up Java (required by the Android toolchain)
         if: steps.detect.outputs.exists == 'true'
         uses: actions/setup-java@v4
@@ -258,6 +281,13 @@ jobs:
           disable-animations: true
           disable-spellchecker: true
           force-avd-creation: false
+          # The `pixel_6` hardware profile asks for a ~7.4 GB userdata
+          # partition by default, which is what overflowed the runner's disk
+          # (see the cleanup step above). This suite creates a handful of
+          # tiny SQLite files; 4 GB is enormously more than it can use, and
+          # pinning it makes the job's disk requirement explicit and stable
+          # rather than "whatever the device profile happens to default to".
+          disk-size: 4096M
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: flutter test integration_test/db_encryption_test.dart -d emulator-5554
 

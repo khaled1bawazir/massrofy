@@ -32,6 +32,37 @@ bool _cipherLibraryConfigured = false;
 /// no override is needed there — this matches `sqlcipher_flutter_libs`'
 /// own documented usage exactly.
 ///
+/// ## CRITICAL: this configuration is per-ISOLATE, not per-app
+/// `sqlite3_open.open.overrideFor(...)` writes into a `static` inside
+/// `package:sqlite3/open.dart`. In Dart, "static" means *static within one
+/// isolate* — every isolate gets its own fresh copy of every global and
+/// static variable, and nothing is shared between them implicitly. So
+/// calling this function on isolate A has **no effect whatsoever** on
+/// isolate B.
+///
+/// That matters enormously here, because [openEncryptedConnection] (the
+/// real production path) uses `NativeDatabase.createInBackground`, which
+/// spawns *new background isolates* and opens the database file there —
+/// not on the isolate that called it. Drift's own documentation on
+/// `createInBackground` spells this out: *"Be aware that the functions
+/// `setup`, `isolateSetup` and `sqlite3` are sent to other isolates and are
+/// executed there. Thus, they don't have access to the same contents of
+/// global variables."*
+///
+/// Hence this function is passed to `createInBackground` as its
+/// **`isolateSetup`** callback (drift invokes it inside each spawned
+/// isolate *before* opening the file), rather than merely being called
+/// beforehand on the caller's isolate. Doing the latter would leave the
+/// background isolate loading plain, non-cipher SQLite — `PRAGMA key`
+/// would silently do nothing, and [_applyEncryptionPragmas]' fail-closed
+/// `cipher_version` check would (correctly) refuse to open the database,
+/// meaning the app could never open its own database at all. See the
+/// regression coverage in `integration_test/db_encryption_test.dart`.
+///
+/// Because it is sent across an isolate boundary, this MUST stay a
+/// top-level function (a static tear-off is sendable; an arbitrary closure
+/// capturing local state may not be).
+///
 /// This function is idempotent and cheap to call from every entry point
 /// below — production code and tests alike — so nobody has to remember to
 /// call it separately before opening a database.
@@ -64,11 +95,19 @@ QueryExecutor openEncryptedConnection({
   String fileName = 'massrofy.sqlite',
 }) {
   return LazyDatabase(() async {
-    _ensureCipherLibraryConfigured();
     final Directory dir = await getApplicationDocumentsDirectory();
     final File file = File(p.join(dir.path, fileName));
     return NativeDatabase.createInBackground(
       file,
+      // `isolateSetup` — NOT a plain call to _ensureCipherLibraryConfigured()
+      // out here. `createInBackground` opens the file on background
+      // isolate(s) it spawns itself, and the SQLCipher library override is
+      // isolate-local static state (see that function's doc comment). Drift
+      // runs `isolateSetup` inside each spawned isolate *before* it opens
+      // the database, which is the only place the override actually takes
+      // effect for this connection. Configuring it on this isolate instead
+      // would be a silent no-op for the isolate that does the real work.
+      isolateSetup: _ensureCipherLibraryConfigured,
       setup: (sqlite3.Database db) => _applyEncryptionPragmas(db, rawKeyHex),
     );
   });

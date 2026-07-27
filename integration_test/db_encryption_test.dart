@@ -167,6 +167,79 @@ void main() {
     },
   );
 
+  // --- Regression: the background-isolate cipher-configuration bug ---------
+  //
+  // `openEncryptedConnection()` opens the file through
+  // `NativeDatabase.createInBackground`, which spawns a SEPARATE isolate and
+  // opens the database there. The SQLCipher library override
+  // (`sqlite3_open.open.overrideFor(...)`) is isolate-local static state, so
+  // configuring it on the calling isolate is a no-op for that background
+  // isolate: it would load plain, non-cipher SQLite, `PRAGMA key` would
+  // silently do nothing, and the fail-closed `PRAGMA cipher_version` check
+  // in `_applyEncryptionPragmas` would throw — meaning the real production
+  // path could never open the database at all, even though every test that
+  // used a same-isolate `NativeDatabase` passed happily.
+  //
+  // The fix is drift's `isolateSetup:` callback, which runs inside each
+  // spawned isolate before the file is opened. This test is the guard on
+  // that fix: it drives a full write-then-read-back round trip through the
+  // background-isolate path, so it fails loudly if the `isolateSetup:`
+  // wiring is ever dropped again. Note the other tests here deliberately
+  // cannot catch this — they use `openEncryptedConnectionAtFile`, which
+  // opens on the current isolate.
+  testWidgets(
+    'ADR-003 (on-device) REGRESSION: the background-isolate production path '
+    '(createInBackground) genuinely loads SQLCipher in the spawned isolate '
+    'and can round-trip data — guards the isolateSetup: cipher-configuration '
+    'fix',
+    (WidgetTester tester) async {
+      const String fileName = 'massrofy_integration_test_isolate_setup.sqlite';
+
+      final AppDatabase db = AppDatabase(
+        openEncryptedConnection(rawKeyHex: _testKeyHex, fileName: fileName),
+      );
+
+      final Directory appDocsDir = await getApplicationDocumentsDirectory();
+      final File dbFileOnDisk = File(p.join(appDocsDir.path, fileName));
+      addTearDown(() {
+        if (dbFileOnDisk.existsSync()) {
+          dbFileOnDisk.deleteSync();
+        }
+      });
+
+      // Any statement forces the background isolate to actually open the
+      // file. Before the isolateSetup: fix this threw the fail-closed
+      // StateError ('SQLCipher is not available in this sqlite3 build'),
+      // because the spawned isolate never got the cipher override.
+      await db.customStatement(
+        'CREATE TABLE isolate_probe (id INTEGER PRIMARY KEY, note TEXT);',
+      );
+      await db.customStatement(
+        "INSERT INTO isolate_probe (id, note) VALUES (1, 'written via "
+        "background isolate');",
+      );
+
+      // Read it back through the same background-isolate connection: proves
+      // the connection is not merely openable but genuinely usable.
+      final List<Map<String, Object?>> rows = await db
+          .customSelect('SELECT note FROM isolate_probe WHERE id = 1')
+          .map((row) => row.data)
+          .get();
+      expect(rows, hasLength(1));
+      expect(rows.single['note'], 'written via background isolate');
+      await db.close();
+
+      // ...and that what it wrote is genuinely encrypted on disk, so this
+      // test can never pass by silently falling back to plain SQLite.
+      final sqlite3.Database raw = sqlite3.sqlite3.open(dbFileOnDisk.path);
+      addTearDown(raw.dispose);
+      expect(
+        () => raw.select('SELECT * FROM isolate_probe'),
+        throwsA(anything),
+      );
+    },
+  );
+
   testWidgets('sanity: a plain (non-cipher-keyed) in-memory Drift database still '
       'works normally on-device too — proves this test file is exercising '
       'real Drift/sqlite3 wiring, not a broken harness reporting false '
