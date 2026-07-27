@@ -3,7 +3,7 @@
 
     <!-- ADR-001 (docs/architecture.md): Massrofy has no backend, no HTTP API
          surface, and the release build must never carry INTERNET or
-         ACCESS_NETWORK_STATE -- not even transitively via a dependency that
+         ACCESS_NETWORK_STATE, not even transitively via a dependency that
          merges one back in. Flutter's own debug/profile manifests
          (android/app/src/debug, .../profile) separately keep INTERNET for
          hot reload; these `tools:node="remove"` directives apply to every

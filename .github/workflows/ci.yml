@@ -137,14 +137,21 @@ jobs:
       # OSV-Scanner checks pubspec.lock (and any other manifest/lockfiles it
       # finds) against the OSV.dev vulnerability database. This is the
       # dependency/security scan required for a banking-domain CI pipeline.
+      #
+      # Installed as a CLI via `go install` rather than a marketplace action:
+      # OSV-Scanner's GitHub integration is only published as job-level
+      # reusable workflows (jobs.<id>.uses:), which cannot be invoked as a
+      # step inside another job's steps list. The CLI avoids that mismatch
+      # and needs no separate action version to track.
+      - name: Install OSV-Scanner
+        if: steps.detect.outputs.exists == 'true'
+        run: |
+          go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
       - name: OSV-Scanner
         if: steps.detect.outputs.exists == 'true'
-        uses: google/osv-scanner-action/osv-scanner-action@v2
-        with:
-          scan-args: |-
-            --recursive
-            --skip-git
-            ./
+        run: osv-scanner --recursive --skip-git ./
 
   # ---------------------------------------------------------------------------
   # 3. ADR-002: money is exact-decimal; double/num banned by construction + CI.
