@@ -1,0 +1,6 @@
+# Force LF line endings for files that execute on Linux CI runners (this repo
+# is developed on Windows, and git's autocrlf would otherwise silently convert
+# these to CRLF, which breaks a bash shebang line at runtime on Ubuntu).
+*.sh text eol=lf
+.github/workflows/*.yml text eol=lf
+.github/workflows/*.yaml text eol=lf

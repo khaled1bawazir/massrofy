@@ -1,0 +1,211 @@
+# Massrofy staging deploy
+#
+# Massrofy has no backend and no app store (docs/architecture.md ADR-001): the
+# only "deploy" that exists is producing an installable APK for side-loading
+# onto the user's own Android device. This workflow is the P10 "deploy to
+# staging" step (docs/build-plan.md): it builds a release APK and publishes it
+# somewhere the human can download and install.
+#
+# Two environments are declared, on purpose, per the devops-engineer rule
+# "deploys to production must remain a human-approved environment even if
+# staging is automatic":
+#   - `staging`    — runs automatically on every push to main. This is the
+#     day-to-day "try the latest build" channel used during development and by
+#     qa/production-support. No human approval gate.
+#   - `production` — runs ONLY on manual dispatch, gated behind a GitHub
+#     Environment that must have required reviewers configured (see
+#     .github/CI_CD.md). This is what the human promotes to their real,
+#     daily-use phone once a staging build has been vetted. For a single-user
+#     side-loaded app "production" is just "the build I actually trust enough
+#     to run on my own transactions" — but the human-approval gate is the same
+#     control a normal prod deploy would need, so we don't skip it just
+#     because there's no server to protect.
+#
+# Signing: see .github/CI_CD.md "Signed staging APK" for the secret contract.
+# If the signing secrets are not yet configured, this workflow still produces
+# an installable APK (Flutter/Gradle falls back to debug signing with a
+# warning) so P10 is never blocked on secret provisioning — but the artifact
+# name and release notes say plainly that it is not release-signed.
+
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      promote_to_production:
+        description: "Also promote this build to the production environment (requires environment approval)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # needed to create a GitHub Release and upload the APK asset
+
+env:
+  FLUTTER_CHANNEL: stable
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # staging — automatic, every push to main.
+  # ---------------------------------------------------------------------------
+  build-staging-apk:
+    name: build & publish staging APK
+    runs-on: ubuntu-latest
+    environment: staging
+    outputs:
+      built: ${{ steps.detect.outputs.exists }}
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check whether the Flutter project exists yet
+        id: detect
+        run: |
+          if [ -f pubspec.yaml ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No pubspec.yaml yet — Flutter app not scaffolded (mobile-engineer's P1 work). Nothing to deploy yet. This is expected during the CI/CD-foundation phase and is not a failure."
+          fi
+
+      - name: Set up Java
+        if: steps.detect.outputs.exists == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        if: steps.detect.outputs.exists == 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+
+      - name: flutter pub get
+        if: steps.detect.outputs.exists == 'true'
+        run: flutter pub get
+
+      - name: Compute build identifier
+        if: steps.detect.outputs.exists == 'true'
+        id: version
+        run: echo "value=$(date -u +%Y%m%d)-${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+
+      - name: Check for staging signing secrets
+        if: steps.detect.outputs.exists == 'true'
+        id: signing
+        env:
+          KS: ${{ secrets.MASSROFY_STAGING_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "No MASSROFY_STAGING_KEYSTORE_BASE64 secret configured — building with Gradle's debug-signing fallback. See .github/CI_CD.md 'Signed staging APK' to configure real signing secrets. NEVER print these secrets; this step only checks presence."
+          fi
+
+      # Secrets are decoded to disk only inside this job's ephemeral runner and
+      # are never echoed. android/key.properties and the .jks file are also
+      # covered by .gitignore so they can never be committed by accident.
+      - name: Decode staging keystore + write key.properties
+        if: steps.detect.outputs.exists == 'true' && steps.signing.outputs.available == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.MASSROFY_STAGING_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.MASSROFY_STAGING_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.MASSROFY_STAGING_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.MASSROFY_STAGING_KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > android/app/staging-upload-keystore.jks
+          {
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyPassword=$KEY_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "storeFile=staging-upload-keystore.jks"
+          } > android/key.properties
+
+      - name: flutter build apk --release
+        if: steps.detect.outputs.exists == 'true'
+        run: flutter build apk --release
+
+      # Defense in depth: re-assert ADR-001 against the artifact we are about
+      # to publish, not just against the PR that merged it. Reuses the same
+      # script ci.yml runs; it finds the manifest already produced above and
+      # does not rebuild.
+      - name: ADR-001 safety gate before publishing
+        if: steps.detect.outputs.exists == 'true'
+        run: bash .github/scripts/check_no_network_permission.sh
+
+      - name: Rename artifact + compute checksum
+        if: steps.detect.outputs.exists == 'true'
+        id: artifact
+        run: |
+          mkdir -p dist
+          SRC="build/app/outputs/flutter-apk/app-release.apk"
+          SIGNED_LABEL="debug-signed-fallback"
+          if [ "${{ steps.signing.outputs.available }}" == "true" ]; then
+            SIGNED_LABEL="signed"
+          fi
+          NAME="massrofy-staging-${{ steps.version.outputs.value }}-${SIGNED_LABEL}.apk"
+          cp "$SRC" "dist/$NAME"
+          sha256sum "dist/$NAME" > "dist/$NAME.sha256"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "signed_label=$SIGNED_LABEL" >> "$GITHUB_OUTPUT"
+
+      - name: Upload staging APK as a workflow artifact
+        if: steps.detect.outputs.exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: dist/
+          retention-days: 90
+
+      # A moving `staging` tag/release makes "get me the latest side-load build"
+      # a single, stable, bookmarkable URL for the human to install from their
+      # phone's browser — no GitHub login or Actions-artifact auth prompts.
+      - name: Publish / update the `staging` GitHub Release
+        if: steps.detect.outputs.exists == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: staging
+          name: "Staging build ${{ steps.version.outputs.value }}"
+          body: |
+            Automatically built from ${{ github.sha }} on push to `main`.
+            Signing: ${{ steps.artifact.outputs.signed_label }}
+            This is the P10 staging side-load channel — install on the test
+            device via the APK below, or open this page's link on the phone.
+          prerelease: true
+          files: |
+            dist/*.apk
+            dist/*.sha256
+
+  # ---------------------------------------------------------------------------
+  # production — manual only, gated by a protected GitHub Environment.
+  # ---------------------------------------------------------------------------
+  promote-to-production:
+    name: promote staging build to production (human-approved)
+    needs: build-staging-apk
+    if: github.event_name == 'workflow_dispatch' && inputs.promote_to_production == true && needs.build-staging-apk.outputs.built == 'true'
+    runs-on: ubuntu-latest
+    # This environment must be configured in GitHub Settings -> Environments
+    # with "Required reviewers" turned on (see .github/CI_CD.md). The job will
+    # pause here until a human approves it, regardless of how this workflow
+    # was triggered. Staging deploys never touch this environment.
+    environment: production
+    steps:
+      - name: Download the staging artifact that was just built
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Re-publish as a production release tag
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: production-${{ needs.build-staging-apk.outputs.version }}
+          name: "Production release ${{ needs.build-staging-apk.outputs.version }}"
+          body: |
+            Human-approved promotion of staging build
+            ${{ needs.build-staging-apk.outputs.version }} (${{ github.sha }})
+            to the production side-load channel.
+          prerelease: false
+          files: dist/**/*.apk

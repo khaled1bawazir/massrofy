@@ -1,0 +1,211 @@
+# Massrofy CI
+#
+# Runs on every pull request into `main` and on every push to `main` (the
+# latter mainly so `main` itself always shows a green/red status, not because
+# we expect direct pushes — branch protection should block those, see
+# .github/CI_CD.md).
+#
+# What this pipeline does, in order:
+#   1. flutter-build-test  — flutter pub get / analyze / format check / test
+#      (with coverage) / debug APK build. The "does the app actually work"
+#      check. See docs/build-plan.md P1: "A PR with a failing test cannot be
+#      merged."
+#   2. dependency-scan      — OSV-Scanner over pubspec.lock: a dependency /
+#      security scan, required in banking CI.
+#   3. money-type-guard      — enforces docs/architecture.md ADR-002: money is
+#      exact-decimal (package:decimal); `double`/`num` are banned by CI in
+#      money-critical code paths.
+#   4. no-network-permission-guard — enforces docs/architecture.md ADR-001: the
+#      release build must never carry INTERNET / ACCESS_NETWORK_STATE.
+#   5. ci                    — a single fan-in job that fails if any of the
+#      above failed. THIS is the job branch protection should require (see
+#      .github/CI_CD.md) — one required check name, however many jobs run
+#      inside it.
+#
+# All four content jobs (1-4) are written to be safe to run on this repo
+# *before* the Flutter project exists (mobile-engineer's P1 scaffold): they
+# detect the absence of pubspec.yaml / lib/ / android/ and skip cleanly rather
+# than failing, and each one starts enforcing for real the moment the relevant
+# files land. Nothing here is "green because it didn't check anything and
+# nobody noticed" forever — see the "detect" step logs on every run.
+#
+# Secrets: this workflow needs none. It never builds a *signed* artifact —
+# that only happens in deploy.yml, gated behind GitHub Actions secrets that are
+# never printed to logs.
+
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same branch/PR so the pipeline stays fast and
+# CI minutes aren't wasted building a commit nobody cares about anymore.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_CHANNEL: stable
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Build + test. The core "is the app correct" gate.
+  # ---------------------------------------------------------------------------
+  flutter-build-test:
+    name: flutter build & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check whether the Flutter project exists yet
+        id: detect
+        run: |
+          if [ -f pubspec.yaml ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No pubspec.yaml at repo root yet — Flutter app not scaffolded (mobile-engineer's P1 work). Nothing to build or test yet; this step passes so the pipeline itself isn't blocked before there is any app code. It will start doing real work the moment pubspec.yaml lands."
+          fi
+
+      - name: Set up Java (required by the Android toolchain)
+        if: steps.detect.outputs.exists == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        if: steps.detect.outputs.exists == 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+
+      - name: flutter pub get
+        if: steps.detect.outputs.exists == 'true'
+        run: flutter pub get
+
+      - name: "dart format --set-exit-if-changed (lint: formatting)"
+        if: steps.detect.outputs.exists == 'true'
+        run: dart format --set-exit-if-changed .
+
+      - name: "flutter analyze (lint: static analysis)"
+        if: steps.detect.outputs.exists == 'true'
+        run: flutter analyze --fatal-infos
+
+      - name: flutter test --coverage
+        if: steps.detect.outputs.exists == 'true'
+        run: flutter test --coverage
+
+      - name: Upload coverage report
+        if: steps.detect.outputs.exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: coverage/lcov.info
+          retention-days: 30
+
+      - name: flutter build apk --debug (build sanity check)
+        if: steps.detect.outputs.exists == 'true'
+        run: flutter build apk --debug
+
+  # ---------------------------------------------------------------------------
+  # 2. Dependency / security scan (banking requirement — never skip this).
+  # ---------------------------------------------------------------------------
+  dependency-scan:
+    name: dependency & security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check whether there is a lockfile to scan yet
+        id: detect
+        run: |
+          if [ -f pubspec.lock ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No pubspec.lock yet — nothing to scan. Will activate once the Flutter project and its dependencies exist."
+          fi
+
+      # OSV-Scanner checks pubspec.lock (and any other manifest/lockfiles it
+      # finds) against the OSV.dev vulnerability database. This is the
+      # dependency/security scan required for a banking-domain CI pipeline.
+      - name: OSV-Scanner
+        if: steps.detect.outputs.exists == 'true'
+        uses: google/osv-scanner-action/osv-scanner-action@v2
+        with:
+          scan-args: |-
+            --recursive
+            --skip-git
+            ./
+
+  # ---------------------------------------------------------------------------
+  # 3. ADR-002: money is exact-decimal; double/num banned by construction + CI.
+  # ---------------------------------------------------------------------------
+  money-type-guard:
+    name: "ADR-002: money-type guard (double/num ban)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run ADR-002 grep guard
+        run: bash .github/scripts/check_money_type_ban.sh
+
+  # ---------------------------------------------------------------------------
+  # 4. ADR-001: release build must never declare INTERNET / ACCESS_NETWORK_STATE.
+  # ---------------------------------------------------------------------------
+  no-network-permission-guard:
+    name: "ADR-001: no-network release manifest guard"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+
+      - name: flutter pub get
+        if: hashFiles('pubspec.yaml') != ''
+        run: flutter pub get
+
+      - name: Run ADR-001 no-network manifest guard
+        run: bash .github/scripts/check_no_network_permission.sh
+
+  # ---------------------------------------------------------------------------
+  # 5. Fan-in — this is the single required status check for branch protection.
+  # ---------------------------------------------------------------------------
+  ci:
+    name: ci
+    if: always()
+    needs:
+      - flutter-build-test
+      - dependency-scan
+      - money-type-guard
+      - no-network-permission-guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm every required job passed (or was legitimately skipped)
+        run: |
+          echo "flutter-build-test: ${{ needs.flutter-build-test.result }}"
+          echo "dependency-scan: ${{ needs.dependency-scan.result }}"
+          echo "money-type-guard: ${{ needs.money-type-guard.result }}"
+          echo "no-network-permission-guard: ${{ needs.no-network-permission-guard.result }}"
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" || "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more required CI jobs failed or was cancelled."
+            exit 1
+          fi
+          echo "All required CI jobs passed."
