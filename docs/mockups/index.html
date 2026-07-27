@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>مصروفي — فهرس نماذج الشاشات (Massrofy Mockup Index)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --primary:#0B3D62; --primary-pressed:#0A3454; --primary-tint10:#E7EEF4;
+  --secondary:#B8842E; --secondary-text:#8A5F1E; --secondary-tint10:#F7EEDD;
+  --ink-900:#101418; --ink-700:#3A434C; --ink-500:#6B7580; --ink-300:#C7CDD4; --ink-100:#EEF1F4;
+  --surface:#F7F8FA; --white:#FFFFFF;
+  --success:#1E7A46; --error:#B3261E; --warning-text:#8A5A00; --warning-fill:#F2A93B; --info:#0B6E8C; --info-tint:#E4F1F5;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{background:var(--surface);font-family:'Tajawal','Manrope',sans-serif;color:var(--ink-900);}
+.icon{width:1em;height:1em;display:inline-block;vertical-align:middle;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;font-size:24px;flex-shrink:0;}
+header{background:var(--primary);color:#fff;padding:40px 24px 32px;text-align:center;}
+.wordmark{font-size:32px;font-weight:700;margin:0 0 8px;}
+.wordmark .dot{color:var(--secondary);}
+header p{max-width:720px;margin:0 auto;font-size:15px;line-height:1.7;color:rgba(255,255,255,.85);}
+.status-pill{display:inline-block;background:var(--warning-fill);color:var(--ink-900);font-size:12px;font-weight:700;padding:6px 16px;border-radius:99px;margin-bottom:16px;}
+main{max-width:1100px;margin:0 auto;padding:32px 24px 80px;}
+.legend{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin-bottom:40px;font-size:13px;color:var(--ink-700);}
+.legend span{background:#fff;border:1px solid var(--ink-100);padding:6px 12px;border-radius:99px;}
+.group{margin-bottom:40px;}
+.group h2{font-size:20px;font-weight:700;border-inline-start:5px solid var(--secondary);padding-inline-start:14px;margin-bottom:16px;}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;}
+.card{background:#fff;border:1px solid var(--ink-100);border-radius:16px;padding:18px;text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:8px;transition:box-shadow .15s, transform .15s;}
+.card:hover{box-shadow:0 8px 24px rgba(11,61,98,.14);transform:translateY(-2px);}
+.card .icn{width:44px;height:44px;border-radius:12px;background:var(--primary-tint10);color:var(--primary);display:flex;align-items:center;justify-content:center;margin-bottom:4px;}
+.card h3{margin:0;font-size:16px;font-weight:700;}
+.card p{margin:0;font-size:13px;color:var(--ink-700);line-height:1.5;flex:1;}
+.card .ids{font-size:11px;color:var(--ink-500);font-weight:600;}
+.card .ids.new-badge{color:var(--secondary-text);}
+footer{text-align:center;padding:24px;color:var(--ink-500);font-size:13px;}
+</style>
+</head>
+<body>
+<svg style="display:none" aria-hidden="true">
+<symbol id="i-waving_hand" viewBox="0 0 24 24"><path d="M8 13V6.5a1.3 1.3 0 0 1 2.6 0V12"/><path d="M10.6 12V5a1.3 1.3 0 0 1 2.6 0v7"/><path d="M13.2 12V6.3a1.3 1.3 0 0 1 2.6 0V12"/><path d="M15.8 12.5V8.8a1.3 1.3 0 0 1 2.6 0V15c0 3.5-2 6-5.5 6h-1c-2 0-3-.6-4.3-2.2L4 14.3c-.5-.7-.3-1.5.4-1.9.6-.3 1.3-.2 1.8.4L8 14.5"/></symbol>
+<symbol id="i-fingerprint" viewBox="0 0 24 24"><path d="M12 4a7 7 0 0 1 7 7v2c0 1.7-.3 3.4-.9 5"/><path d="M5 11a7 7 0 0 1 10.6-6"/><path d="M5 13.5V11a7 7 0 0 1 .3-2"/><path d="M8.5 20a10 10 0 0 0 1.2-4.8V11a2.3 2.3 0 0 1 4.6 0v2"/><path d="M12 20c.8-1.3 1.3-2.8 1.3-4.4V11"/></symbol>
+<symbol id="i-home" viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5"/><path d="M6 9.5V20h4.5v-5h3v5H18V9.5"/></symbol>
+<symbol id="i-translate" viewBox="0 0 24 24"><path d="M3 5h9M7.5 3v2.3M4.5 5c.5 3 2 5.3 4.5 7M11 5c-1 3.5-3 6-6.5 8"/><path d="M14 21l4-9 4 9M15.3 18h5.4"/></symbol>
+<symbol id="i-receipt_long" viewBox="0 0 24 24"><path d="M6 3h12v18l-2.5-1.6L13 21l-1.5-1.6L10 21l-1.5-1.6L6 21V3z"/><path d="M9 8h6M9 12h6M9 16h3.5"/></symbol>
+<symbol id="i-receipt" viewBox="0 0 24 24"><path d="M6 3h12v18l-2.5-1.6L13 21l-1.5-1.6L10 21l-1.5-1.6L6 21V3z"/><path d="M9 7.5h6M9 11.5h6"/></symbol>
+<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 3 6 13.5h5L10 21l7.5-11H12.5z"/></symbol>
+<symbol id="i-rule" viewBox="0 0 24 24"><path d="M4 6h11M4 12h6M4 18h9"/><path d="M16.5 15.5 18.5 17.5 22 14"/></symbol>
+<symbol id="i-flag" viewBox="0 0 24 24"><path d="M6 3v18"/><path d="M6 4.5h11l-3 4 3 4H6"/></symbol>
+<symbol id="i-account_balance" viewBox="0 0 24 24"><path d="M4 10 12 4l8 6"/><path d="M5 10v9M9.5 10v9M14.5 10v9M19 10v9"/><path d="M3.5 19h17"/></symbol>
+<symbol id="i-account_balance_wallet" viewBox="0 0 24 24"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H18a2 2 0 0 1 2 2v2"/><path d="M3 7.5v10A2.5 2.5 0 0 0 5.5 20H19a1 1 0 0 0 1-1v-3.5"/><path d="M15.5 12.5h4a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-4a2 2 0 0 1 0-4z"/></symbol>
+<symbol id="i-credit_card" viewBox="0 0 24 24"><rect x="2.5" y="5.5" width="19" height="13" rx="2"/><path d="M2.5 9.5h19"/><path d="M6 15h4"/></symbol>
+<symbol id="i-bar_chart" viewBox="0 0 24 24"><path d="M5 21V10M12 21V4M19 21v-7"/></symbol>
+<symbol id="i-savings" viewBox="0 0 24 24"><circle cx="10" cy="12" r="7"/><path d="M15.5 9.5 19 8l-.5 3.5"/><circle cx="8" cy="11" r="0.9" fill="currentColor" stroke="none"/><path d="M6.5 16.5 5.5 19M12 16.8l.7 2.2"/></symbol>
+<symbol id="i-upload_file" viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z"/><path d="M14 3.5V8h4.2"/><path d="M12 17v-6M9 13.5l3-3 3 3"/></symbol>
+<symbol id="i-cloud_sync" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.5-9 5.5 5.5 0 0 1 10.7-1.7A4 4 0 0 1 17 15"/><path d="M10 15a3 3 0 0 1 5-2.2M15 12.8V15h-2.2M15 18a3 3 0 0 1-5 2.2M10 20.2V18h2.2"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/></symbol>
+<symbol id="i-history" viewBox="0 0 24 24"><path d="M4.5 9.5A8 8 0 1 1 4 14"/><path d="M4.5 5v4.5H9"/><path d="M12 8v4.5l3 2"/></symbol>
+</svg>
+<header>
+  <div class="status-pill">DRAFT — awaiting human approval</div>
+  <div class="wordmark">مصروفي<span class="dot">.</span> — Massrofy</div>
+  <p>فهرس نماذج واجهة المستخدم HTML القابلة للتصفح. جميع الشاشات مبنية بلغة عربية واجهة أساسية من اليمين لليسار (Arabic-first RTL)، باستخدام رموز العلامة التجارية الدقيقة من <code>docs/brand.md</code> v1.1: Massrofy Navy #0B3D62، Sadu Gold #B8842E، وزوج الخطوط Tajawal (عربي) / Manrope (لاتيني). الأيقونات الآن SVG مضمّنة (لا خط أيقونات خارجي) لضمان ظهورها في أي متصفح بلا اتصال إنترنت. انقر أي بطاقة أدناه لفتح الشاشة وحالاتها المختلفة (تحميل، فارغة، ممتلئة، خطأ، مقفلة، منتهية الجلسة).</p>
+</header>
+<main>
+  <div class="legend">
+    <span>19 ملف HTML مستقل</span>
+    <span>عربي RTL أساسي + نموذج إنجليزي LTR واحد للمقارنة</span>
+    <span>خطوط Tajawal + Manrope، أرقام غربية داخل عزل اتجاه (bidi isolation)</span>
+    <span>أيقونات SVG مضمّنة — بلا اعتماد على خط خارجي</span>
+    <span>لا لون بمفرده — أيقونة + نص دائماً (NFR-U4)</span>
+  </div>
+
+  <div class="group">
+    <h2>الدخول والأمان (Onboarding &amp; App Lock)</h2>
+    <div class="cards">
+      <a class="card" href="onboarding.html">
+        <div class="icn"><svg class="icon"><use href="#i-waving_hand"></use></svg></div>
+        <h3>الإعداد الأولي</h3>
+        <p>الترحيب، توضيح إذن الرسائل قبل نافذة النظام، حالة الرفض/الوضع المحدود، استيراد تاريخي، مراجعة الفئات الافتراضية، إعداد قفل التطبيق.</p>
+        <div class="ids">S-01 · S-02 · S-04 · S-05 · S-06 · S-07</div>
+      </a>
+      <a class="card" href="lock-gate.html">
+        <div class="icn"><svg class="icon"><use href="#i-fingerprint"></use></svg></div>
+        <h3>بوابة قفل التطبيق</h3>
+        <p>خامل، بصمة، فشل المصادقة، رمز PIN بديل، إغلاق مؤقت، وحالة "انتهاء الجلسة" بعد العودة من الخلفية.</p>
+        <div class="ids">S-09 · locked · session-expired</div>
+      </a>
+    </div>
+  </div>
+
+  <div class="group">
+    <h2>الرئيسية والمعاملات (Home &amp; Transaction Feed)</h2>
+    <div class="cards">
+      <a class="card" href="home.html">
+        <div class="icn"><svg class="icon"><use href="#i-home"></use></svg></div>
+        <h3>الرئيسية</h3>
+        <p>الإجمالي الشهري، عدّاد المراجعة، الميزانيات بنظرة سريعة، أحدث المعاملات. يشمل تحميل، فارغة، ممتلئة، وتنبيه إلغاء الإذن.</p>
+        <div class="ids">S-08</div>
+      </a>
+      <a class="card" href="home-en.html">
+        <div class="icn"><svg class="icon"><use href="#i-translate"></use></svg></div>
+        <h3>الرئيسية — مرآة إنجليزية LTR</h3>
+        <p>نفس شاشة الرئيسية بالإنجليزية من اليسار لليمين — مرجع لقاعدة انعكاس التخطيط الكامل بين اللغتين.</p>
+        <div class="ids">S-08 (mirror reference)</div>
+      </a>
+      <a class="card" href="transactions.html">
+        <div class="icn"><svg class="icon"><use href="#i-receipt_long"></use></svg></div>
+        <h3>قائمة المعاملات + البحث والتصفية</h3>
+        <p>القائمة القابلة للمراجعة بكل شاراتها غير المعتمدة على اللون، بالإضافة إلى شاشتي البحث وورقة التصفية.</p>
+        <div class="ids">S-10 · S-26 · S-27</div>
+      </a>
+      <a class="card" href="transaction-detail.html">
+        <div class="icn"><svg class="icon"><use href="#i-receipt"></use></svg></div>
+        <h3>تفاصيل المعاملة / التعديل</h3>
+        <p>كل الحقول، لوحة الرسالة الأصلية، الفرق بين القيمة المكتشفة تلقائياً والمعدَّلة، ومعاملة يدوية ومحذوفة.</p>
+        <div class="ids">S-11</div>
+      </a>
+    </div>
+  </div>
+
+  <div class="group">
+    <h2>حلقة التصنيف والتعلّم (Categorization &amp; Learning Loop) — الأهم</h2>
+    <div class="cards">
+      <a class="card" href="category-correction.html">
+        <div class="icn"><svg class="icon"><use href="#i-bolt"></use></svg></div>
+        <h3>تصحيح التصنيف — النواة</h3>
+        <p>التفاعل الأكثر تكراراً في المنتج (NFR-U7): نقرتان، صفر شاشات، وسؤال النطاق كامتداد ذكي داخل نفس الورقة.</p>
+        <div class="ids">S-12 · S-13</div>
+      </a>
+      <a class="card" href="categories-rules.html">
+        <div class="icn"><svg class="icon"><use href="#i-rule"></use></svg></div>
+        <h3>إدارة الفئات والقواعد المتعلمة</h3>
+        <p>إنشاء/إعادة تسمية/حذف فئة (مع حوار إعادة التوزيع)، وعرض/تعديل/حذف قواعد التاجر ← الفئة.</p>
+        <div class="ids">S-14 · S-15 · S-16 · S-17</div>
+      </a>
+      <a class="card" href="needs-review.html">
+        <div class="icn"><svg class="icon"><use href="#i-flag"></use></svg></div>
+        <h3>صندوق المراجعة</h3>
+        <p>رسائل غير مفهومة مقابل معاملات منخفضة الثقة (تبويبان منفصلان)، إكمال يدوي، تكرار محتمل، وتحويل غامض.</p>
+        <div class="ids">S-18 · S-19 · S-46 · S-47</div>
+      </a>
+    </div>
+  </div>
+
+  <div class="group">
+    <h2>البنوك والحسابات والبطاقات (Bank → Account/Card Hierarchy)</h2>
+    <div class="cards">
+      <a class="card" href="banks.html">
+        <div class="icn"><svg class="icon"><use href="#i-account_balance"></use></svg></div>
+        <h3>البنوك ← الحسابات/البطاقات</h3>
+        <p>قائمة البنوك، تفاصيل بنك مع تبويب حسابات/بطاقات منفصل، تفاصيل بطاقة مرتبطة وغير مرتبطة، إعادة التسمية، ومدخل "+" للإضافة اليدوية.</p>
+        <div class="ids">S-21 · S-22 · S-23 · S-24 · S-25</div>
+      </a>
+      <a class="card" href="add-account.html">
+        <div class="icn"><svg class="icon"><use href="#i-account_balance_wallet"></use></svg></div>
+        <h3>إضافة حساب يدوياً</h3>
+        <p>اختيار البنك، اسم مألوف، نوع الحساب، ورصيد ابتدائي اختياري. فارغة، خطأ تحقّق، ونجاح.</p>
+        <div class="ids new-badge">New — extends US-B15, see design.md decision log</div>
+      </a>
+      <a class="card" href="add-card.html">
+        <div class="icn"><svg class="icon"><use href="#i-credit_card"></use></svg></div>
+        <h3>إضافة بطاقة يدوياً</h3>
+        <p>اختيار البنك، اسم مألوف، نوع البطاقة (ائتمان/خصم)، آخر 4 أرقام، وربط اختياري بحساب تسوية (US-B14). فارغة، خطأ تحقّق، ونجاح.</p>
+        <div class="ids new-badge">New — extends US-B15, see design.md decision log</div>
+      </a>
+    </div>
+  </div>
+
+  <div class="group">
+    <h2>التقارير (Reporting)</h2>
+    <div class="cards">
+      <a class="card" href="reports.html">
+        <div class="icn"><svg class="icon"><use href="#i-bar_chart"></use></svg></div>
+        <h3>مركز التقارير الكامل</h3>
+        <p>الإجمالي الشهري، حسب الفئة (مع "غير مصنف" كسطر دائم)، حسب البطاقة، مقارنة شهرية (وتاريخ غير كافٍ)، والإنفاق مقابل المتبقي.</p>
+        <div class="ids">S-28 · S-29 · S-30 · S-31 · S-32</div>
+      </a>
+    </div>
+  </div>
+
+  <div class="group">
+    <h2>الميزانيات والتنبيهات (Budgets &amp; Threshold Alerts)</h2>
+    <div class="cards">
+      <a class="card" href="budgets.html">
+        <div class="icn"><svg class="icon"><use href="#i-savings"></use></svg></div>
+        <h3>الميزانيات ونظرة عامة</h3>
+        <p>حالة فارغة، تقدّم كنص+لون (72%، تجاوز)، تحديد/تعديل ميزانية، ومثال تنبيه محلي على الجهاز.</p>
+        <div class="ids">S-33 · S-34 · S-35</div>
+      </a>
+    </div>
+  </div>
+
+  <div class="group">
+    <h2>استيراد كشف الحساب والمطابقة (Statement Import &amp; Reconciliation)</h2>
+    <div class="cards">
+      <a class="card" href="statement-import.html">
+        <div class="icn"><svg class="icon"><use href="#i-upload_file"></use></svg></div>
+        <h3>الاستيراد والمطابقة الكاملة</h3>
+        <p>اختيار الملف والحساب، خطأ نوع الملف، تقدّم المطابقة، نتائج (مطابق/مُضاف/غير مطابق)، وحل سطر غير مطابق.</p>
+        <div class="ids">S-36 · S-37 · S-38 · S-39</div>
+      </a>
+    </div>
+  </div>
+
+  <div class="group">
+    <h2>النسخ الاحتياطي والاستعادة (Backup &amp; Restore)</h2>
+    <div class="cards">
+      <a class="card" href="backup-restore.html">
+        <div class="icn"><svg class="icon"><use href="#i-cloud_sync"></use></svg></div>
+        <h3>النسخ الاحتياطي والاستعادة</h3>
+        <p>إعدادات النسخ الاحتياطي المشفّر، اكتشاف نسخة عند جهاز جديد، وتقدّم الاستعادة.</p>
+        <div class="ids">US-I1 · US-I2 · US-I3</div>
+      </a>
+    </div>
+  </div>
+
+  <div class="group">
+    <h2>الخصوصية، الشفافية، والتحكم بالبيانات (Privacy, Transparency &amp; Data Control)</h2>
+    <div class="cards">
+      <a class="card" href="privacy-data.html">
+        <div class="icn"><svg class="icon"><use href="#i-shield"></use></svg></div>
+        <h3>الإعدادات، الشفافية، التصدير، محو كل شيء</h3>
+        <p>قائمة الإعدادات الجذرية، شاشة الشفافية الكاملة، تحذير التصدير الإلزامي، وتدفق المحو النهائي متعدد الخطوات.</p>
+        <div class="ids">S-40 · S-41 · S-42 · S-43</div>
+      </a>
+      <a class="card" href="audit-history.html">
+        <div class="icn"><svg class="icon"><use href="#i-history"></use></svg></div>
+        <h3>سجل التغييرات (تدقيق)</h3>
+        <p>سجل للقراءة فقط تماماً — كل تعديل وتصنيف وحذف واستعادة، مع تمييز الفاعل (مستخدم مقابل قاعدة نظام).</p>
+        <div class="ids">S-45</div>
+      </a>
+    </div>
+  </div>
+</main>
+<footer>
+  Massrofy — نماذج HTML ذاتية الاحتواء، بلا أدوات تصميم خارجية. راجع <code>docs/design.md</code> للمواصفة الكاملة، و<code>docs/brand.md</code> لرموز العلامة التجارية.
+</footer>
+</body>
+</html>

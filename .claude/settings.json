@@ -1,0 +1,22 @@
+{
+  "// note": "Full-autonomy mode: the code-reviewer agent may merge PRs, but ONLY when CI is green — enforced by GitHub branch protection (see devops-engineer). The deny-list keeps genuinely destructive actions guarded; these are safety rails, not workflow gates.",
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Read", "Write", "Edit", "Glob", "Grep", "WebSearch",
+      "Bash(git status)", "Bash(git diff:*)", "Bash(git add:*)",
+      "Bash(git commit:*)", "Bash(git checkout:*)", "Bash(git branch:*)",
+      "Bash(git switch:*)", "Bash(git pull:*)", "Bash(git push:*)",
+      "Bash(mvn:*)", "Bash(./mvnw:*)", "Bash(gradle:*)", "Bash(./gradlew:*)",
+      "Bash(npm:*)", "Bash(npx:*)", "Bash(pnpm:*)", "Bash(yarn:*)",
+      "Bash(flutter:*)", "Bash(dart:*)", "Bash(docker:*)", "Bash(gh:*)",
+      "mcp__linear", "mcp__github"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "mcp__github__delete_repository"
+    ]
+  }
+}

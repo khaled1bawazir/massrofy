@@ -1,0 +1,21 @@
+# HEARTBEAT OPTION A — event-triggered.
+# Runs the maintenance loop automatically when a Linear-synced GitHub issue is
+# labelled "bug". Copy to .github/workflows/ to activate.
+name: auto-fix-bugs
+on:
+  issues:
+    types: [labeled]
+jobs:
+  fix:
+    if: github.event.label.name == 'bug'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the team's bug-fix loop headless
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          # -p runs Claude Code non-interactively (headless). It picks up the
+          # /fix-bugs command, which dispatches the fixer -> qa -> reviewer loop.
+          claude -p "/fix-bugs" --dangerously-skip-permissions

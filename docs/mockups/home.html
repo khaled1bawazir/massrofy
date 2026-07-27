@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>مصروفي — الرئيسية (S-08 Home)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --primary:#0B3D62; --primary-pressed:#0A3454; --primary-tint10:#E7EEF4;
+  --secondary:#B8842E; --secondary-text:#8A5F1E; --secondary-tint10:#F7EEDD;
+  --ink-900:#101418; --ink-700:#3A434C; --ink-500:#6B7580; --ink-300:#C7CDD4; --ink-100:#EEF1F4;
+  --surface:#F7F8FA; --white:#FFFFFF;
+  --success:#1E7A46; --success-tint:#E5F3EA;
+  --error:#B3261E; --error-tint:#FBEAE9;
+  --warning-text:#8A5A00; --warning-fill:#F2A93B;
+  --info:#0B6E8C; --info-tint:#E4F1F5;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{background:#DDE2E7;font-family:'Tajawal','Manrope',sans-serif;color:var(--ink-900);
+  display:flex;flex-direction:column;align-items:center;gap:20px;padding:32px 12px 80px;min-height:100vh;}
+.page-title{font-size:24px;font-weight:700;margin:0;}
+.page-note{max-width:820px;text-align:center;color:var(--ink-700);font-size:14px;line-height:1.6;margin:0 0 8px;}
+.backlink{align-self:flex-start;margin-inline-start:calc(50% - 410px);}
+.backlink a{color:var(--primary);font-weight:600;text-decoration:none;font-size:14px;}
+.gallery{display:flex;flex-wrap:wrap;gap:32px;justify-content:center;align-items:flex-start;}
+.unit{display:flex;flex-direction:column;align-items:center;}
+.unit .caption{margin-bottom:10px;font-weight:700;color:var(--ink-700);font-size:14px;text-align:center;}
+.unit .caption span{display:block;font-weight:400;color:var(--ink-500);font-size:12px;margin-top:2px;}
+.screen{width:380px;background:var(--surface);border-radius:28px;overflow:hidden;box-shadow:0 20px 50px rgba(16,20,24,.25);
+  border:8px solid var(--ink-900);min-height:800px;position:relative;display:flex;flex-direction:column;}
+.appbar{display:flex;align-items:center;justify-content:space-between;padding:16px 16px 8px;}
+.appbar h1{font-size:24px;line-height:32px;font-weight:700;margin:0;}
+.appbar .icons{display:flex;gap:14px;align-items:center;color:var(--ink-700);}
+.icon{width:1em;height:1em;display:inline-block;vertical-align:middle;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;font-size:24px;flex-shrink:0;}
+.content{flex:1;overflow-y:auto;padding:0 16px 100px;}
+.card{background:#fff;border-radius:16px;padding:18px;box-shadow:0 1px 2px rgba(16,20,24,.06);margin-bottom:14px;border:1px solid var(--ink-100);}
+.overline{font-size:13px;line-height:18px;color:var(--ink-500);margin:0 0 6px;font-weight:500;}
+.amount-lg{font-size:34px;line-height:40px;font-weight:600;font-family:'Manrope',sans-serif;font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate;display:block;}
+.delta{display:flex;align-items:center;gap:6px;color:var(--info);font-size:13px;margin-top:6px;font-weight:500;}
+.delta .icon{font-size:16px;}
+.review-card{display:flex;align-items:center;gap:12px;background:#FFF7E8;border:1px solid var(--warning-fill);border-radius:16px;padding:14px 16px;margin-bottom:14px;}
+.review-card .icon{color:var(--warning-text);}
+.review-card .txt{flex:1;font-size:15px;font-weight:500;color:var(--ink-900);}
+.review-card.ok{background:#fff;border-color:var(--ink-100);}
+.review-card.ok .icon{color:var(--ink-500);}
+.section-title{font-size:20px;line-height:28px;font-weight:700;margin:6px 0 10px;display:flex;justify-content:space-between;align-items:center;}
+.section-title a{font-size:14px;font-weight:500;color:var(--primary);text-decoration:none;}
+.budget-row{margin-bottom:12px;}
+.budget-row .top{display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px;}
+.budget-row .label{font-weight:500;color:var(--ink-900);}
+.budget-row .pct{font-weight:600;font-family:'Manrope',sans-serif;font-variant-numeric:tabular-nums;}
+.budget-row .pct.over{color:var(--error);}
+.progress{height:10px;border-radius:99px;background:var(--ink-100);overflow:hidden;}
+.progress>span{display:block;height:100%;border-radius:99px;background:var(--secondary);}
+.progress.warn>span{background:var(--warning-fill);}
+.progress.over>span{background:var(--error);}
+.over-tag{font-size:12px;color:var(--error);font-weight:600;margin-top:2px;}
+.list-item{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--ink-100);}
+.list-item:last-child{border-bottom:none;}
+.avatar{width:42px;height:42px;border-radius:12px;background:var(--ink-100);display:flex;align-items:center;justify-content:center;color:var(--primary);flex-shrink:0;}
+.li-main{flex:1;min-width:0;}
+.li-title{font-size:16px;font-weight:500;color:var(--ink-900);}
+.li-meta{font-size:13px;color:var(--ink-500);margin-top:2px;}
+.li-amount{font-size:17px;font-weight:500;font-family:'Manrope',sans-serif;font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate;white-space:nowrap;}
+.amount-debit{color:var(--ink-900);}
+.amount-credit{color:var(--success);}
+.amount-transfer{color:var(--ink-700);}
+.bottom-nav{display:flex;border-top:1px solid var(--ink-100);background:#fff;position:absolute;bottom:0;inset-inline:0;}
+.bottom-nav a{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 0 12px;color:var(--ink-500);font-size:11px;text-decoration:none;}
+.bottom-nav a.active{color:var(--primary);font-weight:600;}
+.fab{position:absolute;bottom:88px;inset-inline-end:20px;width:56px;height:56px;border-radius:16px;background:var(--primary);color:#fff;
+  display:flex;align-items:center;justify-content:center;box-shadow:0 6px 16px rgba(11,61,98,.35);border:none;}
+.skeleton{background:linear-gradient(90deg,var(--ink-100) 25%,#e4e8ec 37%,var(--ink-100) 63%);background-size:400% 100%;
+  animation:shimmer 1.2s ease-in-out infinite;border-radius:8px;}
+@keyframes shimmer{0%{background-position:100% 50%;}100%{background-position:0 50%;}}
+.sk-line{height:14px;margin-bottom:8px;}
+.banner{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:12px;font-size:13px;margin-bottom:14px;line-height:1.5;}
+.banner-warning{background:#FFF3DE;color:var(--warning-text);}
+.banner .icon{font-size:20px;flex-shrink:0;}
+.empty-state{text-align:center;padding:40px 16px;}
+.empty-state .icon{font-size:44px;color:var(--ink-300);}
+.empty-state h3{font-size:17px;margin:12px 0 6px;}
+.empty-state p{font-size:14px;color:var(--ink-500);margin:0 0 16px;line-height:1.5;}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:none;border-radius:12px;padding:12px 18px;
+  font-size:15px;font-weight:500;cursor:pointer;background:var(--primary);color:#fff;}
+</style>
+</head>
+<body>
+<svg style="display:none" aria-hidden="true">
+<symbol id="i-home" viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5"/><path d="M6 9.5V20h4.5v-5h3v5H18V9.5"/></symbol>
+<symbol id="i-receipt_long" viewBox="0 0 24 24"><path d="M6 3h12v18l-2.5-1.6L13 21l-1.5-1.6L10 21l-1.5-1.6L6 21V3z"/><path d="M9 8h6M9 12h6M9 16h3.5"/></symbol>
+<symbol id="i-bar_chart" viewBox="0 0 24 24"><path d="M5 21V10M12 21V4M19 21v-7"/></symbol>
+<symbol id="i-more_horiz" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.3" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-add" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-visibility" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></symbol>
+<symbol id="i-notifications" viewBox="0 0 24 24"><path d="M6 10.5a6 6 0 0 1 12 0c0 4 1.3 5.5 1.9 6.2H4.1C4.7 16 6 14.5 6 10.5z"/><path d="M9.5 19.5a2.5 2.5 0 0 0 5 0"/></symbol>
+<symbol id="i-trending_up" viewBox="0 0 24 24"><path d="M4 16l6-6 4 4 6-7"/><path d="M14.5 6.5H20V12"/></symbol>
+<symbol id="i-flag" viewBox="0 0 24 24"><path d="M6 3v18"/><path d="M6 4.5h11l-3 4 3 4H6"/></symbol>
+<symbol id="i-chevron_left" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+<symbol id="i-restaurant" viewBox="0 0 24 24"><path d="M7 3v7M9 3v7M7 10a2 2 0 0 0 4 0M8 10v11"/><path d="M17 3c-2 1-3 3-3 6s1 5 3 5v7"/></symbol>
+<symbol id="i-local_atm" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M12 9.5v5"/></symbol>
+<symbol id="i-payments" viewBox="0 0 24 24"><circle cx="9" cy="9" r="6"/><path d="M9 6.5v5M6.7 8h4.6M6.7 10h4.6"/><path d="M11 18a6 6 0 0 0 8-8"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5"/><circle cx="12" cy="8" r="0.9" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-task_alt" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.3l2.3 2.3 4.7-5"/></symbol>
+<symbol id="i-sms_failed" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-4 4V5z"/><path d="M12 8v4"/><circle cx="12" cy="14.5" r="0.9" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-inbox" viewBox="0 0 24 24"><path d="M4 12h4.5l1.5 3h4l1.5-3H20"/><path d="M4 12 6 5h12l2 7v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-6z"/></symbol>
+</svg>
+<div class="backlink"><a href="index.html">‹ العودة إلى الفهرس / Back to index</a></div>
+<h1 class="page-title">S-08 — الرئيسية (Home)</h1>
+<p class="page-note">الشاشة الأولى بعد فتح القفل. تعرض الإجمالي الشهري (AC-E1.1)، عدد المعاملات بحاجة إلى مراجعة، الميزانيات بنظرة سريعة، وأحدث المعاملات. جميع الأرقام تُعرض بأرقام غربية داخل عزل اتجاه (bidi isolation) بخط Manrope ذي الأرقام الجدولية (tabular figures)، وفق دليل العلامة التجارية v1.1.</p>
+
+<div class="gallery">
+
+<div class="unit">
+<div class="caption">التحميل (Loading)<span>Skeleton — before first paint</span></div>
+<div class="screen">
+  <div class="appbar"><h1>مصروفي</h1><div class="icons"><svg class="icon"><use href="#i-visibility"></use></svg><svg class="icon"><use href="#i-notifications"></use></svg></div></div>
+  <div class="content">
+    <div class="card"><div class="skeleton sk-line" style="width:40%"></div><div class="skeleton" style="height:36px;width:70%;margin-bottom:8px;"></div><div class="skeleton sk-line" style="width:50%"></div></div>
+    <div class="card"><div class="skeleton sk-line" style="width:90%"></div></div>
+    <div class="card">
+      <div class="skeleton sk-line" style="width:60%"></div>
+      <div class="skeleton" style="height:10px;width:100%;margin-bottom:14px;"></div>
+      <div class="skeleton sk-line" style="width:60%"></div>
+      <div class="skeleton" style="height:10px;width:100%;"></div>
+    </div>
+  </div>
+  <div class="bottom-nav">
+    <a class="active"><svg class="icon"><use href="#i-home"></use></svg>الرئيسية</a>
+    <a><svg class="icon"><use href="#i-receipt_long"></use></svg>المعاملات</a>
+    <a><svg class="icon"><use href="#i-bar_chart"></use></svg>التقارير</a>
+    <a><svg class="icon"><use href="#i-more_horiz"></use></svg>المزيد</a>
+  </div>
+</div>
+</div>
+
+<div class="unit">
+<div class="caption">فارغة (Empty — no spend this month)<span>AC-E1.3 — explicit zero, never blank</span></div>
+<div class="screen">
+  <div class="appbar"><h1>مصروفي</h1><div class="icons"><svg class="icon"><use href="#i-visibility"></use></svg><svg class="icon"><use href="#i-notifications"></use></svg></div></div>
+  <div class="content">
+    <div class="card">
+      <p class="overline">هذا الشهر</p>
+      <span class="amount-lg num">0.00 SAR</span>
+      <div class="delta" style="color:var(--ink-500)"><svg class="icon"><use href="#i-info"></use></svg>لا توجد معاملات مسجلة بعد هذا الشهر</div>
+    </div>
+    <div class="empty-state">
+      <svg class="icon"><use href="#i-inbox"></use></svg>
+      <h3>لا توجد معاملات بعد</h3>
+      <p>بمجرد أن يرسل بنكك رسالة معاملة، ستظهر هنا تلقائياً. يمكنك أيضاً إضافة معاملة نقدية يدوياً.</p>
+      <button class="btn">+ إضافة معاملة يدوياً</button>
+    </div>
+  </div>
+  <div class="bottom-nav">
+    <a class="active"><svg class="icon"><use href="#i-home"></use></svg>الرئيسية</a>
+    <a><svg class="icon"><use href="#i-receipt_long"></use></svg>المعاملات</a>
+    <a><svg class="icon"><use href="#i-bar_chart"></use></svg>التقارير</a>
+    <a><svg class="icon"><use href="#i-more_horiz"></use></svg>المزيد</a>
+  </div>
+</div>
+</div>
+
+<div class="unit">
+<div class="caption">ممتلئة — الحالة الأساسية (Populated / Success)<span>AC-E1.1, AC-E1.2</span></div>
+<div class="screen">
+  <div class="appbar"><h1>مصروفي</h1><div class="icons"><svg class="icon"><use href="#i-visibility"></use></svg><svg class="icon"><use href="#i-notifications"></use></svg></div></div>
+  <div class="content">
+    <div class="card">
+      <p class="overline">هذا الشهر</p>
+      <span class="amount-lg num amount-debit">− 3,214.50 SAR</span>
+      <div class="delta"><svg class="icon"><use href="#i-trending_up"></use></svg>أعلى بنسبة 8% من الشهر الماضي</div>
+    </div>
+    <div class="review-card">
+      <svg class="icon"><use href="#i-flag"></use></svg>
+      <div class="txt">4 معاملات بحاجة إلى مراجعة</div>
+      <svg class="icon" style="transform:scaleX(-1)"><use href="#i-chevron_left"></use></svg>
+    </div>
+    <div class="card">
+      <div class="section-title" style="margin-top:0">الميزانيات بنظرة سريعة <a href="budgets.html">عرض الكل ›</a></div>
+      <div class="budget-row">
+        <div class="top"><span class="label">البقالة</span><span class="pct">72%</span></div>
+        <div class="progress"><span style="width:72%"></span></div>
+      </div>
+      <div class="budget-row">
+        <div class="top"><span class="label">مطاعم ومقاهي</span><span class="pct over">104%</span></div>
+        <div class="progress over"><span style="width:100%"></span></div>
+        <div class="over-tag">⚠ تجاوزت الميزانية</div>
+      </div>
+      <div class="budget-row" style="margin-bottom:0">
+        <div class="top"><span class="label">الإجمالي العام</span><span class="pct">51%</span></div>
+        <div class="progress"><span style="width:51%"></span></div>
+      </div>
+    </div>
+    <div class="section-title">أحدث المعاملات <a href="transactions.html">عرض الكل ›</a></div>
+    <div class="card" style="padding:6px 16px;">
+      <div class="list-item">
+        <div class="avatar"><svg class="icon"><use href="#i-restaurant"></use></svg></div>
+        <div class="li-main"><div class="li-title">Panda Foods</div><div class="li-meta">مطاعم ومقاهي · اليوم 14:20</div></div>
+        <div class="li-amount num amount-debit">− 45.00 SAR</div>
+      </div>
+      <div class="list-item">
+        <div class="avatar"><svg class="icon"><use href="#i-local_atm"></use></svg></div>
+        <div class="li-main"><div class="li-title">صراف آلي — بنك الراجحي</div><div class="li-meta">سحب نقدي · أمس 19:05</div></div>
+        <div class="li-amount num amount-transfer">− 400.00 SAR</div>
+      </div>
+      <div class="list-item">
+        <div class="avatar"><svg class="icon"><use href="#i-payments"></use></svg></div>
+        <div class="li-main"><div class="li-title">راتب — جهة العمل</div><div class="li-meta">راتب ودخل · 27 يوليو</div></div>
+        <div class="li-amount num amount-credit">+ 9,000.00 SAR</div>
+      </div>
+    </div>
+  </div>
+  <button class="fab"><svg class="icon"><use href="#i-add"></use></svg></button>
+  <div class="bottom-nav">
+    <a class="active"><svg class="icon"><use href="#i-home"></use></svg>الرئيسية</a>
+    <a><svg class="icon"><use href="#i-receipt_long"></use></svg>المعاملات</a>
+    <a><svg class="icon"><use href="#i-bar_chart"></use></svg>التقارير</a>
+    <a><svg class="icon"><use href="#i-more_horiz"></use></svg>المزيد</a>
+  </div>
+</div>
+</div>
+
+<div class="unit">
+<div class="caption">تنبيه: إذن الرسائل مُلغى (Permission revoked banner)<span>AC-A1.3 — data intact, ingestion stopped</span></div>
+<div class="screen">
+  <div class="appbar"><h1>مصروفي</h1><div class="icons"><svg class="icon"><use href="#i-visibility"></use></svg><svg class="icon"><use href="#i-notifications"></use></svg></div></div>
+  <div class="content">
+    <div class="banner banner-warning">
+      <svg class="icon"><use href="#i-sms_failed"></use></svg>
+      <div>توقفت قراءة رسائل البنك لأن إذن الرسائل أُلغي من إعدادات الجهاز. بياناتك السابقة سليمة ولم يُحذف منها شيء. <a href="onboarding.html" style="color:var(--warning-text);font-weight:600;">إعادة منح الإذن</a></div>
+    </div>
+    <div class="card">
+      <p class="overline">هذا الشهر</p>
+      <span class="amount-lg num amount-debit">− 3,214.50 SAR</span>
+      <div class="delta"><svg class="icon"><use href="#i-trending_up"></use></svg>أعلى بنسبة 8% من الشهر الماضي</div>
+    </div>
+    <div class="review-card ok">
+      <svg class="icon"><use href="#i-task_alt"></use></svg>
+      <div class="txt">تم الانتهاء من كل المراجعات ✓</div>
+    </div>
+  </div>
+  <div class="bottom-nav">
+    <a class="active"><svg class="icon"><use href="#i-home"></use></svg>الرئيسية</a>
+    <a><svg class="icon"><use href="#i-receipt_long"></use></svg>المعاملات</a>
+    <a><svg class="icon"><use href="#i-bar_chart"></use></svg>التقارير</a>
+    <a><svg class="icon"><use href="#i-more_horiz"></use></svg>المزيد</a>
+  </div>
+</div>
+</div>
+
+</div>
+</body>
+</html>

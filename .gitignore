@@ -1,0 +1,52 @@
+.env
+docs/incidents/*.md
+!docs/incidents/.gitkeep
+
+# --- Local tooling / scaffolding clutter — not part of the Massrofy app repo ---
+# penpot-mcp is a separate cloned tool (has its own .git) used locally by the
+# ui-ux-designer agent; claude-agent-team/ and the zip are a leftover copy of the
+# agent-team scaffold this project was bootstrapped from. None of these belong in
+# the Massrofy application repository.
+/penpot-mcp/
+/claude-agent-team/
+/claude-agent-team.zip
+
+# --- Flutter / Dart (lib/, android/, ios/ will be added by mobile-engineer in P1) ---
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+*.g.dart.bak
+
+# Android
+android/.gradle/
+android/captures/
+android/gradlew
+android/gradlew.bat
+android/local.properties
+android/**/GeneratedPluginRegistrant.java
+android/key.properties
+android/app/*.jks
+android/app/*.keystore
+
+# iOS is explicitly out of scope for this Android-only, side-loaded app (ADR-001
+# context: Android side-load only) — no ios/ ignore rules are needed, but if one
+# ever appears, standard Flutter iOS ignores should be added here.
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Claude Code local overrides (machine-specific permission tweaks) — not shared state
+.claude/settings.local.json
+
+# Never commit real signing material or secrets, even accidentally
+*.keystore
+*.jks
+secrets.properties
+

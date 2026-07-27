@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>مصروفي — صندوق المراجعة (S-18/19 Needs Review / Unparsed SMS)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --primary:#0B3D62; --primary-pressed:#0A3454; --primary-tint10:#E7EEF4; --secondary:#B8842E;
+  --ink-900:#101418; --ink-700:#3A434C; --ink-500:#6B7580; --ink-300:#C7CDD4; --ink-100:#EEF1F4;
+  --surface:#F7F8FA; --success:#1E7A46; --error:#B3261E; --warning-text:#8A5A00; --warning-fill:#F2A93B; --info:#0B6E8C; --info-tint:#E4F1F5;
+}
+*{box-sizing:border-box;} html,body{margin:0;padding:0;}
+body{background:#DDE2E7;font-family:'Tajawal','Manrope',sans-serif;color:var(--ink-900);
+  display:flex;flex-direction:column;align-items:center;gap:20px;padding:32px 12px 80px;min-height:100vh;}
+.page-title{font-size:24px;font-weight:700;margin:0;}
+.page-note{max-width:820px;text-align:center;color:var(--ink-700);font-size:14px;line-height:1.6;margin:0 0 8px;}
+.backlink a{color:var(--primary);font-weight:600;text-decoration:none;font-size:14px;}
+.gallery{display:flex;flex-wrap:wrap;gap:32px;justify-content:center;align-items:flex-start;}
+.unit{display:flex;flex-direction:column;align-items:center;}
+.unit .caption{margin-bottom:10px;font-weight:700;color:var(--ink-700);font-size:14px;text-align:center;}
+.unit .caption span{display:block;font-weight:400;color:var(--ink-500);font-size:12px;margin-top:2px;}
+.screen{width:380px;background:var(--surface);border-radius:28px;overflow:hidden;box-shadow:0 20px 50px rgba(16,20,24,.25);
+  border:8px solid var(--ink-900);min-height:800px;position:relative;display:flex;flex-direction:column;}
+.appbar{display:flex;align-items:center;gap:10px;padding:16px 16px 6px;}
+.appbar h1{font-size:20px;font-weight:700;margin:0;flex:1;}
+.icon{width:1em;height:1em;display:inline-block;vertical-align:middle;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;font-size:24px;flex-shrink:0;}
+.content{flex:1;overflow-y:auto;padding:8px 16px 24px;}
+.segmented{display:flex;background:var(--ink-100);border-radius:12px;padding:4px;gap:4px;margin-bottom:16px;}
+.segmented span{flex:1;text-align:center;padding:9px;border-radius:9px;font-size:13px;font-weight:500;color:var(--ink-700);}
+.segmented span.active{background:#fff;color:var(--primary);box-shadow:0 1px 2px rgba(16,20,24,.1);}
+.sms-card{background:#fff;border:1px solid var(--ink-100);border-radius:14px;padding:14px;margin-bottom:14px;}
+.sms-text{font-size:13px;color:var(--ink-700);line-height:1.7;background:var(--ink-100);border-radius:10px;padding:10px 12px;margin-bottom:8px;direction:rtl;}
+.sms-meta{font-size:12px;color:var(--ink-500);margin-bottom:12px;}
+.sms-acts{display:flex;gap:8px;}
+.btn{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;border-radius:10px;padding:10px;font-size:13px;font-weight:500;cursor:pointer;}
+.btn-primary{background:var(--primary);color:#fff;}
+.btn-outline{background:#fff;color:var(--ink-700);border:1.5px solid var(--ink-300);}
+.list-item{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--ink-100);}
+.list-item:last-child{border-bottom:none;}
+.list-item.flagged{border-inline-start:3px solid var(--warning-fill);padding-inline-start:8px;margin-inline-start:-11px;}
+.avatar{width:42px;height:42px;border-radius:12px;background:var(--ink-100);display:flex;align-items:center;justify-content:center;color:var(--primary);flex-shrink:0;}
+.li-main{flex:1;min-width:0;}
+.li-title{font-size:16px;font-weight:500;}
+.li-meta{font-size:13px;color:var(--ink-500);margin-top:2px;}
+.li-amount{font-size:17px;font-weight:500;font-family:'Manrope',sans-serif;font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate;white-space:nowrap;}
+.amount-debit{color:var(--ink-900);}
+.badge-flag{display:inline-flex;gap:4px;align-items:center;font-size:11px;font-weight:600;color:var(--warning-text);background:#FFF3DE;padding:2px 8px;border-radius:7px;}
+.badge-flag .icon{font-size:12px;}
+.cat-chip{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--ink-700);background:var(--ink-100);padding:2px 8px;border-radius:99px;margin-inline-start:6px;}
+.empty-state{text-align:center;padding:48px 16px;}
+.empty-state .icon{font-size:44px;color:var(--success);}
+.empty-state h3{font-size:17px;margin:12px 0 6px;}
+.empty-state p{font-size:14px;color:var(--ink-500);margin:0;line-height:1.5;}
+.dup-card{background:#FFF7E8;border:1px solid var(--warning-fill);border-radius:14px;padding:14px;margin-bottom:14px;}
+.dup-card h4{margin:0 0 10px;font-size:14px;font-weight:700;color:var(--warning-text);display:flex;gap:6px;align-items:center;}
+.dup-row{display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px dashed var(--ink-300);}
+</style>
+</head>
+<body>
+<svg style="display:none" aria-hidden="true">
+<symbol id="i-arrow_back" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></symbol>
+<symbol id="i-help_outline" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.5 9.3a2.5 2.5 0 1 1 3.7 2.2c-.8.5-1.2 1-1.2 1.9"/><circle cx="12" cy="17" r="0.9" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-flag" viewBox="0 0 24 24"><path d="M6 3v18"/><path d="M6 4.5h11l-3 4 3 4H6"/></symbol>
+<symbol id="i-task_alt" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.3l2.3 2.3 4.7-5"/></symbol>
+<symbol id="i-warning" viewBox="0 0 24 24"><path d="M12 4 21.5 20H2.5z"/><path d="M12 10v4.5"/><circle cx="12" cy="17.3" r="0.9" fill="currentColor" stroke="none"/></symbol>
+</svg>
+<div class="backlink"><a href="index.html">‹ العودة إلى الفهرس / Back to index</a></div>
+<h1 class="page-title">S-18/19 — صندوق المراجعة (Needs Review Inbox)</h1>
+<p class="page-note">يفصل بين قائمتين مختلفتين حتى لا تختلطا: رسائل غير مفهومة (لا توجد معاملة بعد، US-A4) وحالات منخفضة الثقة (معاملة موجودة تحتاج تأكيد فئة، US-C4). كما يستضيف مراجعة التكرار المحتمل (AC-A5.2) والتحويل الغامض (AC-B11.2).</p>
+
+<div class="gallery">
+
+<div class="unit">
+<div class="caption">رسائل غير مفهومة (Unparsed SMS tab)<span>US-A4, AC-A4.1</span></div>
+<div class="screen">
+  <div class="appbar"><svg class="icon" style="transform:scaleX(-1);display:inline-block;"><use href="#i-arrow_back"></use></svg><h1>بحاجة إلى مراجعة</h1></div>
+  <div class="content">
+    <div class="segmented"><span class="active">غير مفهومة (2)</span><span>منخفضة الثقة (4)</span></div>
+    <div class="sms-card">
+      <div class="sms-text">STC PAY: تم خصم 120.00 ريال من محفظتك. الرقم المرجعي 88213...</div>
+      <div class="sms-meta">استُلمت اليوم، 09:12 · المرسل: STCPAY</div>
+      <div class="sms-acts"><button class="btn btn-primary">أكمل التفاصيل</button><button class="btn btn-outline">ليست معاملة</button></div>
+    </div>
+    <div class="sms-card">
+      <div class="sms-text">تنبيه: عملية غير معتادة تم رصدها على حسابك. للمزيد تفضل بزيارة الفرع.</div>
+      <div class="sms-meta">استُلمت أمس، 16:40 · المرسل: Aljazira</div>
+      <div class="sms-acts"><button class="btn btn-primary">أكمل التفاصيل</button><button class="btn btn-outline">ليست معاملة</button></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="unit">
+<div class="caption">منخفضة الثقة (Low-confidence tab)<span>US-C4 — same correction sheet clears the flag</span></div>
+<div class="screen">
+  <div class="appbar"><svg class="icon" style="transform:scaleX(-1);display:inline-block;"><use href="#i-arrow_back"></use></svg><h1>بحاجة إلى مراجعة</h1></div>
+  <div class="content">
+    <div class="segmented"><span>غير مفهومة (2)</span><span class="active">منخفضة الثقة (4)</span></div>
+    <div class="list-item flagged">
+      <div class="avatar"><svg class="icon"><use href="#i-help_outline"></use></svg></div>
+      <div class="li-main"><div class="li-title">Extra Mart 0042 <span class="badge-flag"><svg class="icon"><use href="#i-flag"></use></svg>مراجعة</span></div><div class="li-meta">اليوم 10:05 <span class="cat-chip">غير مصنف</span></div></div>
+      <div class="li-amount num amount-debit">− 89.00 SAR</div>
+    </div>
+    <div class="list-item flagged">
+      <div class="avatar"><svg class="icon"><use href="#i-help_outline"></use></svg></div>
+      <div class="li-main"><div class="li-title">QR Pay — Unknown Merchant <span class="badge-flag"><svg class="icon"><use href="#i-flag"></use></svg>مراجعة</span></div><div class="li-meta">أمس 13:22 <span class="cat-chip">غير مصنف</span></div></div>
+      <div class="li-amount num amount-debit">− 25.00 SAR</div>
+    </div>
+    <div class="list-item flagged">
+      <div class="avatar"><svg class="icon"><use href="#i-help_outline"></use></svg></div>
+      <div class="li-main"><div class="li-title">Store #7712 <span class="badge-flag"><svg class="icon"><use href="#i-flag"></use></svg>مراجعة</span></div><div class="li-meta">26 يوليو <span class="cat-chip">غير مصنف</span></div></div>
+      <div class="li-amount num amount-debit">− 340.00 SAR</div>
+    </div>
+    <div class="list-item flagged">
+      <div class="avatar"><svg class="icon"><use href="#i-help_outline"></use></svg></div>
+      <div class="li-main"><div class="li-title">SADAD Billing <span class="badge-flag"><svg class="icon"><use href="#i-flag"></use></svg>مراجعة</span></div><div class="li-meta">25 يوليو <span class="cat-chip">غير مصنف</span></div></div>
+      <div class="li-amount num amount-debit">− 150.00 SAR</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="unit">
+<div class="caption">فارغة لكل تبويب (All caught up)<span>Reassurance state, not amber</span></div>
+<div class="screen">
+  <div class="appbar"><svg class="icon" style="transform:scaleX(-1);display:inline-block;"><use href="#i-arrow_back"></use></svg><h1>بحاجة إلى مراجعة</h1></div>
+  <div class="content">
+    <div class="segmented"><span class="active">غير مفهومة (0)</span><span>منخفضة الثقة (0)</span></div>
+    <div class="empty-state" style="padding-top:60px;">
+      <svg class="icon"><use href="#i-task_alt"></use></svg>
+      <h3>لا شيء يحتاج مراجعة الآن ✓</h3>
+      <p>كل الرسائل والمعاملات مصنَّفة وواضحة.</p>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="unit">
+<div class="caption">S-19 — إكمال رسالة غير مفهومة (Complete unparsed SMS)<span>AC-A4.2, AC-B4.2</span></div>
+<div class="screen">
+  <div class="appbar"><svg class="icon" style="transform:scaleX(-1);display:inline-block;"><use href="#i-arrow_back"></use></svg><h1>إكمال التفاصيل</h1></div>
+  <div class="content">
+    <div class="sms-text" style="margin-bottom:16px;">STC PAY: تم خصم 120.00 ريال من محفظتك. الرقم المرجعي 88213...</div>
+    <div style="margin-bottom:14px;"><label style="font-size:12px;color:var(--ink-700);display:block;margin-bottom:6px;">المبلغ</label><input value="120.00" style="width:100%;padding:12px;border:1.5px solid var(--error);border-radius:10px;font-family:inherit;"><div style="color:var(--error);font-size:12px;margin-top:4px;font-weight:500;">أدخل مبلغاً لحفظ هذه المعاملة</div></div>
+    <div style="margin-bottom:14px;"><label style="font-size:12px;color:var(--ink-700);display:block;margin-bottom:6px;">التاجر / الجهة</label><input placeholder="مثال: STC Pay" style="width:100%;padding:12px;border:1.5px solid var(--ink-300);border-radius:10px;font-family:inherit;"></div>
+    <div style="margin-bottom:20px;"><label style="font-size:12px;color:var(--ink-700);display:block;margin-bottom:6px;">الفئة</label><input placeholder="اختر فئة" style="width:100%;padding:12px;border:1.5px solid var(--ink-300);border-radius:10px;font-family:inherit;"></div>
+    <button class="btn btn-primary" style="width:100%;padding:13px;">حفظ كمعاملة</button>
+  </div>
+</div>
+</div>
+
+<div class="unit">
+<div class="caption">S-46/47 — تكرار محتمل / تحويل غامض (Possible duplicate / Ambiguous transfer)<span>AC-A5.2, AC-B11.2</span></div>
+<div class="screen">
+  <div class="appbar"><svg class="icon" style="transform:scaleX(-1);display:inline-block;"><use href="#i-arrow_back"></use></svg><h1>بحاجة إلى مراجعة</h1></div>
+  <div class="content">
+    <div class="dup-card">
+      <h4><svg class="icon"><use href="#i-warning"></use></svg>تكرار محتمل</h4>
+      <div class="dup-row"><span>تفويض — Jarir Bookstore</span><span class="num">212.00 SAR</span></div>
+      <div class="dup-row"><span>ترسيم — Jarir Bookstore</span><span class="num">212.00 SAR</span></div>
+      <div class="sms-acts" style="margin-top:10px;"><button class="btn btn-primary">نفس المعاملة — دمج</button><button class="btn btn-outline">معاملتان منفصلتان</button></div>
+    </div>
+    <div class="dup-card">
+      <h4><svg class="icon"><use href="#i-help_outline"></use></svg>تحويل غامض — هل هو حسابك؟</h4>
+      <div class="dup-row"><span>تحويل صادر إلى ٠٠٠٠٤٤٢١</span><span class="num">1,000.00 SAR</span></div>
+      <div class="sms-acts" style="margin-top:10px;"><button class="btn btn-primary">نعم، حسابي — داخلي</button><button class="btn btn-outline">لا، جهة أخرى</button></div>
+    </div>
+  </div>
+</div>
+</div>
+
+</div>
+</body>
+</html>

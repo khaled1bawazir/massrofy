@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>مصروفي — إضافة حساب يدوياً (New — Add Account Manually)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --primary:#0B3D62; --primary-pressed:#0A3454; --primary-tint10:#E7EEF4; --secondary:#B8842E; --secondary-text:#8A5F1E;
+  --ink-900:#101418; --ink-700:#3A434C; --ink-500:#6B7580; --ink-300:#C7CDD4; --ink-100:#EEF1F4;
+  --surface:#F7F8FA; --success:#1E7A46; --success-tint:#E5F3EA; --error:#B3261E; --error-tint:#FBEAE9; --warning-text:#8A5A00; --info:#0B6E8C; --info-tint:#E4F1F5;
+}
+*{box-sizing:border-box;} html,body{margin:0;padding:0;}
+body{background:#DDE2E7;font-family:'Tajawal','Manrope',sans-serif;color:var(--ink-900);
+  display:flex;flex-direction:column;align-items:center;gap:20px;padding:32px 12px 80px;min-height:100vh;}
+.page-title{font-size:24px;font-weight:700;margin:0;}
+.page-note{max-width:820px;text-align:center;color:var(--ink-700);font-size:14px;line-height:1.6;margin:0 0 8px;}
+.backlink a{color:var(--primary);font-weight:600;text-decoration:none;font-size:14px;}
+.gallery{display:flex;flex-wrap:wrap;gap:32px;justify-content:center;align-items:flex-start;}
+.unit{display:flex;flex-direction:column;align-items:center;}
+.unit .caption{margin-bottom:10px;font-weight:700;color:var(--ink-700);font-size:14px;text-align:center;}
+.unit .caption span{display:block;font-weight:400;color:var(--ink-500);font-size:12px;margin-top:2px;}
+.screen{width:380px;background:var(--surface);border-radius:28px;overflow:hidden;box-shadow:0 20px 50px rgba(16,20,24,.25);
+  border:8px solid var(--ink-900);min-height:800px;position:relative;display:flex;flex-direction:column;}
+.appbar{display:flex;align-items:center;gap:10px;padding:16px 16px 6px;}
+.appbar h1{font-size:20px;font-weight:700;margin:0;flex:1;}
+.icon{width:1em;height:1em;display:inline-block;vertical-align:middle;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;font-size:24px;flex-shrink:0;}
+.content{flex:1;overflow-y:auto;padding:12px 16px 24px;}
+.section-label{font-size:12px;font-weight:700;color:var(--ink-500);margin:4px 0 8px;}
+.bank-option{display:flex;align-items:center;gap:12px;background:#fff;border:1.5px solid var(--ink-300);border-radius:12px;padding:12px 14px;margin-bottom:10px;cursor:pointer;}
+.bank-option.selected{border-color:var(--primary);background:var(--primary-tint10);}
+.bank-option .icn{width:36px;height:36px;border-radius:9px;background:var(--ink-100);display:flex;align-items:center;justify-content:center;color:var(--primary);flex-shrink:0;}
+.bank-option.selected .icn{background:#fff;}
+.bank-option .name{flex:1;font-size:14px;font-weight:500;}
+.bank-option .check{color:var(--primary);}
+.bank-option.other{border-style:dashed;color:var(--ink-700);}
+.field{margin-bottom:16px;}
+.field label{display:block;font-size:12px;color:var(--ink-700);margin-bottom:6px;font-weight:500;}
+.field .hint{font-size:12px;color:var(--ink-500);margin-top:5px;line-height:1.5;}
+.field input,.field select{width:100%;padding:12px;border:1.5px solid var(--ink-300);border-radius:10px;font-family:inherit;font-size:15px;background:#fff;}
+.field input.err,.field select.err{border-color:var(--error);}
+.field .err-msg{font-size:12px;color:var(--error);margin-top:5px;font-weight:500;display:flex;gap:5px;align-items:center;}
+.type-row{display:flex;gap:8px;}
+.type-pill{flex:1;text-align:center;padding:11px;border-radius:10px;border:1.5px solid var(--ink-300);font-size:13px;font-weight:500;color:var(--ink-700);}
+.type-pill.on{border-color:var(--primary);background:var(--primary-tint10);color:var(--primary);}
+.amount-input{position:relative;}
+.amount-input input{padding-inline-end:56px;font-family:'Manrope',sans-serif;direction:ltr;text-align:left;}
+.amount-input .suffix{position:absolute;inset-inline-end:12px;top:50%;transform:translateY(-50%);color:var(--ink-500);font-size:13px;font-weight:500;}
+.optional-tag{color:var(--ink-500);font-weight:400;}
+.btn{width:100%;border:none;border-radius:12px;padding:13px;font-size:15px;font-weight:500;cursor:pointer;background:var(--primary);color:#fff;}
+.btn[disabled]{background:var(--ink-300);cursor:not-allowed;}
+.btn-outline{background:#fff;color:var(--primary);border:1.5px solid var(--primary);}
+.success-wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;}
+.success-icon{width:72px;height:72px;border-radius:50%;background:var(--success-tint);color:var(--success);display:flex;align-items:center;justify-content:center;margin-bottom:16px;}
+.success-icon .icon{font-size:40px;}
+.success-wrap h2{font-size:18px;font-weight:700;margin:0 0 6px;}
+.success-wrap p{font-size:14px;color:var(--ink-700);line-height:1.6;margin:0 0 20px;}
+.summary-card{background:#fff;border:1px solid var(--ink-100);border-radius:14px;padding:14px;text-align:right;width:100%;margin-bottom:20px;}
+.summary-card .row{display:flex;justify-content:space-between;padding:6px 0;font-size:13px;}
+.summary-card .row .k{color:var(--ink-500);}
+.summary-card .row .v{font-weight:500;}
+.banner{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:12px;font-size:13px;margin-bottom:14px;line-height:1.5;}
+.banner-error{background:var(--error-tint);color:var(--error);}
+</style>
+</head>
+<body>
+<svg style="display:none" aria-hidden="true">
+<symbol id="i-arrow_back" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></symbol>
+<symbol id="i-account_balance" viewBox="0 0 24 24"><path d="M4 10 12 4l8 6"/><path d="M5 10v9M9.5 10v9M14.5 10v9M19 10v9"/><path d="M3.5 19h17"/></symbol>
+<symbol id="i-add_circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 8.2v7.6M8.2 12h7.6"/></symbol>
+<symbol id="i-check_circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.3 12.3l2.4 2.4 5-5.4"/></symbol>
+<symbol id="i-account_balance_wallet" viewBox="0 0 24 24"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H18a2 2 0 0 1 2 2v2"/><path d="M3 7.5v10A2.5 2.5 0 0 0 5.5 20H19a1 1 0 0 0 1-1v-3.5"/><path d="M15.5 12.5h4a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-4a2 2 0 0 1 0-4z"/></symbol>
+<symbol id="i-error" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V13"/><circle cx="12" cy="16.3" r="0.9" fill="currentColor" stroke="none"/></symbol>
+</svg>
+<div class="backlink"><a href="index.html">‹ العودة إلى الفهرس / Back to index</a></div>
+<h1 class="page-title">إضافة حساب يدوياً (Add Account Manually)</h1>
+<p class="page-note">شاشة جديدة أضيفت بناءً على طلب صريح من المراجعة البشرية أثناء مراجعة النماذج — تُوسّع US-B15 (الإنشاء التلقائي من رسالة) لتغطي حالة إنشاء حساب يدوياً قبل ورود أي رسالة عنه. تُبنى على نفس تسلسل بنك ← حساب/بطاقة المستخدم في <a href="banks.html">banks.html</a>. راجع سجل القرارات في docs/design.md. تُفتح من زر "+" في قائمة البنوك أو تفاصيل بنك.</p>
+
+<div class="gallery">
+
+<div class="unit">
+<div class="caption">فارغة (Empty — initial form)<span>الحفظ معطّل حتى يُختار بنك ويُدخل اسم</span></div>
+<div class="screen">
+  <div class="appbar"><svg class="icon" style="transform:scaleX(-1);display:inline-block;"><use href="#i-arrow_back"></use></svg><h1>إضافة حساب</h1></div>
+  <div class="content">
+    <div class="section-label">اختر البنك</div>
+    <div class="bank-option"><div class="icn"><svg class="icon"><use href="#i-account_balance"></use></svg></div><div class="name">بنك الجزيرة</div></div>
+    <div class="bank-option"><div class="icn"><svg class="icon"><use href="#i-account_balance"></use></svg></div><div class="name">D360</div></div>
+    <div class="bank-option"><div class="icn"><svg class="icon"><use href="#i-account_balance"></use></svg></div><div class="name">مصرف الراجحي</div></div>
+    <div class="bank-option other"><div class="icn"><svg class="icon"><use href="#i-add_circle"></use></svg></div><div class="name">بنك آخر — أدخل الاسم</div></div>
+
+    <div class="section-label" style="margin-top:18px;">تفاصيل الحساب</div>
+    <div class="field"><label>الاسم المألوف</label><input placeholder="مثال: حساب الراتب"></div>
+    <div class="field"><label>نوع الحساب</label>
+      <div class="type-row">
+        <div class="type-pill on">حساب جاري / راتب</div>
+        <div class="type-pill">حساب توفير</div>
+      </div>
+    </div>
+    <div class="field"><label>الرصيد الابتدائي <span class="optional-tag">(اختياري)</span></label>
+      <div class="amount-input"><input placeholder="0.00"><span class="suffix">SAR</span></div>
+      <div class="hint">اتركه فارغاً إذا كنت تفضّل بدء التتبع من أول معاملة تصلك عبر رسالة نصية، بدلاً من إدخال رصيد حالي.</div>
+    </div>
+    <button class="btn" disabled>حفظ الحساب</button>
+  </div>
+</div>
+</div>
+
+<div class="unit">
+<div class="caption">خطأ تحقّق (Validation error)<span>لم يُختر بنك، ولا يوجد اسم مألوف</span></div>
+<div class="screen">
+  <div class="appbar"><svg class="icon" style="transform:scaleX(-1);display:inline-block;"><use href="#i-arrow_back"></use></svg><h1>إضافة حساب</h1></div>
+  <div class="content">
+    <div class="banner banner-error"><svg class="icon"><use href="#i-error"></use></svg>لا يمكن حفظ الحساب. اختر بنكاً وأدخل اسماً مألوفاً أولاً.</div>
+    <div class="section-label">اختر البنك</div>
+    <div class="bank-option"><div class="icn"><svg class="icon"><use href="#i-account_balance"></use></svg></div><div class="name">بنك الجزيرة</div></div>
+    <div class="bank-option"><div class="icn"><svg class="icon"><use href="#i-account_balance"></use></svg></div><div class="name">D360</div></div>
+    <div class="bank-option"><div class="icn"><svg class="icon"><use href="#i-account_balance"></use></svg></div><div class="name">مصرف الراجحي</div></div>
+    <div class="field err-field" style="margin-top:6px;">
+      <div class="err-msg"><svg class="icon" style="font-size:14px;"><use href="#i-error"></use></svg>اختر بنكاً من القائمة أعلاه، أو أضف بنكاً آخر</div>
+    </div>
+
+    <div class="section-label" style="margin-top:14px;">تفاصيل الحساب</div>
+    <div class="field">
+      <label>الاسم المألوف</label>
+      <input class="err" placeholder="مثال: حساب الراتب">
+      <div class="err-msg"><svg class="icon" style="font-size:14px;"><use href="#i-error"></use></svg>أدخل اسماً مألوفاً لهذا الحساب لحفظه</div>
+    </div>
+    <div class="field"><label>نوع الحساب</label>
+      <div class="type-row">
+        <div class="type-pill on">حساب جاري / راتب</div>
+        <div class="type-pill">حساب توفير</div>
+      </div>
+    </div>
+    <div class="field"><label>الرصيد الابتدائي <span class="optional-tag">(اختياري)</span></label>
+      <div class="amount-input"><input placeholder="0.00"><span class="suffix">SAR</span></div>
+    </div>
+    <button class="btn">حفظ الحساب</button>
+  </div>
+</div>
+</div>
+
+<div class="unit">
+<div class="caption">تم الحفظ بنجاح (Success)<span>الحساب يظهر فوراً في تفاصيل البنك، بدون معاملات بعد</span></div>
+<div class="screen">
+  <div class="success-wrap">
+    <div class="success-icon"><svg class="icon"><use href="#i-check_circle"></use></svg></div>
+    <h2>تمت إضافة الحساب</h2>
+    <p>سيظهر "حساب الراتب" الآن ضمن حسابات بنك الجزيرة. أي رسالة معاملة تصل لاحقاً بنفس رقم الحساب ستُطابق هذا الحساب تلقائياً.</p>
+    <div class="summary-card">
+      <div class="row"><span class="k">البنك</span><span class="v">بنك الجزيرة</span></div>
+      <div class="row"><span class="k">الاسم</span><span class="v">حساب الراتب</span></div>
+      <div class="row"><span class="k">النوع</span><span class="v">حساب جاري / راتب</span></div>
+      <div class="row"><span class="k">الرصيد الابتدائي</span><span class="v num">5,000.00 SAR</span></div>
+    </div>
+    <button class="btn" style="margin-bottom:10px;">الذهاب إلى تفاصيل البنك</button>
+    <button class="btn btn-outline">إضافة حساب آخر</button>
+  </div>
+</div>
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# HEARTBEAT OPTION B — scheduled.
+# Add to crontab (e.g. every hour) to have the team sweep for new bugs:
+#   0 * * * * /path/to/cron-heartbeat.sh >> /var/log/team.log 2>&1
+cd /path/to/your/project || exit 1
+export ANTHROPIC_API_KEY="..."   # or use a secrets manager
+claude -p "/fix-bugs" --dangerously-skip-permissions
