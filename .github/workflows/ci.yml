@@ -151,7 +151,7 @@ jobs:
 
       - name: OSV-Scanner
         if: steps.detect.outputs.exists == 'true'
-        run: osv-scanner --recursive --skip-git ./
+        run: osv-scanner scan source -r ./
 
   # ---------------------------------------------------------------------------
   # 3. ADR-002: money is exact-decimal; double/num banned by construction + CI.
