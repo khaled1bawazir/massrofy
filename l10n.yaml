@@ -1,0 +1,16 @@
+# Configuration for `flutter gen-l10n`, which Flutter's build system runs
+# automatically (because pubspec.yaml sets `flutter: generate: true`).
+#
+# For newcomers to Flutter: this generates a Dart class (`AppLocalizations`)
+# with one typed getter per string key found in the .arb files below, so
+# `AppLocalizations.of(context)!.lockGateUnlockToView` is a compile-time-safe
+# reference — a typo in a translation key is a build error, not a silent
+# missing string at runtime. This is how the app supports Arabic (`ar`,
+# primary, RTL) and English (`en`, secondary, LTR) from one shared widget
+# tree (NFR-U8), instead of hand-rolled string maps.
+arb-dir: lib/presentation/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+output-dir: lib/presentation/l10n/generated
+nullable-getter: false

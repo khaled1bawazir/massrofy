@@ -1,0 +1,79 @@
+{
+  "@@locale": "en",
+
+  "appTitle": "Massrofy",
+  "@appTitle": {
+    "description": "The app name, shown as the wordmark on the lock gate and as the OS task label. Never translated — brand.md §4.4 fixes both the English and Arabic wordmark forms as literals, not a translated string, but it still lives in .arb so every screen references one source of truth."
+  },
+
+  "lockGateUnlockToView": "Unlock to view your data",
+  "@lockGateUnlockToView": {
+    "description": "Lock gate headline shown above the biometric prompt (docs/mockups/lock-gate.html, idle state)."
+  },
+
+  "lockGateBiometricHint": "Place your finger on the sensor",
+  "@lockGateBiometricHint": {
+    "description": "Lock gate subtitle under the biometric icon."
+  },
+
+  "lockGateUsePinInstead": "Use PIN instead",
+  "@lockGateUsePinInstead": {
+    "description": "Link/button offering the PIN fallback when biometrics are available but the user prefers not to use them."
+  },
+
+  "lockGateUsePasscode": "Use device passcode instead",
+  "@lockGateUsePasscode": {
+    "description": "Link/button offering the OS device-credential fallback (BIOMETRIC_STRONG|DEVICE_CREDENTIAL, ADR-005)."
+  },
+
+  "lockGateAuthFailed": "Authentication failed. Try again.",
+  "@lockGateAuthFailed": {
+    "description": "Generic failure banner (ADR-005: the message is deliberately generic, never revealing which factor or why, and never revealing any data)."
+  },
+
+  "lockGateEnterPin": "Enter PIN",
+  "@lockGateEnterPin": {
+    "description": "Headline for the PIN-entry fallback state."
+  },
+
+  "lockGateTooManyAttempts": "Too many attempts",
+  "@lockGateTooManyAttempts": {
+    "description": "Headline for the locked-out state after repeated failed attempts (ADR-005 exponential backoff)."
+  },
+
+  "lockGateRetryIn": "Try again in {seconds}, or use PIN",
+  "@lockGateRetryIn": {
+    "description": "Locked-out countdown message.",
+    "placeholders": {
+      "seconds": {
+        "type": "String",
+        "example": "00:28"
+      }
+    }
+  },
+
+  "lockGateSessionExpiredBanner": "Your session ended while the app was in the background. Unlock again to continue where you left off.",
+  "@lockGateSessionExpiredBanner": {
+    "description": "Banner shown when re-locked after AppLifecycleState.paused past the grace period (ADR-005 re-lock policy)."
+  },
+
+  "lockGateContinueUnlock": "Unlock to continue",
+  "@lockGateContinueUnlock": {
+    "description": "Headline shown together with the session-expired banner."
+  },
+
+  "lockGateUnlockButtonSemanticLabel": "Unlock with biometrics",
+  "@lockGateUnlockButtonSemanticLabel": {
+    "description": "Screen-reader label for the biometric icon/button (NFR-U2)."
+  },
+
+  "homePlaceholderTitle": "Home",
+  "@homePlaceholderTitle": {
+    "description": "Placeholder home screen shown after unlock in this P1 foundation build; replaced by the real dashboard (S-08) in a later phase."
+  },
+
+  "homePlaceholderBody": "This is the Massrofy foundation build. SMS ingestion, categorisation, and reporting are built in later phases — this screen only proves the app launches, unlocks, and reads/writes its encrypted store correctly.",
+  "@homePlaceholderBody": {
+    "description": "Explanatory copy for the placeholder home screen."
+  }
+}

@@ -1,0 +1,136 @@
+name: massrofy
+description: >
+  Massrofy — a single-user, offline-first personal spending tracker that reads
+  bank SMS on-device (Saudi Arabia, Arabic/English, RTL-first). See
+  docs/PRD.md, docs/architecture.md (ADR) and docs/design.md for the product
+  and engineering contract this code implements.
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.10.0
+  flutter: ">=3.35.0"
+
+# --- Dependency notes for anyone new to Flutter/Dart reading this file -------
+# `dependencies:` ship inside the app. `dev_dependencies:` are build/test-time
+# only tools (code generators, test frameworks, linters) and are never bundled
+# into the APK.
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # State management (architecture.md picks Riverpod over Bloc explicitly).
+  flutter_riverpod: ^3.4.1
+  # Declared explicitly (not just pulled in transitively via
+  # flutter_riverpod) because pure-Dart layers such as
+  # lib/features/security/app_lock_controller.dart import
+  # package:riverpod/riverpod.dart directly, with no Flutter widget
+  # dependency of their own — keeping the `core`/`features` layers
+  # Flutter-light per architecture.md's module boundaries.
+  riverpod: ^3.4.1
+
+  # ADR-002 — exact-decimal money. This is the ONE arithmetic type allowed in
+  # any money-critical path; see lib/core/money/money.dart.
+  decimal: ^3.2.5
+
+  # ADR-003 — Drift is the typed SQL layer over SQLCipher-capable sqlite3.
+  # Matches the `drift_dev: 2.31.0` pin in dev_dependencies below.
+  #
+  # Version-choice note (read before bumping): `package:sqlite3` 3.x's
+  # SQLCipher support goes through Dart's native "hooks"/native-assets build
+  # mechanism (see the removed `hooks:` key this file used to carry). That
+  # mechanism resolves correctly for `flutter run`/`flutter build`, but this
+  # project found — empirically, against the current Flutter stable channel
+  # — that `flutter test` does not feed the resolved native-asset mapping
+  # into the compiled test kernel, so the encrypted-DB tests silently opened
+  # a *non-cipher* sqlite3 build under `flutter test` even with
+  # `flutter config --enable-native-assets` set and the hook genuinely
+  # producing a correct `sqlite3mc` library on disk
+  # (`.dart_tool/native_assets.yaml` / `.dart_tool/lib/sqlite3mc.*`). Rather
+  # than ship ADR-003's core guarantee unverified by an automated test, this
+  # project stays on the older, battle-tested `sqlcipher_flutter_libs`
+  # package (classic Flutter plugin native-library bundling, no native-assets
+  # step involved), which `flutter test` has always supported correctly.
+  drift: 2.31.0
+  sqlite3: ^2.6.0
+  sqlcipher_flutter_libs: ^0.6.8
+  path_provider: ^2.1.6
+  path: ^1.9.1
+
+  # ADR-004 — wrapped-key persistence (EncryptedSharedPreferences on Android,
+  # itself Keystore-backed) for the two wrapped DB-master-key blobs.
+  flutter_secure_storage: ^10.3.1
+
+  # ADR-005 — biometric / device-credential app lock gate.
+  local_auth: ^3.0.2
+
+  # ADR-004/ADR-010 — HMAC-SHA256 (audit hash chain) and SHA-256 (backup
+  # digest, future use). `crypto` is the small, dependency-free primitive
+  # package; `cryptography` below adds AES-256-GCM (Keystore KEK wrap
+  # emulation on the Dart side / tests) and HKDF.
+  crypto: ^3.0.7
+  cryptography: ^2.9.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  # `integration_test/db_encryption_test.dart` — ADR-003's genuine,
+  # on-device SQLCipher coverage. Unlike `flutter_test` (which runs on the
+  # HOST machine's Dart VM, where this Android-only app has no real
+  # SQLCipher native library to load — see
+  # test/data/db/app_database_encryption_test.dart's doc comment),
+  # `integration_test` compiles and runs the app on an actual Android
+  # device/emulator, where `sqlcipher_flutter_libs`' precompiled Android
+  # binary is genuinely present. Run via the dedicated
+  # `android-sqlcipher-integration-test` CI job (`.github/workflows/ci.yml`),
+  # which boots a headless Android emulator specifically so this can execute
+  # for real, not just compile.
+  integration_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  # Matches the `drift: 2.31.0` pin above (see that comment for the full
+  # sqlite3/native-assets/flutter-test story).
+  drift_dev: 2.31.0
+  # Must stay <=2.15.1: build_runner >=2.15.2 requires analyzer >=13.3.0,
+  # which is incompatible with drift_dev 2.31.0's analyzer <11.0.0 and with
+  # the `meta` version this Flutter SDK pins via flutter_test.
+  build_runner: 2.15.1
+  # Test-only in-memory fake for FlutterSecureStorage
+  # (package:flutter_secure_storage/test/test_flutter_secure_storage_platform.dart),
+  # used by test/core/crypto/db_master_key_store_test.dart so ADR-004's key
+  # hierarchy can be tested without a real platform channel.
+  flutter_secure_storage_platform_interface: ^2.0.2
+
+flutter:
+  uses-material-design: true
+
+  # gen-l10n (Arabic + English) — see l10n.yaml. `flutter gen-l10n` (run
+  # automatically by `flutter pub get`/`flutter build`) reads
+  # lib/presentation/l10n/app_*.arb and generates typed
+  # AppLocalizations.of(context) accessors, so UI strings are never
+  # hand-interpolated and every string is forced to exist in both languages.
+  generate: true
+
+  assets:
+    - assets/fonts/LICENSE_OFL.txt
+
+  # docs/brand.md §3.1: both families must be bundled as local assets — never
+  # a Google Fonts CDN link — so the shipped (network-permission-less) app
+  # renders Arabic/Latin text correctly with zero network dependency.
+  fonts:
+    - family: Tajawal
+      fonts:
+        - asset: assets/fonts/Tajawal-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Tajawal-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Tajawal-Bold.ttf
+          weight: 700
+    - family: Manrope
+      fonts:
+        # Single variable-font file covering the whole weight axis (200-800) —
+        # brand.md's Manrope steps (400/500/600/700) all render correctly from
+        # this one asset without shipping four separate static files.
+        - asset: assets/fonts/Manrope-Variable.ttf

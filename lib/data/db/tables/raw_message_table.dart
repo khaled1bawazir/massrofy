@@ -1,0 +1,55 @@
+import 'package:drift/drift.dart';
+
+/// Raw (redacted) SMS storage — ADR-013, NFR-P4, AC-B1.2, US-A4.
+///
+/// **This table can only ever be written to through `RawMessageDao.insert`,
+/// which requires a `SanitizedSmsText` (see `lib/core/text/sms_sanitizer.dart`)
+/// — never a plain `String`.** There is no code path in this app that can
+/// compile a call inserting an unsanitised body into [sanitizedBody].
+@DataClassName('RawMessageRow')
+class RawMessages extends Table {
+  @override
+  String get tableName => 'raw_message';
+
+  IntColumn get id => integer().autoIncrement()();
+
+  /// The Android SMS content-provider row id, when known — `UNIQUE` so a
+  /// re-scan (AC-A3.3) can never create a duplicate row for the same
+  /// underlying message.
+  TextColumn get smsProviderId => text().nullable().unique()();
+
+  TextColumn get sender => text()();
+
+  DateTimeColumn get receivedAt => dateTime()();
+
+  /// Redacted text, or `NULL`.
+  ///
+  /// Per ADR-013/NFR-P4's precise retention rule: a message from a **known
+  /// financial sender** classified `intent: ignore` (OTP/marketing/info)
+  /// gets a row with `sanitizedBody = NULL` — bank, classification, and
+  /// timestamp only, for the parser-health panel, with **no content at
+  /// all**. A message that was parsed or is unparsed-but-financial keeps
+  /// its (already redacted) text, because AC-B1.2 lets the user verify a
+  /// parse and AC-A4.1 needs the raw-but-sanitised text in the review
+  /// queue. (A non-financial sender gets **no row at all** — that decision
+  /// happens before this DAO is ever called, in the P2 ingestion pipeline.)
+  TextColumn get sanitizedBody => text().nullable()();
+
+  /// `HMAC-SHA256(k, normalisedBody‖sender‖smsTimestamp)`, `UNIQUE` — the
+  /// D1-exact carrier-retry dedup key (ADR-017). Storing an HMAC rather
+  /// than the text keeps this dedup index non-reversible.
+  TextColumn get contentHmac => text().unique()();
+
+  TextColumn get bankId => text().nullable()();
+
+  /// `'financial_parsed' | 'financial_unparsed' | 'ignored_otp' |
+  /// 'ignored_marketing' | 'ignored_info'`.
+  TextColumn get classification => text()();
+
+  BoolColumn get panRedacted => boolean().withDefault(const Constant(false))();
+
+  BoolColumn get dismissedAsNotTransaction =>
+      boolean().withDefault(const Constant(false))();
+
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+}

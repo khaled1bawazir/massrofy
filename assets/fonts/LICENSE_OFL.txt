@@ -1,0 +1,17 @@
+Massrofy bundles two typefaces, per docs/brand.md §3.1/§7, both licensed under
+the SIL Open Font License, Version 1.1 (free for commercial use, redistribution
+and modification; no in-product attribution required):
+
+  - Tajawal (Arabic + Latin), by Boutros International / Google Fonts.
+    Source: https://github.com/google/fonts/tree/main/ofl/tajawal
+    Full licence text: https://openfontlicense.org/documents/OFL.txt
+
+  - Manrope (Latin, variable font), by Mikhail Sharanda / Google Fonts.
+    Source: https://github.com/google/fonts/tree/main/ofl/manrope
+    Full licence text: https://openfontlicense.org/documents/OFL.txt
+
+Both fonts are distributed under the SIL Open Font License, Version 1.1,
+25 February 2007, reproduced at the URL above. Both are self-hosted as local
+Flutter font assets under this directory (pubspec.yaml `flutter: fonts:`) —
+never fetched from a Google Fonts CDN at runtime — so the app renders correctly
+with zero network dependency (ADR-001).

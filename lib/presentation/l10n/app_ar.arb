@@ -1,0 +1,18 @@
+{
+  "@@locale": "ar",
+
+  "appTitle": "مصروفي",
+  "lockGateUnlockToView": "افتح القفل لعرض بياناتك",
+  "lockGateBiometricHint": "ضع إصبعك على المستشعر",
+  "lockGateUsePinInstead": "استخدام رمز PIN بدلاً من ذلك",
+  "lockGateUsePasscode": "استخدام رمز الجهاز بدلاً من ذلك",
+  "lockGateAuthFailed": "تعذّرت المصادقة. حاول مرة أخرى.",
+  "lockGateEnterPin": "أدخل رمز PIN",
+  "lockGateTooManyAttempts": "محاولات كثيرة جداً",
+  "lockGateRetryIn": "حاول مرة أخرى خلال {seconds}، أو استخدم رمز PIN",
+  "lockGateSessionExpiredBanner": "انتهت الجلسة أثناء تصفّح التطبيق في الخلفية. أعد فتح القفل للمتابعة من حيث توقفت.",
+  "lockGateContinueUnlock": "افتح القفل للمتابعة",
+  "lockGateUnlockButtonSemanticLabel": "افتح القفل ببصمتك",
+  "homePlaceholderTitle": "الرئيسية",
+  "homePlaceholderBody": "هذه نسخة الأساس (Foundation) من مصروفي. رصد الرسائل والتصنيف والتقارير تُبنى في مراحل لاحقة — هذه الشاشة تثبت فقط أن التطبيق يعمل، ويُفتح قفله، ويقرأ ويكتب في مخزنه المشفّر بشكل صحيح."
+}
