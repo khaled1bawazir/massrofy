@@ -25,14 +25,37 @@ The phase sequence the manager conducts:
    - **backend-engineer** -> API + tests, flesh out `docs/api.md`, open PR.
    - **frontend-engineer** -> React UI + tests, open PR.
    - **mobile-engineer** -> Flutter UI + tests, open PR (skip if not in scope).
-3. **qa-tester** -> per PR: run the test plan, the contract/integration stage
-   (real backend), and the adversarial security pass. Verdict `QA: PASS/FAIL`
-   per PR. File defects in Linear.
-4. **code-reviewer** -> per PR: merge ONLY when CI is green AND QA passed.
-   Otherwise send back with comments; the owning engineer fixes; QA re-verifies.
-   (manager supervises this loop and breaks deadlocks.)
-5. **devops-engineer** -> deploy the merged result to staging.
-6. **manager** -> retrospective: append lessons learned this build (what broke,
+3. THE FEATURE LOOP — run this for EVERY feature/story, in the same session:
+   a. **qa-tester** -> test the feature properly: automated tests, the
+      contract/integration stage (real backend), the security pass, AND actually
+      run the feature like a user. File EVERY problem found as a Linear issue
+      labelled `bug` with repro steps, expected vs actual, and severity. Verdict
+      `QA: PASS/FAIL` per PR.
+   b. If issues were raised: **manager** -> triage each issue and ASSIGN it to
+      the owning engineer (backend/frontend/mobile) in Linear, with priority
+      order. Note the assignment in `docs/build-log.md`.
+   c. Assigned engineer(s) -> fix on the same branch/PR with a regression test
+      per fix. Move the issue to In Review.
+   d. **qa-tester** -> re-verify each fixed issue (run it again, not just read
+      the code). Close verified issues; reopen failed ones.
+   e. Repeat b-d until QA passes, MAX 3 ROUNDS. If issues survive 3 rounds,
+      STOP that feature and escalate to the human with a summary of what's
+      stuck and why.
+4. **code-reviewer** -> per PR: merge ONLY when CI is green AND QA's verdict is
+   PASS with no open bug issues on the feature. Otherwise back to the loop.
+   (manager supervises and breaks deadlocks.)
+5. **qa-tester** -> RUNTIME JOURNEY VERIFICATION on the integrated build: boot
+   the real stack and walk every PRD journey as a user (first screen renders,
+   core flows work, no boot errors). Verdict `QA: RUNTIME PASS/FAIL`. On FAIL,
+   file the defects and route back to the owning engineer via the manager — do
+   NOT proceed to staging.
+6. **devops-engineer** -> deploy to staging, then run the post-deploy smoke
+   check against live staging.
+7. **qa-tester** -> produce `docs/release-report.md` (see /release-report):
+   journey table with evidence, fresh first-screen screenshots in
+   `docs/evidence/`, open issues, what was NOT tested, and the verdict
+   `READY FOR HUMAN USE` or `NOT READY`. The build is not "done" without it.
+8. **manager** -> retrospective: append lessons learned this build (what broke,
    what was re-planned, what to do differently) to `docs/lessons.md`, and write
    the final summary: shipped, merged, blocked, open issues, approximate cost by
    phase/model.

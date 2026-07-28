@@ -25,8 +25,8 @@ produce a critique in `docs/design-critique.md` covering, per screen:
    used semantically.
 5. States — are loading/empty/error/locked/session-expired designed, and do they
    look intentional rather than bolted on?
-6. Banking trust cues — masked data, clear affordances around money actions,
-   nothing that feels gimmicky.
+6. Trust cues — sensitive data masked where designed, clear affordances on
+   destructive or irreversible actions.
 7. Consistency across screens — same component must look identical everywhere.
 
 ## Output format

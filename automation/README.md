@@ -11,4 +11,4 @@ ways to give the team an automatic heartbeat so it acts without you sitting ther
 
 All three use headless mode (`claude -p`). `--dangerously-skip-permissions` is what
 makes it fully unattended — only use it in CI/cron on a controlled machine, never
-carelessly, especially for banking code. Requires an `ANTHROPIC_API_KEY` secret.
+carelessly. Requires an `ANTHROPIC_API_KEY` secret.
