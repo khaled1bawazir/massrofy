@@ -1,9 +1,9 @@
-STATUS: DRAFT
+STATUS: LIVE — gate 2 passed, build in progress
 # Massrofy — Build Plan
 
-**Version:** 1.0
-**Date:** 2026-07-27
-**Author:** manager agent (phase 2 — planning)
+**Version:** 1.2
+**Date:** 2026-07-27 (v1.0) · last supervised 2026-07-28 (v1.2)
+**Author:** manager agent (v1.0 planning; v1.1+ build supervision)
 **Source of truth:** `docs/PRD.md` v0.3, STATUS: Approved
 **Linear project:** [Massrofy — Personal Spending Tracker from Bank SMS](https://linear.app/khaledbawazir/project/massrofy-personal-spending-tracker-from-bank-sms-1c491affcc87) (team `KHA`)
 
@@ -11,6 +11,18 @@ STATUS: DRAFT
 > architecture decisions** — those belong to `docs/architecture.md` (solution-architect)
 > and `docs/design.md` (ui-ux-designer), both of which are human gate 2. Where planning
 > surfaced a decision that must be made, it is recorded in §7 as a flag, not answered here.
+
+> **This is now a living document.** Under team v2 the manager re-reads real state
+> (docs, PRs, CI, Linear) between build phases and updates this plan where reality
+> diverged. Per-phase status and dispatch history live in `docs/build-log.md`.
+
+## Revision history
+
+| Ver | Date | Change |
+|---|---|---|
+| 1.0 | 2026-07-27 | Original plan, written before gate 2. |
+| 1.1 | 2026-07-28 | Gate 2 closed; P1 and P2 merged. |
+| 1.2 | 2026-07-28 | **P3 supervision.** §2.1 backend question closed by ADR-001. P3 scope corrected — two work items inherited from P2 were missing (KHA-64, KHA-66) and P3 is now recommended as two PRs. §8 issue index refreshed (issues now run past KHA-53). §9 records the team-v2 QA merge gate. R-1 restated as unpaid P0 debt. |
 
 ---
 
@@ -52,17 +64,40 @@ The roster is not applied wholesale. Here is the call, with reasoning.
 
 | Specialist | Needed? | Why |
 |---|---|---|
-| **solution-architect** | **Yes — next, blocking** | Gate 2. Must settle on-device vs. server, storage/crypto, background SMS strategy, parser rule model, backup key recovery. See §7. |
-| **ui-ux-designer** | **Yes — next, blocking** | Gate 2. This is a UI-heavy product: ~12 screens, Arabic-first RTL, and the correction flow (NFR-U7) is the interaction the whole learning loop depends on. |
-| **devops-engineer** | **Yes** | Flutter CI, branch protection (the merge safety net), signed-APK build, side-load staging channel. Small but genuinely required. |
+| **solution-architect** | **Done at gate 2** | Settled on-device vs. server (ADR-001), storage/crypto, background SMS strategy, parser rule model, backup key recovery. Re-engaged only when a build phase surfaces a new decision — as happened with ADR-018. |
+| **ui-ux-designer** | **Done at gate 2** | ~12 screens, Arabic-first RTL, and the correction flow (NFR-U7). Re-engaged only via `/revise-design`. |
+| **devops-engineer** | **Yes** | Flutter CI, signed-APK build, side-load staging channel. Note: **branch protection is unavailable on this repo's GitHub free plan (KHA-55)** — merge discipline is convention-only, not server-enforced, which raises the stakes on the QA + code-reviewer gate. |
 | **mobile-engineer** (Flutter) | **Yes — primary implementer** | Owns essentially all product code: ingestion, parsing, domain model, learning loop, every screen, budgets, statements, backup client. |
-| **frontend-engineer** (React web) | **NO — do not dispatch** | **There is no web surface in this product at all.** No admin console, no companion web app, no browser-based anything. The PRD's only client is the Android/Flutter app. Dispatching a React engineer would produce a deliverable nobody asked for and a second codebase to secure. |
-| **backend-engineer** (Java/Spring) | **CONDITIONAL — do not dispatch yet** | See §2.1. There is very likely **no traditional backend** in this product. |
+| **frontend-engineer** (React web) | **NO — never dispatch** | **There is no web surface in this product at all.** No admin console, no companion web app, no browser-based anything. The PRD's only client is the Android/Flutter app. Dispatching a React engineer would produce a deliverable nobody asked for and a second codebase to secure. |
+| **backend-engineer** (Java/Spring) | **NO — never dispatch (settled 2026-07-28)** | §2.1 is closed: **ADR-001 chose no backend**, CI-enforced. Applies to Epic I too. |
 | **qa-tester** | **Yes** | 132 acceptance criteria across 9 epics need a traceability matrix; the parser corpus needs automated regression (NFR-M2); security/privacy claims (AC-F4.2) need active verification, not assertion. |
 | **code-reviewer** | **Yes** | Merge gate on every PR. Extra scrutiny mandated on anything labelled `security-sensitive`. |
 | **production-support** | **Yes, but reduced** | There are no server logs to triage. Its remit here is on-device crash/diagnostic triage and raising bugs — and it is constrained by NFR-S4/S6 (no sensitive values in logs, no telemetry SDK). See flag A-14. |
 
-### 2.1 The backend question — flagged, not decided
+### 2.1 The backend question — ANSWERED (2026-07-28): there is no backend
+
+> **Resolved.** `docs/architecture.md` **ADR-001** decides it: Massrofy is on-device only,
+> with **no backend and no network permission at all**. This is not merely documented, it is
+> mechanically enforced — CI runs `.github/scripts/check_no_network_permission.sh`, which
+> fails the build if `INTERNET`/`ACCESS_NETWORK_STATE` appears in the **merged release
+> manifest across every plugin**, verified against a real release build in PR #1.
+>
+> Consequences, now settled rather than conditional:
+> - **backend-engineer is never dispatched on this product.** Not for Epic I either.
+> - **frontend-engineer is never dispatched.** Confirmed: there is no web surface.
+> - **P8 (Epic I) is mobile-engineer work**, and the `(or backend-engineer …)` caveat on
+>   that phase below is void.
+> - The `owner-backend-engineer-CONDITIONAL` Linear label is now dead and should not be
+>   applied to anything new.
+>
+> The team for this product is, finally: **devops + mobile + qa + code-reviewer**, plus
+> production-support post-release. Three of the eleven roster agents are permanently out of
+> scope here (backend, frontend, and — after gate 2 — the designers, barring `/revise-design`).
+>
+> The original reasoning is kept below because it is the argument the ADR had to answer.
+
+<details>
+<summary><b>Original v1.0 reasoning — the backend question as it stood before ADR-001 (superseded, kept for the record)</b></summary>
 
 This project's default team shape assumes a Java/Spring backend served to clients. **Massrofy
 probably does not have one.** The PRD points hard the other way:
@@ -91,6 +126,8 @@ it is:
 Issues that would belong to a backend are pre-labelled `owner-backend-engineer-CONDITIONAL`
 in Linear so this stays visible rather than being assumed either way.
 
+</details>
+
 ---
 
 ## 3. Phases, ownership and sequencing
@@ -114,6 +151,12 @@ changes with it. Run the spike **during** P0 so its result lands in the ADR, not
 
 **Exit check:** the human marks **both** `docs/architecture.md` and `docs/design.md`
 `APPROVED`. `/build` refuses to start otherwise.
+
+> **Retrospective (2026-07-28): this exit check was wrong, and it cost us.** It names only the
+> two documents, so P0 closed cleanly while the spike above — declared "not optional" one
+> paragraph earlier — was never run. KHA-7 is still in Backlog with no recorded outcome, and
+> P1 and P2 have both since shipped on its unverified assumptions. See **R-12**. An exit check
+> must enumerate *every* artifact of its phase, or the ones it omits become invisible.
 
 ---
 
@@ -154,6 +197,15 @@ sets. The engine interface itself is the sequencing bottleneck — do it first.
 types parses to expected output in automated tests; no fixture is silently discarded (NFR-A7);
 a real SMS on a physical device reaches the data layer within seconds.
 
+> **Status (2026-07-28): met in part. P2 merged as PR #2 with the third clause open.** The
+> corpus and no-silent-discard halves are genuinely proved (the latter structurally —
+> `ParseOutcome` is a sealed type with no `dropped` case and the pipeline's `switch` has no
+> `default:`). **The physical-device clause was never verified** and PR #2 says so in its own
+> "Honest limits". Two things changed underneath it: ADR-018 makes background ingestion an
+> unconditional no-op while locked, so the Layer 2 foreground sweep does the work and NFR-R1
+> is renegotiated to "seconds while unlocked; seconds from unlock, nothing lost, while locked"
+> (flagged to the human as H-13); and KHA-7 remains unrun (**R-12**). Carried to P10.
+
 > **Test data rule, non-negotiable (NFR-M3):** the user's genuine bank SMS must never be
 > committed to a repository or pasted into any tool. The corpus is realistic-but-**synthetic**,
 > authored from the structural patterns in PRD §3.4. QA owns enforcing this.
@@ -162,6 +214,8 @@ a real SMS on a physical device reaches the data layer within seconds.
 
 ### P3 — Domain model: banks, instruments, transactions (Epic B)
 **Owner:** mobile-engineer. Sequential after P2 (needs real parsed output to model against).
+**Status (2026-07-28): unblocked and ready to dispatch.** Both blockers are closed —
+KHA-19 (parser rule engine) and KHA-14 (audit trail) are `Done` and merged to `main`.
 
 Bank/account/card hierarchy with auto-creation on first mention and entity resolution
 (the same bank named in Arabic in one message and abbreviated in another must resolve to
@@ -170,9 +224,46 @@ linkage; the transaction record with provenance; manual entry, edit, soft delete
 refunds and credits netting against spend; multi-currency with the FX-fee component kept as
 its own field (PRD §3.4); income, ATM withdrawal and internal-transfer classification.
 
+#### Scope correction — two items inherited from P2 (added 2026-07-28)
+
+P2 shipped two things as **callbacks with no implementation behind them**, deferring them
+here because both must write a full `Transaction` and the domain model did not exist yet.
+Neither was covered by KHA-23..29, so P3 as originally written would have closed while Epic A
+was still half-functional. Both are now tracked:
+
+| Issue | Inherited work | Why it was deferred |
+|---|---|---|
+| **KHA-64** | **S-19 / AC-A4.2** — completing an unparsed SMS into a real transaction, and **ADR-017 D2's enrichment merge** | PR #2 items 9 and 5: both write a full `Transaction` over P3 fields |
+| **KHA-66** | **AC-A4.3 regression test** — a dismissed message stays dismissed across a full re-scan | QA-found gap (PR #4); code-reviewer set "before P3 closes" as the deadline |
+
+Note honestly: **KHA-22 is closed `Done` while AC-A4.2 is not actually shipped.** The closure
+is defensible — KHA-22's own done-check was about the *queue* (nothing silently dropped,
+dismissal survives re-scan) and that is genuinely delivered — but the completion action is
+outstanding, and KHA-64 is the record of that. This is the kind of gap that disappears if only
+PR bodies remember it.
+
+**KHA-64 carries the highest correctness risk in P3.** The enrichment merge is the only place
+in the entire product where two records become one, and R-8 is explicit that silently deleting
+a real transaction is worse than an inflated total. Merge must stay user-confirmed and
+never automatic, and the result must remain traceable to both source messages (NFR-A6).
+
+#### Recommended split: two PRs, not one
+
+P3 is now **9 issues / ~40 story points** — the largest single-agent phase in the build, and
+R-9 (single-implementer bottleneck) says keep PRs small so review never becomes a queue. P2
+went to **four review rounds** as one large PR, with five blockers including a security-relevant
+one. Repeating that shape at greater size is a predictable mistake.
+
+| PR | Issues | Rationale |
+|---|---|---|
+| **P3a — the spine** | KHA-23 (hierarchy), KHA-25 (transaction record) | Everything else in Epic B blocks on these two, and they are what P4/P5 build against. Landing them first unblocks the widest surface soonest. |
+| **P3b — behaviours over the spine** | KHA-24, KHA-26, KHA-27, KHA-28, KHA-29, KHA-64, KHA-66 | All depend on the spine; each is independently testable once it exists. |
+
 **Exit check:** fixtures produce the correct bank tree; category totals sum to the period
 total (AC-C1.3); per-card totals sum to the period total (AC-E3.2); internal transfers are
-excluded from spend; every stored amount carries a currency.
+excluded from spend; every stored amount carries a currency; **a review-queue item can be
+completed into a transaction and leaves the queue (AC-A4.2); a dismissed item stays dismissed
+across a re-scan (AC-A4.3)**.
 
 ---
 
@@ -237,7 +328,7 @@ identically to an SMS-derived one (AC-H3.1).
 ---
 
 ### P8 — Encrypted backup and restore (Epic I)
-**Owner:** mobile-engineer *(or backend-engineer, only if the ADR chooses a custom service — §2.1)*. After P3; ideally last among feature phases so the schema has settled.
+**Owner:** mobile-engineer. ~~*(or backend-engineer, only if the ADR chooses a custom service)*~~ — **void: ADR-001 chose no backend, see §2.1.** After P3; ideally last among feature phases so the schema has settled.
 
 Encrypted backup, key management and **key recovery**, restore onto a new device.
 
@@ -264,8 +355,23 @@ one artifact that can be produced entirely from the approved PRD.
 
 ---
 
+> **Process change — team v2 (2026-07-28).** QA is no longer only a parallel authoring track:
+> it is now a **merge gate**. qa-tester (now opus) must return an explicit `QA: PASS` /
+> `QA: FAIL` verdict on each PR, including a contract/integration stage and an adversarial
+> security pass (injection, authz bypass, money-math edge cases, replay, mass-assignment), and
+> **code-reviewer refuses to merge without `QA: PASS`** in addition to green CI. This applies
+> to `/fix-bugs` as well as `/build`.
+>
+> Two consequences for the phases above: every feature PR from P3 onward routes
+> **engineer → qa → code-reviewer**, never engineer → code-reviewer; and `docs/test-plan.md`
+> is a living document that gains its epic's traceability rows as part of that phase's QA
+> gate, rather than waiting for a P9 catch-up (it currently covers Epic 0 and Epic A only, so
+> **P3's QA pass owes Epic B rows**).
+
+---
+
 ### P10 — Review, merge and staging release
-**Owners:** code-reviewer (merge on green CI), devops-engineer (signed staging APK), production-support (thereafter).
+**Owners:** code-reviewer (merge on green CI **and** `QA: PASS`), devops-engineer (signed staging APK), production-support (thereafter).
 
 **Exit check:** a signed APK is installed on the user's real device, ingests real SMS, and the
 human confirms the current-month total matches reality. That last confirmation is the only
@@ -382,7 +488,7 @@ stated explicitly rather than assumed.
 
 | ID | Risk | Impact | Mitigation / owner |
 |---|---|---|---|
-| **R-1** | **Background SMS reception is unreliable on modern Android.** Restricted permissions, Doze, and OEM battery managers can kill a background receiver. NFR-R1 promises single-digit seconds. | Core promise of the product degrades to "updates when you open the app". | P0 spike on the user's real device *before* the ADR is written. If it fails, the ADR must state the achievable latency and the PRD's NFR-R1 needs revisiting with the human. **Owner: mobile-engineer + solution-architect.** |
+| **R-1** | **Background SMS reception is unreliable on modern Android.** Restricted permissions, Doze, and OEM battery managers can kill a background receiver. NFR-R1 promises single-digit seconds. | Core promise of the product degrades to "updates when you open the app". | **PARTLY REALISED, AND THE MITIGATION WAS NEVER RUN — see R-12.** The P0 spike (KHA-7) is still in Backlog with no recorded outcome, so P1 and P2 both shipped on unverified assumptions. ADR-018 has meanwhile already renegotiated NFR-R1 downward on *different* grounds (the app lock), flagged to the human as H-13. **Owner: mobile-engineer + solution-architect.** |
 | **R-2** | **Backup key recovery.** If the encryption key lives only in the Android Keystore it is device-bound, and a lost device means an unrestorable backup — defeating US-I3 entirely. If it's derived from a user passphrase, a weak passphrase weakens AC-I2.1. | Epic I silently fails at the exact moment it's needed. | Architect must specify key derivation, escrow and recovery explicitly in the ADR, and QA must test restore **on a device that has never seen the original key**. |
 | **R-3** | **Exact decimal money in Dart.** There is no native decimal type; a `double` creeping into one aggregation path silently corrupts totals and violates NFR-A4. | Wrong numbers, undetectably. | P1 decision, enforced by a lint/CI rule banning `double` in money paths plus property-based tests. **Owner: solution-architect (choice), mobile-engineer (enforcement).** |
 | **R-4** | **Parser brittleness.** Bank SMS formats change without notice (NFR-M1), and coverage is bounded by what the SMS actually says (CON-3). Only two banks and nine message types are sampled. | Transactions land in the unparsed queue; the user loses trust. | Data-driven rule sets, updatable without redesign; the review queue (US-A4) is the safety net so nothing is lost; corpus regression in CI. Collect more real samples over time (residual OQ-2) — via synthetic transcription only. |
@@ -393,12 +499,22 @@ stated explicitly rather than assumed.
 | **R-9** | **Single-implementer bottleneck.** mobile-engineer owns ~85% of the work; P2–P8 are mostly one lane. | Little real parallelism after P1; slippage compounds. | Sequence to maximize the genuine parallel windows (P4∥P5, P6∥P7∥P8), keep QA off the critical path, and keep PRs small so review never becomes a queue. |
 | **R-10** | **No telemetry, by design** (NFR-S6, X13) — and no app store, so no store crash reporting either. | production-support has almost nothing to triage with; field bugs surface only as the user describing them. | Accept it: it is the correct privacy posture. Compensate with a local, user-visible, redaction-safe diagnostic log the user can share deliberately. **Flag A-14 for the architect.** |
 | **R-11** | **Side-load distribution means no update channel.** Every fix requires the user to install an APK manually (OQ-4/X16). | Slow fix propagation; parser rule updates can't be pushed. | devops should make the staging APK trivially installable; architect should consider whether parser rules can be updated as data without a full reinstall (NFR-M1). |
+| **R-12** *(added 2026-07-28)* | **The P0 device spike (KHA-7) was never run, and it is the one task no agent can do.** It needs the user's real phone. P0's exit check was written as "the human marks both gate-2 docs APPROVED", which the build satisfied — but §P0 also called the spike "not optional", and that half was never enforced. Two phases of ingestion code now rest on its unverified assumptions, and PR #2's own "Honest limits" says so plainly. | If the broadcast turns out to be suppressed on the target OEM, the fix is a *default* change (ADR-006 Layer 3 becomes default-on), not a redesign — so the blast radius is bounded. But it stays unknown until someone runs it, and it is compounding: every phase adds code above it. | **Escalate to the human now, not at P10.** It does not block P3 (domain modelling is pure logic over already-parsed output). It *should* block the P10 staging sign-off. KHA-58's `ingest.skipped.locked` diagnostic is a partial substitute — it makes "locked, working as designed" distinguishable from "broadcast never arrived" from the outside. **Owner: human (device) + mobile-engineer (harness).** |
+| **R-13** *(added 2026-07-28)* | **No branch protection on this repo (KHA-55)** — GitHub free plan. The `/build` design leans on "green CI + strict reviewer" as the merge gate, but nothing *server-side* enforces it: a green `ci` check is a convention, not a requirement. | An agent could in principle merge a red or unreviewed PR, and the design's central safety claim would not hold. | Accepted risk, recorded in the user's notes. Compensating controls: code-reviewer is the only agent permitted to merge, the team-v2 `QA: PASS` gate adds a second independent verdict, and **manager is explicitly forbidden from merging** even when told to break deadlocks. Revisit if the repo ever moves to a paid plan. |
 
 ---
 
 ## 7. Open questions the plan surfaced — for gate 2
 
 These are **flags, not answers**. Planning is not the place to decide them.
+
+> **Status: gate 2 closed — A-1…A-15 and D-1…D-12 are answered** in `docs/architecture.md`
+> (ADR-001…ADR-018) and `docs/design.md`, both APPROVED. Kept here as the record of what
+> planning demanded be decided, and as the checklist to re-run if the PRD ever changes.
+> Answers have since moved on in one place: **ADR-018** (background ingestion vs. the
+> cryptographic app lock) was raised *during* P2, not at gate 2, and it renegotiated NFR-R1
+> — flagged to the human as **H-13**. A-2's answer remains provisional on the unrun KHA-7
+> spike (**R-12**).
 
 ### 7.1 For the solution-architect (`docs/architecture.md`)
 
@@ -438,11 +554,15 @@ These are **flags, not answers**. Planning is not the place to decide them.
 | **D-12** | Budget progress and alert presentation (US-G3/G4). |
 
 ### 7.3 For the human
-1. **Confirm the no-web-frontend call** in §2 — this plan dispatches no React work at all.
-2. **Confirm the backend posture** in §2.1 once the ADR lands.
-3. **Decide on PDF statement import** (R-6): must-have for v1, or CSV-first with PDF in v1.1?
-4. More real SMS samples are still welcome (residual OQ-2) — other banks, and edge cases like
-   declines and partial refunds. Share the *structure*, never the raw text (NFR-M3).
+
+| # | Question | Status (2026-07-28) |
+|---|---|---|
+| 1 | **Confirm the no-web-frontend call** in §2 — this plan dispatches no React work at all. | ✅ Settled by ADR-001. No web surface exists or will. |
+| 2 | **Confirm the backend posture** in §2.1 once the ADR lands. | ✅ Settled: ADR-001 chose no backend, CI-enforced. |
+| 3 | **Decide on PDF statement import** (R-6): must-have for v1, or CSV-first with PDF in v1.1? | ⬜ **STILL OPEN.** Not yet needed — P7 is several phases away — but it should be answered before P7 is planned, not during it. |
+| 4 | More real SMS samples are still welcome (residual OQ-2) — other banks, and edge cases like declines and partial refunds. Share the *structure*, never the raw text (NFR-M3). | ⬜ Standing invitation. Directly reduces R-4. |
+| 5 | **Run the KHA-7 background-SMS spike on your real device** (**R-12**, added 2026-07-28). | 🔴 **NEEDED — no agent can do this.** Two phases of ingestion code rest on assumptions it was meant to verify. Does not block P3; should block the P10 staging sign-off. |
+| 6 | **NFR-R1 has been renegotiated downward** since you approved the PRD: ADR-018 (H-13) changes the promise to "seconds while unlocked; seconds from unlock, with nothing lost, while locked." | ⬜ **Please confirm you accept this**, since it alters a promise in an approved document. |
 
 ---
 
@@ -466,32 +586,43 @@ Project: **Massrofy — Personal Spending Tracker from Bank SMS** (team `KhaledB
 
 Every issue carries its PRD story and AC references, and a "Done check" that QA can verify.
 
-### Issue index (KHA-5 … KHA-53, 49 issues)
+### Issue index (KHA-5 … KHA-53 as planned, plus follow-ups born in review)
+
+> **The original index is no longer the whole set.** Review, QA and CI have since created
+> real work above KHA-53 — KHA-54, KHA-55, KHA-58, KHA-62, KHA-64, KHA-66 and others. Treat
+> **Linear as the source of truth for issue state**; this table is the planned skeleton, not
+> a census. Follow-ups are listed against the phase that must close them.
 
 | Milestone | Issues | Owner(s) |
 |---|---|---|
-| P0 — Gate 2 | KHA-5 ADR · KHA-6 UI design · KHA-7 background-SMS spike | architect, designer, mobile |
-| P1 — Foundation | KHA-8 CI · KHA-9 signed APK · KHA-10 scaffold/RTL · KHA-11 money type · KHA-12 encrypted store · KHA-13 masking/redaction · KHA-14 audit trail · KHA-15 app lock | devops, mobile |
-| P2 — Ingestion (A) | KHA-16 permissions · KHA-17 background receiver · KHA-18 classifier · KHA-19 parser engine · KHA-20 historical import · KHA-21 dedup · KHA-22 review queue | mobile |
-| P3 — Domain (B) | KHA-23 bank/instrument hierarchy · KHA-24 card↔account link · KHA-25 transaction record · KHA-26 manual/edit/soft-delete · KHA-27 multi-currency · KHA-28 refunds · KHA-29 income/transfers | mobile |
+| P0 — Gate 2 | KHA-5 ADR ✅ · KHA-6 UI design ✅ · **KHA-7 background-SMS spike — STILL IN BACKLOG, NEVER RUN (R-12)** | architect, designer, mobile |
+| P1 — Foundation | KHA-8 CI · KHA-9 signed APK · KHA-10 scaffold/RTL · KHA-11 money type · KHA-12 encrypted store · KHA-13 masking/redaction · KHA-14 audit trail · KHA-15 app lock — **all ✅ merged (PR #1)** | devops, mobile |
+| P2 — Ingestion (A) | KHA-16 permissions · KHA-17 background receiver · KHA-18 classifier · KHA-19 parser engine · KHA-20 historical import · KHA-21 dedup · KHA-22 review queue — **all ✅ merged (PR #2)**; +KHA-54 sanitizer gaps ✅ · KHA-58 `ingest.skipped.locked` diagnostic ⬜ | mobile |
+| P3 — Domain (B) | KHA-23 bank/instrument hierarchy · KHA-24 card↔account link · KHA-25 transaction record · KHA-26 manual/edit/soft-delete · KHA-27 multi-currency · KHA-28 refunds · KHA-29 income/transfers · **KHA-64 S-19 + ADR-017 D2 merge (inherited from P2)** · **KHA-66 AC-A4.3 regression test** — all ⬜ Backlog, unblocked | mobile |
 | P4 — Learning (C, D) | KHA-30 categories · KHA-31 merchant rule store · KHA-32 confidence/flagging · KHA-33 correction flow · KHA-34 rules screen | mobile |
 | P5 — UI (E, F) | KHA-35 dashboard · KHA-36 list/bank screens · KHA-37 reports · KHA-38 search/filter · KHA-39 privacy controls · KHA-40 change history · KHA-41 a11y/RTL pass | mobile |
 | P6 — Budgets (G) | KHA-42 budgets · KHA-43 alerts | mobile |
 | P7 — Statements (H) | KHA-44 CSV/PDF import · KHA-45 reconciliation | mobile |
-| P8 — Backup (I) | KHA-46 encrypted backup · KHA-47 restore | mobile *(backend only if ADR says so)* |
-| P9 — QA | KHA-48 test plan · KHA-49 parser corpus · KHA-50 security/privacy verification · KHA-51 a11y audit · KHA-52 E2E acceptance | qa |
-| P10 — Release | KHA-53 staging release | reviewer, devops |
+| P8 — Backup (I) | KHA-46 encrypted backup · KHA-47 restore | mobile *(ADR-001: no backend, §2.1)* |
+| P9 — QA | KHA-48 test plan ✅ (Epic 0 + A only; **Epic B rows owed by P3's QA gate**) · KHA-49 parser corpus · KHA-50 security/privacy verification · KHA-51 a11y audit · KHA-52 E2E acceptance | qa |
+| P10 — Release | KHA-53 staging release · **KHA-7 device spike must close here at the latest (R-12)** | reviewer, devops |
+| Cross-cutting | KHA-55 no branch protection (GitHub free plan — merge safety is convention-only, accepted risk) · KHA-62 emulator CI flakiness ✅ (PR #7, #8) | devops |
 
 Blocking relations are set in Linear on the issues where the dependency is load-bearing
 (e.g. KHA-19 parser blocks KHA-20/21/22/23; KHA-31 rule store blocks KHA-32/33/34;
 KHA-46 backup blocks KHA-47 restore). The milestone order carries the rest.
 
-Two issues can be started **before** gate 2 closes, because they need only the approved PRD:
-**KHA-7** (the background-SMS spike, whose result must feed the ADR) and **KHA-48** (the QA
-traceability matrix). Everything else waits for both gate-2 documents to be APPROVED.
+Two issues could be started **before** gate 2 closed, because they needed only the approved
+PRD: **KHA-7** (the background-SMS spike, whose result was to feed the ADR) and **KHA-48**
+(the QA traceability matrix). In the event, KHA-48 was done late (retroactively, in PR #4)
+and **KHA-7 was never done at all** — the lesson is recorded in `docs/lessons.md`.
+
+Also note the `owner-backend-engineer-CONDITIONAL` label described above is now **dead** —
+ADR-001 settled §2.1 against a backend, so nothing should ever carry it.
 
 ---
 
-*End of build plan. This document is a plan, not an approval. Gate 2 — `docs/architecture.md`
-and `docs/design.md` both marked APPROVED by the human — still stands between here and any
-line of product code.*
+*End of build plan. Gate 2 is closed: `docs/architecture.md`, `docs/brand.md` and
+`docs/design.md` are APPROVED and product code is being written against them. This document
+is no longer a pre-build plan but a live one — the manager updates it between phases as
+reality diverges, and `docs/build-log.md` records each phase's actual dispatch and outcome.*
