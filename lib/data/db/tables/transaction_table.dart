@@ -1,6 +1,6 @@
 import 'package:drift/drift.dart';
 
-/// **Scope note — P1 created this, P2 extended it, P3 completes it.**
+/// **Scope note — P1 created this, P2 extended it, P3a completes the spine.**
 ///
 /// `docs/architecture.md` §4.2 defines the full `Transaction` entity. P1
 /// created a deliberately minimal version, purely to give the append-only
@@ -23,12 +23,27 @@ import 'package:drift/drift.dart';
 ///    component must be its own field from the first write, not folded in
 ///    and separated later.
 ///
-/// **Still P3's job, deliberately left out:** foreign keys to `Bank`,
-/// `Instrument`, `Category` and `Merchant` (those tables do not exist yet),
-/// soft-delete restore UX, internal-transfer links, and categorisation
-/// confidence. The instrument is denormalised here as
-/// `instrumentKind` + `instrumentMaskedRef` until P3 creates the real
-/// `Instrument` table and migrates these into foreign keys.
+/// **P3a (this phase — KHA-25) adds the rest of the record's spine:**
+///
+///  - **`instrumentId`** — the real foreign key to `instrument`, which now
+///    exists. `instrumentKind`/`instrumentMaskedRef` are **kept** rather than
+///    dropped: they are what the message itself said, and they remain
+///    meaningful when the identifier could not be masked into a usable
+///    `refKey` (fewer than four digits) and therefore matched no instrument.
+///    A null `instrumentId` is AC-B1.3's explicit unknown, not a data error.
+///  - **`counterpartyName` / `counterpartyBankName` / `remainingBalance*`** —
+///    architecture §4.2 fields the parser already extracted and P2 had
+///    nowhere to put. AC-B1.1 asks the detail view to show the payee; for a
+///    transfer, the counterparty *is* the payee.
+///  - **`provenanceDetail`** — see the doc comment on that column.
+///  - **`deletedAt`** — soft delete previously recorded *that* a row was
+///    deleted but not *when*, which AC-B6.4 needs.
+///
+/// **Still not here, deliberately:** foreign keys to `Category` and
+/// `Merchant` (P4 owns those tables), `isExcluded` and the restore UX
+/// (KHA-26, P3b), internal-transfer links (KHA-29), refund/fee parent links
+/// (KHA-28) and categorisation confidence (P4). Each arrives with the
+/// behaviour that gives it meaning, rather than as an unused column.
 ///
 /// The SQL table is named `transactions` (plural) rather than the singular
 /// domain word, specifically to avoid any ambiguity with SQLite's own
@@ -112,7 +127,7 @@ class Transactions extends Table {
   /// duplicate key when it exists (ADR-017 D2).
   TextColumn get referenceNumber => text().nullable()();
 
-  // --- P2: the instrument, denormalised until P3 builds the real table -----
+  // --- P2: what the message said about the instrument ----------------------
 
   /// `card` | `account`, from the matched rule's declaration — never guessed
   /// from digit length (AC-B13.1/2).
@@ -122,11 +137,61 @@ class Transactions extends Table {
   /// schema capable of holding a full PAN (NFR-S2, architecture §4.2).
   TextColumn get instrumentMaskedRef => text().nullable()();
 
+  // --- P3a: the resolved instrument (KHA-23, KHA-25) ------------------------
+
+  /// The `instrument` row this transaction hit.
+  ///
+  /// **Nullable on purpose** (architecture §4.2 says so explicitly): a
+  /// message that named no instrument, or named one with too few digits to
+  /// mask meaningfully, produces a transaction whose instrument is
+  /// *explicitly unknown* (AC-B1.3). Defaulting to some "unassigned"
+  /// instrument row would put real money under a fictional card.
+  /// (Written as an explicit SQL constraint rather than `.references(...)` —
+  /// see the same note on `instrument_table.dart`'s `bankId`. `ALTER TABLE
+  /// ADD COLUMN` accepts a `REFERENCES` clause as long as the column defaults
+  /// to NULL, which it does, so an upgraded database gets exactly the same
+  /// constraint a fresh install does.)
+  IntColumn get instrumentId =>
+      integer().nullable().customConstraint('REFERENCES instrument(id)')();
+
+  // --- P3a: fields the parser already produced and P2 could not store -------
+
+  /// Who the money went to or came from on a transfer (PRD §3.4). For a
+  /// transfer this is the payee AC-B1.1 asks the detail view to show; for a
+  /// purchase it is null and `merchantRawText` plays that role.
+  TextColumn get counterpartyName => text().nullable()();
+
+  /// The counterparty's bank, where the message named it.
+  TextColumn get counterpartyBankName => text().nullable()();
+
+  /// The balance a message reported *after* the movement — PRD §3.4 notes the
+  /// installment template does this.
+  ///
+  /// **Informational only. It is never treated as spend and never summed**;
+  /// it is stored as a `Money` triple like every other amount purely so it
+  /// cannot accidentally be handled as a float on its way to the screen.
+  TextColumn get remainingBalanceAmount => text().nullable()();
+  TextColumn get remainingBalanceCurrency => text().nullable()();
+  IntColumn get remainingBalanceMinor => integer().nullable()();
+
   // --- P2: provenance (NFR-A1) ---------------------------------------------
 
   /// `sms` | `manual` | `statement`. P7 must not create a fourth, untracked
   /// path (build-plan §5).
   TextColumn get provenance => text().withDefault(const Constant('sms'))();
+
+  /// A refinement of [provenance], not a fourth value of it.
+  ///
+  /// KHA-64/AC-A4.2 creates a genuinely hybrid record: an unparsed SMS the
+  /// **user** completed by hand. Recording it as `manual` would throw away
+  /// the source-message reference NFR-A1 requires; recording it as plain
+  /// `sms` would claim the parser produced numbers a human actually typed.
+  /// So [provenance] stays `sms` (the message reference is real and is kept)
+  /// and this column carries `manual_completion`. Architecture §4.2's
+  /// three-value provenance vocabulary is left intact.
+  ///
+  /// Null for an ordinary parsed transaction.
+  TextColumn get provenanceDetail => text().nullable()();
 
   /// FK to `raw_message.id`, so the user can open a transaction and read the
   /// message it came from to verify the parse (AC-B1.2).
@@ -161,6 +226,12 @@ class Transactions extends Table {
   /// restorable. Only "erase everything" (ADR-011, P8) is a true hard
   /// delete.
   BoolColumn get isDeleted => boolean().withDefault(const Constant(false))();
+
+  /// When the soft delete happened. AC-B6.4 requires the change history to
+  /// show a deletion "with timestamp and prior values" — the audit entry
+  /// carries both, and this column makes the same fact readable from the row
+  /// itself (e.g. for the Recently Deleted list's ordering, US-B8).
+  DateTimeColumn get deletedAt => dateTime().nullable()();
 
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();

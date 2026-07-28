@@ -2,7 +2,9 @@ import 'package:drift/drift.dart';
 
 import 'tables/app_settings_table.dart';
 import 'tables/audit_entry_table.dart';
+import 'tables/bank_table.dart';
 import 'tables/ingest_watermark_table.dart';
+import 'tables/instrument_table.dart';
 import 'tables/raw_message_table.dart';
 import 'tables/transaction_table.dart';
 
@@ -30,6 +32,8 @@ part 'app_database.g.dart';
   tables: [
     AuditEntries,
     RawMessages,
+    Banks,
+    Instruments,
     Transactions,
     AppSettingsTable,
     IngestWatermarks,
@@ -51,8 +55,9 @@ class AppDatabase extends _$AppDatabase {
   /// |---|---|---|
   /// | 1 | P1 | audit, raw_message, minimal transactions, settings |
   /// | 2 | P2 | ingest watermark; SMS provenance, FX and dedup columns on transactions; unparsed diagnostics on raw_message |
+  /// | 3 | P3a | `bank` + `instrument` tables (KHA-23); instrument FK, counterparty, remaining balance, provenance detail and `deleted_at` on transactions (KHA-25) |
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -99,6 +104,30 @@ class AppDatabase extends _$AppDatabase {
 
         await m.addColumn(rawMessages, rawMessages.unparsedReason);
         await m.addColumn(rawMessages, rawMessages.unparsedRuleId);
+      }
+
+      if (from < 3) {
+        // P3a — the domain spine (KHA-23, KHA-25).
+        //
+        // Order matters and SQLite is unforgiving about it: `instrument`
+        // references `bank`, and `transactions.instrument_id` references
+        // `instrument`, so the parents must exist before the child that
+        // points at them.
+        await m.createTable(banks);
+        await m.createTable(instruments);
+
+        for (final GeneratedColumn<Object> column in <GeneratedColumn<Object>>[
+          transactions.instrumentId,
+          transactions.counterpartyName,
+          transactions.counterpartyBankName,
+          transactions.remainingBalanceAmount,
+          transactions.remainingBalanceCurrency,
+          transactions.remainingBalanceMinor,
+          transactions.provenanceDetail,
+          transactions.deletedAt,
+        ]) {
+          await m.addColumn(transactions, column);
+        }
       }
     },
     beforeOpen: (OpeningDetails details) async {

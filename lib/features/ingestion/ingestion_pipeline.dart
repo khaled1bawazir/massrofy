@@ -111,6 +111,7 @@ import '../../data/dao/ingest_watermark_dao.dart';
 import '../../data/dao/raw_message_dao.dart';
 import '../../data/dao/transaction_dao.dart';
 import '../../data/db/app_database.dart';
+import '../ledger/ledger_entity_resolver.dart';
 import '../parsing/message_parser.dart';
 import '../parsing/parse_outcome.dart';
 import '../parsing/parsed_fields.dart';
@@ -206,6 +207,17 @@ final class IngestionPipeline {
   final IngestWatermarkDao watermarkDao;
   final SafeLogger logger;
 
+  /// P3a (KHA-23): turns what a message said about its bank and instrument
+  /// into rows in the bank → account/card tree, creating them on first
+  /// mention (US-B15).
+  ///
+  /// Nullable so the pipeline still runs without it — the historical-import
+  /// and dedup tests, for instance, care about nothing in the tree. When it
+  /// is absent the transaction is written with its instrument left
+  /// **explicitly unknown** rather than guessed, which is the same shape
+  /// AC-B1.3 already requires for a message that named no instrument.
+  final LedgerEntityResolver? entityResolver;
+
   /// The Keystore-held key for the D1 content HMAC (ADR-017). See
   /// `content_hmac.dart` for why this is keyed rather than a plain digest.
   final List<int> contentHmacKey;
@@ -233,6 +245,7 @@ final class IngestionPipeline {
     required this.watermarkDao,
     required this.logger,
     required this.contentHmacKey,
+    this.entityResolver,
     this.batchLimit = 100,
     this.maxBatchesPerRun = 10,
   });
@@ -607,12 +620,32 @@ final class IngestionPipeline {
       classification: 'financial_parsed',
     );
 
+    // P3a — resolve (and auto-create on first mention) the bank and the
+    // instrument this message names, US-B15/AC-B15.1.
+    //
+    // This runs **after** the raw-message insert so the entities can record
+    // which message first mentioned them (NFR-A1), and **inside** the same
+    // per-message database transaction opened in `processAll` — so a crash
+    // can never leave an instrument behind with no transaction and no
+    // message to explain it.
+    final ResolvedLedgerEntities entities =
+        await entityResolver?.resolveForMessage(
+          bankCanonicalKey: parsed.rule.bankId,
+          fields: fields,
+          firstSeenMessageId: rawMessageId,
+          observedAt: occurredAt,
+        ) ??
+        const ResolvedLedgerEntities();
+
     final int transactionId = await transactionDao.insertFromParsedSms(
       amount: amount,
       convertedAmount: fields.convertedAmount,
       feeAmount: fields.feeAmount,
       fxRate: fields.exchangeRate,
+      remainingBalance: fields.remainingBalance,
       merchantRawText: fields.merchantRawText,
+      counterpartyName: fields.counterpartyName,
+      counterpartyBankName: fields.counterpartyBankName,
       occurredAt: occurredAt,
       timeSource: timeSource,
       direction: parsed.direction,
@@ -621,6 +654,7 @@ final class IngestionPipeline {
       referenceNumber: fields.referenceNumber,
       instrumentKind: fields.instrument?.kind,
       instrumentMaskedRef: fields.instrument?.maskedIdentifier,
+      instrumentId: entities.instrumentId,
       sourceMessageId: rawMessageId,
       rulePackId: parsed.rule.packId,
       rulePackVersion: parsed.rule.packVersion,

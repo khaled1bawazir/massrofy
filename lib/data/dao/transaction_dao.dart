@@ -137,6 +137,11 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
       )..where((Transactions t) => t.id.equals(id))).write(
         TransactionsCompanion(
           isDeleted: const Value<bool>(true),
+          // P3a: AC-B6.4 asks the change history to show *when* a deletion
+          // happened. The audit entry has always carried that, and now the
+          // row does too, which is what the Recently Deleted list (US-B8)
+          // orders by.
+          deletedAt: Value<DateTime?>(timestamp),
           updatedAt: Value<DateTime>(timestamp),
         ),
       );
@@ -173,6 +178,7 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
       )..where((Transactions t) => t.id.equals(id))).write(
         TransactionsCompanion(
           isDeleted: const Value<bool>(false),
+          deletedAt: const Value<DateTime?>(null),
           updatedAt: Value<DateTime>(timestamp),
         ),
       );
@@ -215,7 +221,10 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
     Money? convertedAmount,
     Money? feeAmount,
     String? fxRate,
+    Money? remainingBalance,
     String? merchantRawText,
+    String? counterpartyName,
+    String? counterpartyBankName,
     DateTime? occurredAt,
     String? timeSource,
     required String direction,
@@ -224,6 +233,7 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
     String? referenceNumber,
     String? instrumentKind,
     String? instrumentMaskedRef,
+    int? instrumentId,
     required int sourceMessageId,
     required String rulePackId,
     required String rulePackVersion,
@@ -258,6 +268,19 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
             feeAmount == null ? null : _toMinorUnitsBestEffort(feeAmount),
           ),
           fxRate: Value<String?>(fxRate),
+          remainingBalanceAmount: Value<String?>(
+            remainingBalance?.toCanonicalString(),
+          ),
+          remainingBalanceCurrency: Value<String?>(
+            remainingBalance?.currencyCode,
+          ),
+          remainingBalanceMinor: Value<int?>(
+            remainingBalance == null
+                ? null
+                : _toMinorUnitsBestEffort(remainingBalance),
+          ),
+          counterpartyName: Value<String?>(counterpartyName),
+          counterpartyBankName: Value<String?>(counterpartyBankName),
           occurredAt: Value<DateTime?>(occurredAt),
           timeSource: Value<String?>(timeSource),
           direction: Value<String>(direction),
@@ -266,6 +289,9 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
           referenceNumber: Value<String?>(referenceNumber),
           instrumentKind: Value<String?>(instrumentKind),
           instrumentMaskedRef: Value<String?>(instrumentMaskedRef),
+          // P3a: the resolved FK. Null is AC-B1.3's explicit unknown — the
+          // message named no instrument, or named one we could not key on.
+          instrumentId: Value<int?>(instrumentId),
           provenance: const Value<String>('sms'),
           sourceMessageId: Value<int?>(sourceMessageId),
           rulePackId: Value<String?>(rulePackId),
@@ -307,6 +333,114 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
             field: 'provenance',
             from: null,
             to: 'sms#$sourceMessageId',
+          ),
+          if (merchantRawText != null)
+            AuditFieldChange(
+              field: 'merchantRawText',
+              from: null,
+              to: merchantRawText,
+            ),
+        ],
+      );
+      return id;
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // P3a — completing an unparsed message by hand (KHA-64, S-19, AC-A4.2)
+  // -------------------------------------------------------------------------
+
+  /// Writes the transaction a user produced by filling in the fields the
+  /// parser could not read, together with its `create` audit entry.
+  ///
+  /// ## Why this is not `insertFromParsedSms` with a different actor
+  ///
+  /// Three things differ, and each of them matters to somebody:
+  ///
+  ///  - **Actor is `user`, not `parser`** (NFR-A2). The change history must
+  ///    not claim a rule produced numbers a person typed; that is precisely
+  ///    the distinction ADR-010 asks the actor field to carry.
+  ///  - **`provenanceDetail` is `manual_completion`** while `provenance`
+  ///    stays `sms` and [sourceMessageId] stays set. KHA-64 is explicit:
+  ///    *"Provenance must record this as SMS-derived-with-manual-completion,
+  ///    not as plain manual entry — the source message reference is still
+  ///    real and NFR-A1 must not lose it."*
+  ///  - **There is no rule reference.** No rule matched; recording one would
+  ///    be a lie the parser-health panel would then act on.
+  ///
+  /// The caller is responsible for reclassifying the raw message so it leaves
+  /// the review queue — see `UnparsedCompletionService`, which does both
+  /// inside one database transaction.
+  Future<int> insertManualCompletion({
+    required Money amount,
+    String? merchantRawText,
+    required DateTime occurredAt,
+    required String direction,
+    required String transactionType,
+    required bool affectsSpend,
+    int? instrumentId,
+    String? instrumentKind,
+    String? instrumentMaskedRef,
+    String? referenceNumber,
+    required int sourceMessageId,
+    DateTime? now,
+  }) {
+    final DateTime timestamp = now ?? DateTime.now();
+    return transaction<int>(() async {
+      final int id = await into(transactions).insert(
+        TransactionsCompanion.insert(
+          merchantRawText: Value<String?>(merchantRawText),
+          amountAmount: amount.toCanonicalString(),
+          amountCurrency: amount.currencyCode,
+          amountMinor: _toMinorUnitsBestEffort(amount),
+          occurredAt: Value<DateTime?>(occurredAt),
+          // The user stated the time explicitly on the S-19 form; it did not
+          // come from the message text and it is not a delivery-time
+          // fallback, so neither of the SMS time sources would be honest.
+          timeSource: const Value<String?>('user_stated'),
+          direction: Value<String>(direction),
+          transactionType: Value<String>(transactionType),
+          affectsSpend: Value<bool>(affectsSpend),
+          referenceNumber: Value<String?>(referenceNumber),
+          instrumentKind: Value<String?>(instrumentKind),
+          instrumentMaskedRef: Value<String?>(instrumentMaskedRef),
+          instrumentId: Value<int?>(instrumentId),
+          provenance: const Value<String>('sms'),
+          provenanceDetail: const Value<String?>('manual_completion'),
+          sourceMessageId: Value<int?>(sourceMessageId),
+          createdAt: Value<DateTime>(timestamp),
+          updatedAt: Value<DateTime>(timestamp),
+        ),
+      );
+
+      await auditLogDao.append(
+        entityType: 'transaction',
+        entityId: id.toString(),
+        action: 'create',
+        actor: 'user',
+        actorDetail: 'review_queue_completion',
+        changedAt: timestamp,
+        fieldChanges: <AuditFieldChange>[
+          AuditFieldChange(
+            field: 'amount',
+            from: null,
+            to: amount.toCanonicalString(),
+          ),
+          AuditFieldChange(
+            field: 'currency',
+            from: null,
+            to: amount.currencyCode,
+          ),
+          AuditFieldChange(
+            field: 'transactionType',
+            from: null,
+            to: transactionType,
+          ),
+          AuditFieldChange(field: 'direction', from: null, to: direction),
+          AuditFieldChange(
+            field: 'provenance',
+            from: null,
+            to: 'sms#$sourceMessageId/manual_completion',
           ),
           if (merchantRawText != null)
             AuditFieldChange(
@@ -393,6 +527,52 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
   }
 
   Future<List<TransactionRow>> all() => select(transactions).get();
+
+  /// Every live transaction, newest movement first — the source for the bank
+  /// tree's totals (AC-B2.1/B2.2/B2.3) and for the transaction list.
+  ///
+  /// Soft-deleted rows are excluded here rather than filtered per screen:
+  /// US-B6/B8 require a deleted transaction to be out of every list and every
+  /// total until restored, and a screen that forgot the filter would show it
+  /// in one of them. The Recently Deleted view uses [watchDeleted] instead.
+  Stream<List<TransactionRow>> watchLive() {
+    return (select(transactions)
+          ..where((Transactions t) => t.isDeleted.equals(false))
+          ..orderBy(<OrderClauseGenerator<Transactions>>[
+            (Transactions t) => OrderingTerm.desc(t.occurredAt),
+            (Transactions t) => OrderingTerm.desc(t.id),
+          ]))
+        .watch();
+  }
+
+  Stream<List<TransactionRow>> watchDeleted() {
+    return (select(transactions)
+          ..where((Transactions t) => t.isDeleted.equals(true))
+          ..orderBy(<OrderClauseGenerator<Transactions>>[
+            (Transactions t) => OrderingTerm.desc(t.deletedAt),
+          ]))
+        .watch();
+  }
+
+  /// One instrument's transactions — AC-B2.3's *"only that instrument's
+  /// transactions are listed"*. The total shown next to them is computed in
+  /// Dart from exactly this list (ADR-002 forbids a SQL `SUM`), which is what
+  /// makes the two agree by construction.
+  Future<List<TransactionRow>> forInstrument(int instrumentId) {
+    return (select(transactions)
+          ..where(
+            (Transactions t) =>
+                t.instrumentId.equals(instrumentId) & t.isDeleted.equals(false),
+          )
+          ..orderBy(<OrderClauseGenerator<Transactions>>[
+            (Transactions t) => OrderingTerm.desc(t.occurredAt),
+          ]))
+        .get();
+  }
+
+  Future<TransactionRow?> byIdOrNull(int id) => (select(
+    transactions,
+  )..where((Transactions t) => t.id.equals(id))).getSingleOrNull();
 
   /// Everything flagged for the user's attention — the "low confidence" half
   /// of the Needs Review inbox (design.md S-18), which includes possible

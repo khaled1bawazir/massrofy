@@ -39,11 +39,13 @@ import '../../features/ingestion/ingestion_pipeline.dart';
 import '../../features/ingestion/review_queue.dart';
 import '../../features/ingestion/sms_permission_service.dart';
 import '../../features/ingestion/sms_source.dart';
+import '../../features/ledger/ledger_entity_resolver.dart';
 import '../../features/parsing/message_parser.dart';
 import '../../features/parsing/rule_pack.dart';
 import '../../features/parsing/rule_pack_loader.dart';
 import '../../features/parsing/rule_pack_message_parser.dart';
 import 'app_providers.dart';
+import 'ledger_providers.dart';
 
 /// Path of the bundled rule pack asset (ADR-007 "Bundled" source).
 const String bundledRulePackAsset = 'assets/rule_packs/sa-core.json';
@@ -112,6 +114,16 @@ final FutureProvider<IngestionPipeline?> ingestionPipelineProvider =
         messageParserProvider.future,
       );
 
+      // P3a (KHA-23): the ingestion pipeline's link to the domain model.
+      // Without this the pipeline still runs and still records every
+      // transaction — it simply leaves the instrument explicitly unknown —
+      // which is why the parameter is nullable. Wiring it here is what makes
+      // "a bank and card appear the first time an SMS mentions them"
+      // (US-B15) a property of the shipped app rather than of a test.
+      final LedgerEntityResolver? resolver = await ref.watch(
+        ledgerEntityResolverProvider.future,
+      );
+
       return IngestionPipeline(
         database: session.database,
         smsSource: ref.watch(smsSourceProvider),
@@ -130,6 +142,7 @@ final FutureProvider<IngestionPipeline?> ingestionPipelineProvider =
           rootKey: session.auditLogDao.auditChainKey,
           label: ContentHmac.keyDerivationLabel,
         ),
+        entityResolver: resolver,
       );
     });
 

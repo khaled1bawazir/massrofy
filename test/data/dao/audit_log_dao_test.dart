@@ -228,6 +228,57 @@ void main() {
       expect(await dao.verifyChainIntegrity(), isTrue);
     });
 
+    test('REGRESSION — a chain written with sub-second timestamps still '
+        'verifies (the production path uses DateTime.now())', () async {
+      // ## The defect this pins, found while building P3a
+      //
+      // Drift stores a `DateTimeColumn` as a Unix timestamp in **whole
+      // seconds**. The hash chain used to be computed over the *untruncated*
+      // `changedAt`, so every entry written by the running app — all of which
+      // carry milliseconds from `DateTime.now()` — hashed a value that could
+      // never be read back. `verifyChainIntegrity()` then recomputed from the
+      // truncated stored value, got a different hash, and reported
+      // **tampering on an intact history**: ADR-010's "Verify history
+      // integrity" action would have accused the user's own device.
+      //
+      // Every pre-existing test in this file passed whole-second literals
+      // like `DateTime.utc(2026, 1, 1)`, which is exactly why nobody noticed.
+      // This one deliberately does not.
+      for (int i = 0; i < 5; i++) {
+        await dao.append(
+          entityType: 'transaction',
+          entityId: '$i',
+          action: 'create',
+          actor: 'user',
+          changedAt: DateTime.utc(2026, 1, 1, 10, 30, 12, 345 + i, 678),
+          fieldChanges: const <AuditFieldChange>[],
+        );
+      }
+
+      expect(await dao.verifyChainIntegrity(), isTrue);
+
+      // And the stored timestamp is the truncated one, so what was hashed and
+      // what was stored are demonstrably the same value.
+      final AuditEntryRow row = (await dao.queryFor('transaction', '0')).single;
+      expect(row.changedAt.toUtc(), DateTime.utc(2026, 1, 1, 10, 30, 12));
+    });
+
+    test('a chain written with the real clock verifies', () async {
+      // The narrowest possible statement of the same property: no explicit
+      // timestamp at all, i.e. exactly what production does.
+      for (int i = 0; i < 3; i++) {
+        await dao.append(
+          entityType: 'instrument',
+          entityId: '$i',
+          action: 'create',
+          actor: 'parser',
+          changedAt: DateTime.now(),
+          fieldChanges: const <AuditFieldChange>[],
+        );
+      }
+      expect(await dao.verifyChainIntegrity(), isTrue);
+    });
+
     test('directly tampering with a stored field is detected', () async {
       await dao.append(
         entityType: 'transaction',
