@@ -108,8 +108,106 @@ void main() {
     await tester.pump();
 
     expect(find.text('Too many attempts'), findsOneWidget);
-    // The "use passcode" retry link is intentionally hidden while locked out.
+    // The "use passcode" retry link is intentionally hidden *while the
+    // cooldown is still running* — see the countdown group below for what
+    // happens once it elapses.
     expect(find.text('Use device passcode instead'), findsNothing);
+
+    // The countdown ticker is now genuinely running; wind it down so the
+    // test does not end with a pending periodic Timer.
+    await tester.pumpAndSettle(const Duration(seconds: 31));
+  });
+
+  group('KHA-75 — the locked-out countdown actually counts down', () {
+    // A clock the test moves by hand, kept in lock-step with the fake-async
+    // clock that `tester.pump(duration)` advances. `DateTime.now()` is NOT
+    // advanced by `pump`, so without this the countdown text could never
+    // change in a widget test no matter how correct the code is — see
+    // `LockGateScreen.clock`'s doc comment.
+    late DateTime fakeNow;
+    DateTime clock() => fakeNow;
+
+    /// Advances both clocks together by [seconds] one second at a time, so
+    /// each `Timer.periodic` tick sees a correspondingly newer "now".
+    Future<void> tick(WidgetTester tester, int seconds) async {
+      for (int i = 0; i < seconds; i++) {
+        fakeNow = fakeNow.add(const Duration(seconds: 1));
+        await tester.pump(const Duration(seconds: 1));
+      }
+    }
+
+    setUp(() => fakeNow = DateTime(2026, 7, 28, 12));
+
+    testWidgets('the "retry in mm:ss" subtitle decrements once a second '
+        '(it used to be computed once and then sit frozen forever, because '
+        'the screen\'s Timer field was declared and disposed but never '
+        'started)', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          LockGateScreen(clock: clock),
+          AppLockState(
+            status: AppLockStatus.lockedOut,
+            lockedOutUntil: fakeNow.add(const Duration(seconds: 30)),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.textContaining('00:30'), findsOneWidget);
+
+      await tick(tester, 3);
+
+      expect(
+        find.textContaining('00:30'),
+        findsNothing,
+        reason: 'the countdown must move on from its initial value',
+      );
+      expect(find.textContaining('00:27'), findsOneWidget);
+
+      // Let the ticker stop itself so the test ends with no pending timers.
+      await tick(tester, 28);
+    });
+
+    testWidgets('once the cooldown elapses the retry affordance comes back, '
+        'so the user is not stranded on a dead screen until they '
+        'force-quit the app', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          LockGateScreen(clock: clock),
+          AppLockState(
+            status: AppLockStatus.lockedOut,
+            lockedOutUntil: fakeNow.add(const Duration(seconds: 2)),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Use device passcode instead'), findsNothing);
+
+      await tick(tester, 3);
+
+      expect(find.text('Use device passcode instead'), findsOneWidget);
+      expect(
+        find.textContaining('00:00'),
+        findsNothing,
+        reason: 'a spent countdown should not linger as "retry in 00:00"',
+      );
+      // The whole screen flips together — a "Too many attempts" headline
+      // sitting above a working retry button reads as a bug.
+      expect(find.text('Too many attempts'), findsNothing);
+      expect(find.text('Unlock to view your data'), findsOneWidget);
+    });
+
+    testWidgets('a null lockedOutUntil is treated as already elapsed, never '
+        'as an infinite lockout', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          LockGateScreen(clock: clock),
+          const AppLockState(status: AppLockStatus.lockedOut),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('Use device passcode instead'), findsOneWidget);
+    });
   });
 
   testWidgets('session-expired state shows the background-session banner', (

@@ -222,7 +222,28 @@ jobs:
         run: bash .github/scripts/check_money_type_ban.sh
 
   # ---------------------------------------------------------------------------
-  # 4b. ADR-003: SQLCipher encryption, exercised for real on Android.
+  # 4b. Everything that can only be proven on a real Android device.
+  #
+  # KHA-75 (2026-07-28) made this job run MORE than the one SQLCipher file
+  # it started with, and the reason is worth keeping: this job is the ONLY
+  # place in CI where Dart code meets the real Android platform, and the only
+  # place a Dart↔Kotlin platform-channel contract is genuinely exercised.
+  # KHA-75 was a channel-encoding mismatch (`Uint8List` sent,
+  # `java.util.List` expected) that broke the app lock on 100% of devices
+  # while every host-side test stayed green — because a fake MethodChannel
+  # never crosses the codec boundary. `integration_test/keystore_channel_test.dart`
+  # is the guard against a repeat, and it only guards anything if this job
+  # actually runs it.
+  #
+  # It runs `integration_test/all_on_device_tests.dart` — a single entry
+  # point that calls every suite's `main()` — and NOT the directory. Pointing
+  # `flutter test` at the directory was tried first and failed the job: it
+  # rebuilds and reinstalls the whole app once per FILE, and a cold
+  # `assembleDebug` measured 900.5s here, so the second file's build blew the
+  # script timeout. The aggregator means one build and one install however
+  # many suites exist. See that file: a new suite must be registered in it.
+  #
+  # ADR-003: SQLCipher encryption, exercised for real on Android.
   #
   # `flutter test` (job 1 above) runs on the HOST runner's Dart VM, where
   # this Android-only app has no genuine SQLCipher native library to load —
@@ -345,7 +366,11 @@ jobs:
   # materially. Both are deliberately out of scope of a timeout fix.
   # ---------------------------------------------------------------------------
   android-sqlcipher-integration-test:
-    name: "ADR-003: SQLCipher integration test (Android emulator)"
+    # Display name only — the job *id* above is what `needs:` and the
+    # aggregate `ci` check reference, so this rename is safe. It is worth
+    # doing because the job stopped being SQLCipher-only in KHA-75 and a
+    # name that lies about scope is how a job quietly stops being trusted.
+    name: "On-device integration tests (Android emulator): ADR-003 SQLCipher + ADR-004 Keystore channel"
     runs-on: ubuntu-latest
     # Without an explicit timeout this job inherits GitHub's 360-minute
     # default, and has previously hung (not failed — genuinely never
@@ -360,19 +385,27 @@ jobs:
     # `timeout-minutes` backstops:
     #
     #   setup steps, checkout -> flutter pub get (measured 1m23s)      3 min
-    #   attempt 1  — internal ceiling, see the step's own comment     27 min
+    #   attempt 1  — internal ceiling, see the step's own comment     31 min
     #   teardown between attempts (its own timeout-minutes: 2)         2 min
-    #   attempt 2  — internal ceiling, same                           27 min
+    #   attempt 2  — internal ceiling, same                           31 min
     #   "Fail the job if every attempt failed"                         1 min
     #   post steps (Post Flutter / Post Java / Post checkout)          1 min
     #                                                                -------
-    #   worst case                                                    61 min
-    #   declared                                                      62 min
+    #   worst case                                                    69 min
+    #   declared                                                      70 min
+    #
+    # KHA-75 re-derived the two 27s above as 31s. The script cap grew from
+    # 960s to 1200s because the cold `assembleDebug` this job's script is
+    # almost entirely made of has itself grown from 728.6s to 900.5s across
+    # a few weeks — see the step's own comment for both measurements and for
+    # the run where the old cap fired. Nothing about a healthy run got
+    # slower: these are ceilings, and the expected duration is still the
+    # 13-18 min recorded below.
     #
     # Read the two numbers this produces, because they are NOT the same
     # number and conflating them is what KHA-67 was:
-    #   - 62 min is when GitHub starts cancelling this job.
-    #   - up to 67 min is the worst observed wall clock, because GitHub
+    #   - 70 min is when GitHub starts cancelling this job.
+    #   - up to 75 min is the worst observed wall clock, because GitHub
     #     force-terminates 5 minutes after cancellation begins if the runner
     #     cannot stop the step (this is exactly the 55 -> 60 gap on job
     #     90343139912). Never read a `timeout-minutes` here as a wall clock.
@@ -384,22 +417,26 @@ jobs:
     #     a boot that times out means the script never runs? Because the
     #     expensive case is not a boot that FAILS — it is a boot that is slow
     #     and then SUCCEEDS (4m59s is legal), followed by a script that
-    #     overruns. Those two do compose, so 27 is genuinely reachable and
+    #     overruns. Those two do compose, so 31 is genuinely reachable and
     #     not a stack of mutually exclusive failures.
     #
-    #   - Why is 27 so much larger than a healthy attempt? Because a healthy
-    #     attempt is ~13-14 min (measured: 12m48s on job 90359857337,
-    #     13m16s on job 90365606440, 13m34s on job 90369329440) and nearly
-    #     all of it is the script. SDK install + AVD create + boot together
-    #     take ~2 min in practice (job 90369329440: step start 18:07:22Z,
-    #     "Emulator booted." 18:09:19Z). The SDK/boot terms above are
-    #     ceilings, not expectations.
+    #   - Why is 31 so much larger than a healthy attempt? Because a healthy
+    #     attempt is ~13-18 min (measured: 12m48s on job 90359857337,
+    #     13m16s on job 90365606440, 13m34s on job 90369329440, and 18m on
+    #     job 90402282684's slower runner) and nearly all of it is the
+    #     script. SDK install + AVD create + boot together take ~2 min in
+    #     practice (job 90369329440: step start 18:07:22Z, "Emulator
+    #     booted." 18:09:19Z). The SDK/boot terms above are ceilings, not
+    #     expectations. Note the spread in that first number: the same
+    #     script has cost anywhere from 12 to 18 minutes depending purely on
+    #     which runner it landed on, which is exactly why the cap needs real
+    #     headroom rather than a snug fit to the last measurement.
     #
     # If BOTH attempts skip past their internal ceilings and run all the way
-    # to their 30-minute step BACKSTOPS, the step budgets alone would sum to
-    # 3 + 30 + 2 + 30 + 1 + 1 = 67, which is over this job's 62 — so this job
+    # to their 34-minute step BACKSTOPS, the step budgets alone would sum to
+    # 3 + 34 + 2 + 34 + 1 + 1 = 75, which is over this job's 70 — so this job
     # timeout fires first and is what stops it. Deliberate: this is the
-    # outermost backstop. (That 67 and the 67-minute worst-case wall clock
+    # outermost backstop. (That 75 and the 75-minute worst-case wall clock
     # above are two different quantities that happen to coincide. Neither is
     # derived from the other.)
     #
@@ -420,7 +457,7 @@ jobs:
     # evidence that the budgets here are broken — check for that pair of log
     # lines first. Surviving this properly needs a retry at the JOB level
     # (re-running the workflow), which GitHub has no native primitive for.
-    timeout-minutes: 62
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
         with:
@@ -540,32 +577,48 @@ jobs:
       #      action's default is 600s; a healthy boot on these runners is
       #      well under a minute once the system image is installed, so 10
       #      minutes was pure dead time on the exact failure it exists for.
-      #   b. `timeout --kill-after=60s 960s` around `script` — the action has
-      #      no deadline of its own for the script phase, and the script
-      #      phase is where the time actually goes (a cold
-      #      `assembleDebug` measured 728.6s = 12.1 min on job 90326515099,
-      #      and it grows with the codebase). 960s = 16 min gives that
-      #      measurement ~4 min of headroom; the extra 60s escalates SIGTERM
-      #      to SIGKILL for anything that ignores the first signal. `timeout`
+      #   b. `timeout --kill-after=60s 1200s` around `script` — the action
+      #      has no deadline of its own for the script phase, and the script
+      #      phase is where the time actually goes. It is almost entirely one
+      #      cold `assembleDebug`, and that measurement is GROWING with the
+      #      codebase:
+      #                       job 90326515099   728.6s = 12.1 min
+      #                       job 90402282684   900.5s = 15.0 min
+      #      The old 960s (16 min) was chosen for the first of those and left
+      #      ~4 min of headroom. Against the second it left **60 seconds**,
+      #      and KHA-75 duly hit it: the SQLCipher suite passed, the runner
+      #      started building for a second test file, and `timeout` fired
+      #      (exit 124). 1200s = 20 min restores ~5 min of headroom against
+      #      the current measurement. Re-measure and re-raise this when the
+      #      build grows again — it will. The extra 60s escalates SIGTERM to
+      #      SIGKILL for anything that ignores the first signal. `timeout`
       #      exits 124 on expiry, so the action fails normally and the step's
       #      outcome is a plain `failure` — no runner-level kill needed.
-      #   c. `timeout-minutes: 30` — a BACKSTOP ONLY, and it should never
+      #
+      #      The structural half of that fix is `integration_test/
+      #      all_on_device_tests.dart`: `flutter test` rebuilds and
+      #      reinstalls the app once PER FILE, so pointing this script at a
+      #      directory made every new suite cost another ~15-minute build.
+      #      Pointing it at one aggregating entry point means one build and
+      #      one install however many suites exist. Read that file before
+      #      adding a suite; it must be registered there.
+      #   c. `timeout-minutes: 34` — a BACKSTOP ONLY, and it should never
       #      fire. It exists for the case where (a) and (b) themselves wedge.
       #
       # Internal ceiling per attempt, which is what the job budget above is
       # summed from:
       #   SDK + system image install, AVD create                       4 min
       #   emulator boot          (capped by emulator-boot-timeout: 300) 5 min
-      #   script       (capped by timeout 960s, +60s kill escalation)  17 min
+      #   script      (capped by timeout 1200s, +60s kill escalation)  21 min
       #   the action's own emulator teardown                            1 min
       #                                                               -------
-      #                                                                27 min
-      # and the step backstop is 30, i.e. 3 min above that ceiling.
+      #                                                                31 min
+      # and the step backstop is 34, i.e. 3 min above that ceiling.
       - name: "Run the SQLCipher integration test on a headless Android emulator (attempt 1 of 2)"
         id: emulator_attempt_1
         if: steps.detect.outputs.exists == 'true' && (github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true')
         continue-on-error: true
-        timeout-minutes: 30
+        timeout-minutes: 34
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -584,7 +637,7 @@ jobs:
           # rather than "whatever the device profile happens to default to".
           disk-size: 4096M
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: timeout --kill-after=60s 960s flutter test integration_test/db_encryption_test.dart -d emulator-5554
+          script: timeout --kill-after=60s 1200s flutter test integration_test/all_on_device_tests.dart -d emulator-5554
 
       # KHA-67 defect 3: without this step, attempt 2 does not get a fresh
       # emulator — it silently re-attaches to attempt 1's. Job 90326515099's
@@ -639,7 +692,7 @@ jobs:
           (github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true') &&
           steps.emulator_attempt_1.outcome == 'failure'
         continue-on-error: true
-        timeout-minutes: 30
+        timeout-minutes: 34
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -657,7 +710,7 @@ jobs:
           emulator-boot-timeout: 300
           disk-size: 4096M
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: timeout --kill-after=60s 960s flutter test integration_test/db_encryption_test.dart -d emulator-5554
+          script: timeout --kill-after=60s 1200s flutter test integration_test/all_on_device_tests.dart -d emulator-5554
 
       - name: Fail the job if every attempt failed
         if: >
