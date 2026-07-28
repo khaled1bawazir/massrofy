@@ -68,6 +68,13 @@ jobs:
   flutter-build-test:
     name: flutter build & test
     runs-on: ubuntu-latest
+    # KHA-65: this job and no-network-permission-guard had no explicit
+    # timeout and inherited GitHub's 360-minute default, exactly the class
+    # of bug KHA-62 already fixed for the emulator job -- both have now
+    # hung in_progress (not failed) on a docs-only PR that can't possibly
+    # affect either. Observed healthy duration is under 15 min; 30 is
+    # headroom, not a squeeze.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -153,6 +160,11 @@ jobs:
   dependency-scan:
     name: dependency & security scan
     runs-on: ubuntu-latest
+    # KHA-65: same "no explicit timeout" gap as the other jobs. Observed
+    # duration is under 5 min; `go install` fetching over the network is
+    # the one step here with any real variance, so this has more headroom
+    # than its normal runtime, not zero.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -191,6 +203,11 @@ jobs:
   money-type-guard:
     name: "ADR-002: money-type guard (double/num ban)"
     runs-on: ubuntu-latest
+    # A grep-based shell script with no network/emulator dependency; this is
+    # generous headroom purely for consistency with every other job in this
+    # file now having an explicit timeout (KHA-65), not because this one has
+    # ever been slow.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - name: Run ADR-002 grep guard
@@ -465,6 +482,11 @@ jobs:
   no-network-permission-guard:
     name: "ADR-001: no-network release manifest guard"
     runs-on: ubuntu-latest
+    # KHA-65: no explicit timeout previously -- this is the second job
+    # (with flutter-build-test) observed hanging in_progress for 65+ min on
+    # a docs-only diff it cannot be affected by. Observed healthy duration
+    # is under 10 min.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -493,6 +515,7 @@ jobs:
   ci:
     name: ci
     if: always()
+    timeout-minutes: 5
     needs:
       - flutter-build-test
       - dependency-scan
