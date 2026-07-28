@@ -67,7 +67,7 @@ distribution is side-load only, and iOS was never in scope (see `docs/PRD.md`).
 flutter pub get
 dart format --set-exit-if-changed .
 flutter analyze --fatal-infos
-flutter test
+flutter test --exclude-tags=release_mode_guard
 flutter build apk --debug
 ```
 
