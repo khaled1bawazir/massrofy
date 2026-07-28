@@ -42,11 +42,14 @@ respect to money.** It observes; it never moves a riyal.
 There is no backend, no server, and no `INTERNET` permission in the release
 build — enforced by CI, not just claimed. Everything (SMS parsing,
 categorization, storage) runs on-device in Flutter/Dart. The local database is
-SQLCipher-encrypted; the app lock is cryptographic, not cosmetic (losing
-biometric auth means the database physically cannot open); money is exact
-decimal end to end, never floating point; every ledger mutation writes an
-append-only audit entry. See `docs/architecture.md` for the full ADR — every
-decision states the alternatives considered and why they lost.
+SQLCipher-encrypted; the app lock is cryptographic, not cosmetic — failing or
+cancelling authentication means the DB Master Key is never unwrapped, so the
+database physically cannot be opened, not merely a route guard the UI enforces
+(losing biometric enrollment itself has a documented recovery path via a
+passphrase-derived key, so that specific case is not data loss). Money is
+exact decimal end to end, never floating point; every ledger mutation writes
+an append-only audit entry. See `docs/architecture.md` for the full ADR —
+every decision states the alternatives considered and why they lost.
 
 ## Status
 
@@ -57,11 +60,12 @@ plan and `docs/PRD.md` for the complete requirements.
 
 ## Building it
 
-Flutter `>=3.35.0` / Dart SDK `^3.10.0`, Android only (no `ios/` target — see
-`docs/architecture.md` for why).
+Flutter `>=3.35.0` / Dart SDK `^3.10.0`, Android only — no `ios/` target;
+distribution is side-load only, and iOS was never in scope (see `docs/PRD.md`).
 
 ```
 flutter pub get
+dart format --set-exit-if-changed .
 flutter analyze --fatal-infos
 flutter test
 flutter build apk --debug
@@ -73,10 +77,13 @@ flutter build apk --debug
   (encrypted storage, DAOs), `features/` (ingestion, parsing, security),
   `presentation/` (screens, providers, l10n).
 - `android/` — the one platform target.
-- `test/` — unit, widget, and fixture-corpus tests.
+- `assets/rule_packs/` — the data-driven, per-bank SMS parsing rules (add a
+  bank here, not in code).
+- `test/` — unit, widget, and fixture-corpus tests. `integration_test/` holds
+  the device/emulator-only tests (e.g. the SQLCipher encryption check).
 - `docs/` — the product record: `PRD.md`, `architecture.md`, `brand.md`,
-  `design.md`, `mockups/`, `test-plan.md`, `defects.md`. This is the paper
-  trail for every decision in the app.
+  `design.md`, `mockups/`, `build-plan.md`, `test-plan.md`, `defects.md`. This
+  is the paper trail for every decision in the app.
 
 ## How this gets built
 
