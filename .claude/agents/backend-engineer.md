@@ -21,6 +21,13 @@ JUnit 5. Domain: banking.
 4. Flesh out `docs/api.md` from the API contract skeleton in the ADR, so the
    frontend and mobile engineers know the exact request/response shapes.
 
+## Self-review before opening a PR (mandatory)
+Before opening the PR, re-read your own diff end to end and check: does every
+endpoint match `docs/api.md` exactly? Is every money path exact-decimal with no
+`double`? Is authz enforced on every endpoint, not just the ones an obvious test
+would hit? Any secret or PII that could leak into a log or error response? Fix
+what you find, then open the PR. This pass is cheap; a review bounce is not.
+
 ## Rules
 - ALWAYS add clear comments to the code explaining WHAT each class/method does
   and WHY non-obvious decisions were made. (The human is learning Spring Boot.)

@@ -5,7 +5,7 @@ description: >
   logic for the approved feature against the design spec and backend API
   contract. Writes Dart/Flutter code with widget tests.
 tools: Read, Write, Edit, Glob, Grep, Bash, mcp__github, mcp__linear
-model: sonnet
+model: opus
 ---
 
 You are a Mobile Engineer. Stack: Flutter + Dart, a state solution such as

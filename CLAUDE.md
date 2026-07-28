@@ -51,10 +51,10 @@ Each subagent has isolated context and returns only a summary. Shared state live
 | brand-designer | sonnet | (writes files) | palette, type, logo direction, `docs/brand.md` (gate 2) |
 | ui-ux-designer | sonnet | (writes files) | `docs/design.md` + viewable HTML mockups (gate 2) |
 | design-critic | opus | (reads files) | one critique round on mockups before you see them |
-| devops-engineer | sonnet | GitHub | CI/CD pipeline + branch protection |
+| devops-engineer | opus | GitHub | CI/CD pipeline + branch protection |
 | backend-engineer | opus | GitHub, Linear | Java/Spring API + tests |
-| frontend-engineer | sonnet | GitHub, Linear | React web |
-| mobile-engineer | sonnet | GitHub, Linear | Flutter |
+| frontend-engineer | opus | GitHub, Linear | React web |
+| mobile-engineer | opus | GitHub, Linear | Flutter |
 | qa-tester | opus | GitHub, Linear | tests + contract stage + security attacks, gates merges |
 | code-reviewer | opus | GitHub, Linear | reviews + MERGES PRs on green CI |
 | production-support | haiku | local | log triage, raises bugs |
@@ -84,15 +84,21 @@ event-triggered GitHub Action on the `bug` label, a cron sweep, or manual runs.
 Headless runs use `claude -p ... --dangerously-skip-permissions` on a controlled
 machine only.
 
-## Model strategy (top-tier output, cost-aware)
-Opus where mistakes are expensive or judgment gates quality: product-owner,
-manager (conducts every phase), solution-architect, backend-engineer (money/auth
-logic), qa-tester (tests + security attacks), design-critic, code-reviewer.
-Sonnet for volume work with a guardrail: frontend/mobile (mandatory self-review
-pass before PR), ui-ux-designer (opus critic reviews its output), brand-designer,
-devops. Haiku for production-support triage. Quality loops are SINGLE-round by
-design (one critique, one self-review) so costs stay bounded. The manager logs
-per-phase cost notes in `docs/build-log.md`.
+## Model strategy (top-tier output; deliberately not cost-optimal)
+Opus everywhere code or judgment can introduce a defect: product-owner, manager
+(conducts every phase), solution-architect, every engineer (devops, backend,
+frontend, mobile), qa-tester (tests + security attacks), design-critic,
+code-reviewer. This is a deliberate call, made after a live security-relevant
+defect (domain-separation of a dedup HMAC key from the audit-chain key) surfaced
+in engineer-authored code under review — fewer defects reaching review is worth
+more here than the token cost of a smaller model. Sonnet stays only for
+low-judgment file generation: ui-ux-designer (opus critic reviews its output) and
+brand-designer. Haiku for production-support triage. The self-review pass before
+PR (frontend/mobile/backend) and the design-critic round stay in place as a
+second, independent-minded check even on opus output — the guardrail is cheap
+regardless of model tier. Quality loops are SINGLE-round by design (one critique,
+one self-review) so costs stay bounded. The manager logs per-phase cost notes in
+`docs/build-log.md` so the human can see what this choice costs over time.
 
 ## Team memory
 `docs/lessons.md` — the manager appends a retrospective after every build; agents
