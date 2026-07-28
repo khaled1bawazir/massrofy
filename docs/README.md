@@ -9,9 +9,13 @@ Expected files as a project progresses:
 - `brand.md`        brand-designer       (gate 2: approve before build)
 - `design.md`       ui-ux-designer       (gate 2: approve before build)
 - `mockups/`        ui-ux-designer       (viewable HTML screens — open index.html)
+- `design-system/`  human (Penpot export) (studio tokens the brand-designer reuses)
 - `api.md`         backend-engineer (the contract web + mobile build against)
 - `test-plan.md`   qa-tester        (acceptance-criteria traceability matrix)
 - `defects.md`     qa-tester
+- `build-log.md`    manager              (status + cost per phase)
+- `design-critique.md` design-critic     (one critique round per design)
+- `lessons.md`      manager              (compounding memory across builds)
 - `incidents/`     production-support
 
 Keep this folder in version control — it's the paper trail for the whole build.

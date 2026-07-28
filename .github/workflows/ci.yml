@@ -22,6 +22,14 @@
 #      .github/CI_CD.md) — one required check name, however many jobs run
 #      inside it.
 #
+# KHA-62 (2026-07-28): the Android emulator job (4b below) boots a real,
+# nested-KVM-virtualized emulator on a shared GitHub-hosted runner, which is
+# intermittently flaky in ways unrelated to this repo's code (QEMU hangs
+# mid-boot). It now (a) only runs on a PR when the PR actually touches
+# android/, lib/, integration_test/, or pubspec.*, and (b) retries its
+# emulator-boot step up to 3 times before failing the job for real. See the
+# job's own comment block for the evidence and reasoning.
+#
 # All four content jobs (1-4) are written to be safe to run on this repo
 # *before* the Flutter project exists (mobile-engineer's P1 scaffold): they
 # detect the absence of pubspec.yaml / lib/ / android/ and skip cleanly rather
@@ -200,13 +208,76 @@ jobs:
   # integration_test/db_encryption_test.dart against it, where
   # `sqlcipher_flutter_libs`' precompiled Android binary genuinely is
   # present — the exact same binary the shipped app uses. If SQLCipher is
-  # ever misconfigured, this job fails; it never silently skips.
+  # ever misconfigured on code this job actually runs against, this job
+  # fails; it never silently skips *that*. It DOES legitimately skip its
+  # real work in two cases, both intentional (see KHA-62):
+  #   - pubspec.yaml doesn't exist yet (pre-scaffold repo state, same as
+  #     every other job here), or
+  #   - on a pull_request, this PR's diff doesn't touch anything this job
+  #     could possibly affect (android/, lib/, integration_test/,
+  #     pubspec.yaml/.lock, or this workflow file). A README-only or
+  #     docs-only PR gains nothing from booting an emulator, and every run of
+  #     this job is a real, non-trivial chance of hitting the flakiness
+  #     described below. Push events (merges to main) are NOT path-filtered —
+  #     every merge still gets the real emulator run, since that's the
+  #     lowest-frequency, highest-stakes trigger and defense-in-depth is
+  #     worth the extra minutes there.
+  #
+  # KHA-62 — known flakiness and how this job now handles it:
+  # reactivecircus/android-emulator-runner boots a nested-KVM-virtualized
+  # Android emulator inside GitHub's shared, standard (2-vCPU) runner VM.
+  # Twice now, on two different PRs, this job has failed with the emulator's
+  # QEMU process hanging mid-boot and never recovering:
+  #   ERROR | detected a hanging thread 'QEMU2 main loop'. No response for ...
+  #   ERROR | detected a hanging thread 'QEMU2 CPU0 thread'. No response for ...
+  #   ##[error]The runner has received a shutdown signal...
+  # Once under contention from other PRs' CI running concurrently, once with
+  # no other PR CI running at all — so runner contention alone doesn't
+  # explain it; this is a documented, general pain point of this action on
+  # GitHub's shared standard runners (nested virtualization getting starved
+  # of CPU time by the host). It is NOT diff-related: one hang happened on a
+  # docs-only PR, the other on a CI-workflow-only PR, both well before the
+  # Dart test itself ever ran. The exact same job has also passed cleanly
+  # many times (12m57s-15m02s), so this is genuine intermittent flakiness,
+  # not a systemic break — which is exactly the situation a retry fixes: a
+  # hang that doesn't resolve is far less likely to recur 2-3 times in a row
+  # than once. There is no input on the action itself that makes QEMU immune
+  # to this, and GitHub Actions has no native "retry this step" primitive for
+  # a `uses:` step, so the retry is done by hand below: up to 3 attempts of
+  # the same step, each skipped once an earlier one has already succeeded.
+  #
+  # Considered and NOT done here:
+  #   - Changing api-level/target/arch/profile: the failure is a QEMU-level
+  #     hang during boot, not something specific to this combination; no
+  #     evidence points at it being the cause.
+  #   - GitHub's larger/paid runners (more vCPUs materially reduces nested-
+  #     virtualization contention and would likely help) — left as a flagged
+  #     option, not implemented, since it costs money and is an org billing
+  #     decision, not a workflow-file decision.
   # ---------------------------------------------------------------------------
   android-sqlcipher-integration-test:
     name: "ADR-003: SQLCipher integration test (Android emulator)"
     runs-on: ubuntu-latest
+    # Without an explicit timeout this job inherits GitHub's 360-minute
+    # default, and has previously hung (not failed — genuinely never
+    # completed) for 2+ hours on the boot flakiness described above, which
+    # silently blocks every merge behind it since a required check stuck
+    # `pending` is indistinguishable from "still running fine."
+    #
+    # Budget: ~5 min of setup steps (checkout/detect/filter/KVM perms/disk
+    # cleanup/Java/Flutter/pub get — all fast and not implicated in any
+    # observed failure) + up to 3 emulator-step attempts x 15 min each
+    # (45 min) = 50 min ceiling, rounded up to 55 for margin. A healthy run
+    # still finishes in ~13-15 minutes exactly as it always has; this bound
+    # only matters when attempts are genuinely hanging.
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history, not the default shallow fetch-depth: 1 — the path
+          # filter below diffs this PR's head against its base commit, which
+          # requires both commits to actually be present locally.
+          fetch-depth: 0
 
       - name: Check whether the Flutter project exists yet
         id: detect
@@ -218,12 +289,37 @@ jobs:
             echo "No pubspec.yaml at repo root yet — nothing to run. Will activate once the Flutter project exists."
           fi
 
+      # KHA-62 item 3: on a pull_request, only actually run this job's
+      # (slow, occasionally flaky) emulator work when the PR touches
+      # something it could plausibly affect. Hand-rolled with `git diff`
+      # rather than a third-party paths-filter action, consistent with the
+      # rest of this file's plain-bash "detect" steps and to avoid adding
+      # another supply-chain dependency for something this small.
+      # Push events (merges to main) are deliberately NOT filtered here —
+      # see the job-level comment above.
+      - name: Determine whether this PR touches files this job exercises
+        id: filter
+        if: steps.detect.outputs.exists == 'true' && github.event_name == 'pull_request'
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          echo "Changed files in this PR:"
+          echo "$CHANGED_FILES"
+          if echo "$CHANGED_FILES" | grep -Eq '^(android/|lib/|integration_test/|pubspec\.(yaml|lock)$|\.github/workflows/ci\.yml$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "-> relevant: this PR touches android/, lib/, integration_test/, pubspec.*, or ci.yml itself. Running the real emulator job."
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "-> not relevant: this PR touches none of android/, lib/, integration_test/, pubspec.*, or ci.yml. Skipping the emulator work — nothing in this diff could affect it."
+          fi
+
       # GitHub-hosted ubuntu runners support hardware-accelerated
       # (KVM-backed) Android emulators, but the kvm device node needs its
       # permissions relaxed first — this is the standard, documented setup
       # step for reactivecircus/android-emulator-runner on GitHub Actions.
       - name: Enable KVM group permissions
-        if: steps.detect.outputs.exists == 'true'
+        if: steps.detect.outputs.exists == 'true' && (github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true')
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
@@ -240,7 +336,7 @@ jobs:
       # any way. Everything removed here is unrelated to a Flutter/Android
       # build: the Android SDK itself and Java are untouched.
       - name: Free disk space for the Android emulator
-        if: steps.detect.outputs.exists == 'true'
+        if: steps.detect.outputs.exists == 'true' && (github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true')
         run: |
           echo "Disk before cleanup:"
           df -h /
@@ -253,25 +349,39 @@ jobs:
           df -h /
 
       - name: Set up Java (required by the Android toolchain)
-        if: steps.detect.outputs.exists == 'true'
+        if: steps.detect.outputs.exists == 'true' && (github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true')
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Flutter
-        if: steps.detect.outputs.exists == 'true'
+        if: steps.detect.outputs.exists == 'true' && (github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true')
         uses: subosito/flutter-action@v2
         with:
           channel: ${{ env.FLUTTER_CHANNEL }}
           cache: true
 
       - name: flutter pub get
-        if: steps.detect.outputs.exists == 'true'
+        if: steps.detect.outputs.exists == 'true' && (github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true')
         run: flutter pub get
 
-      - name: Run the SQLCipher integration test on a headless Android emulator
-        if: steps.detect.outputs.exists == 'true'
+      # --- KHA-62: retry the flaky emulator boot, up to 3 attempts --------
+      # `continue-on-error: true` on attempts 1-2 means a failed attempt does
+      # NOT fail the job by itself — it only lets the next attempt run
+      # (guarded by `steps.emulator_attempt_N.outcome == 'failure'`, so a
+      # SUCCESSFUL attempt short-circuits every later one via `if:`, and the
+      # AVD/SDK caches from the failed attempt are reused since
+      # `force-avd-creation: false` and nothing wipes the runner between
+      # attempts). The explicit "Fail the job if every attempt failed" step
+      # after this block is what actually fails the job — this block by
+      # itself would otherwise let the job report success even if the
+      # emulator never once booted successfully.
+      - name: "Run the SQLCipher integration test on a headless Android emulator (attempt 1 of 3)"
+        id: emulator_attempt_1
+        if: steps.detect.outputs.exists == 'true' && (github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true')
+        continue-on-error: true
+        timeout-minutes: 15
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -290,6 +400,64 @@ jobs:
           disk-size: 4096M
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: flutter test integration_test/db_encryption_test.dart -d emulator-5554
+
+      - name: "Run the SQLCipher integration test on a headless Android emulator (attempt 2 of 3 — retry after attempt 1 failed)"
+        id: emulator_attempt_2
+        if: >
+          steps.detect.outputs.exists == 'true' &&
+          (github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true') &&
+          steps.emulator_attempt_1.outcome == 'failure'
+        continue-on-error: true
+        timeout-minutes: 15
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          disable-spellchecker: true
+          force-avd-creation: false
+          disk-size: 4096M
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: flutter test integration_test/db_encryption_test.dart -d emulator-5554
+
+      - name: "Run the SQLCipher integration test on a headless Android emulator (attempt 3 of 3 — final retry after attempt 2 failed)"
+        id: emulator_attempt_3
+        if: >
+          steps.detect.outputs.exists == 'true' &&
+          (github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true') &&
+          steps.emulator_attempt_2.outcome == 'failure'
+        continue-on-error: true
+        timeout-minutes: 15
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          disable-spellchecker: true
+          force-avd-creation: false
+          disk-size: 4096M
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: flutter test integration_test/db_encryption_test.dart -d emulator-5554
+
+      - name: Fail the job if every attempt failed
+        if: >
+          always() &&
+          steps.detect.outputs.exists == 'true' &&
+          (github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true') &&
+          steps.emulator_attempt_1.outcome != 'success' &&
+          steps.emulator_attempt_2.outcome != 'success' &&
+          steps.emulator_attempt_3.outcome != 'success'
+        run: |
+          echo "All 3 attempts of the SQLCipher emulator integration test failed."
+          echo "attempt 1: ${{ steps.emulator_attempt_1.outcome }}"
+          echo "attempt 2: ${{ steps.emulator_attempt_2.outcome }}"
+          echo "attempt 3: ${{ steps.emulator_attempt_3.outcome }}"
+          echo "This is very unlikely to be transient boot flakiness (KHA-62) three times in a row — treat this as a genuine failure and check the logs above for each attempt."
+          exit 1
 
   # ---------------------------------------------------------------------------
   # 4. ADR-001: release build must never declare INTERNET / ACCESS_NETWORK_STATE.

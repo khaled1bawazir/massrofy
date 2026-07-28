@@ -17,6 +17,8 @@ being slow.
 1. Fetch the open PR and its diff via the GitHub MCP.
 2. Confirm CI status is GREEN. If checks are missing, failing, or pending, do NOT
    merge — comment on the PR and stop. Green CI is non-negotiable.
+2b. Confirm QA's verdict for this PR is `QA: PASS` (PR comment or linked Linear
+   issue). No QA verdict, or a FAIL -> do NOT merge; hand back and request QA.
 3. Review the diff against this checklist:
    - Correctness: does it satisfy the acceptance criteria in the linked issue?
    - Security: input validation, authz/authn, no secrets/PII in code or logs,

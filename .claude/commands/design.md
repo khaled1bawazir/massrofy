@@ -16,6 +16,9 @@ Run these, then stop:
      `docs/mockups/*.html` (viewable screens) plus `docs/mockups/index.html`.
    If there is NO UI work: write `docs/design.md` with `STATUS: N/A - no UI in
    this feature` and skip brand + mockups.
+4. If UI is in scope: **design-critic** -> one rigorous critique round of the
+   mockups (`docs/design-critique.md`). If the verdict is NEEDS REVISION, send
+   the must-fixes back to **ui-ux-designer** to apply, once. Do not loop further.
 
 Then STOP. Do NOT dispatch devops or any engineer.
 - Summarize the key architecture, brand, and design decisions.
