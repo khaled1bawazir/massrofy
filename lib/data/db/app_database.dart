@@ -56,8 +56,9 @@ class AppDatabase extends _$AppDatabase {
   /// | 1 | P1 | audit, raw_message, minimal transactions, settings |
   /// | 2 | P2 | ingest watermark; SMS provenance, FX and dedup columns on transactions; unparsed diagnostics on raw_message |
   /// | 3 | P3a | `bank` + `instrument` tables (KHA-23); instrument FK, counterparty, remaining balance, provenance detail and `deleted_at` on transactions (KHA-25) |
+  /// | 4 | P3b-1 | FX rate date/source/pending (KHA-27, KHA-70) and internal-transfer link + state (KHA-29) on transactions |
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -125,6 +126,42 @@ class AppDatabase extends _$AppDatabase {
           transactions.remainingBalanceMinor,
           transactions.provenanceDetail,
           transactions.deletedAt,
+        ]) {
+          await m.addColumn(transactions, column);
+        }
+      }
+
+      if (from < 4) {
+        // P3b-1 — what a period total *means* (KHA-27, KHA-28, KHA-29,
+        // KHA-70).
+        //
+        // Five columns, no data backfill, and the absence of a backfill is
+        // the interesting part:
+        //
+        //  - `fx_rate_date` / `fx_rate_source` stay NULL on every existing
+        //    row. That is the honest value: those rows were written by a
+        //    build that never recorded a rate date, so we do not know one.
+        //    Deriving `occurredAt` into them retroactively would invent
+        //    provenance for figures nobody recorded provenance for — the
+        //    opposite of what KHA-70 asked for.
+        //  - `conversion_pending` defaults to false, which is right for every
+        //    existing row: schema v3's only foreign-currency path came from
+        //    the two online-purchase rules, both of which capture the bank's
+        //    inline converted amount, so nothing already stored is pending.
+        //    A v3 row that somehow lacked both is still handled correctly at
+        //    read time, because `BaseCurrencyConverter` decides from the data
+        //    it finds rather than from this flag.
+        //  - `internal_transfer_*` stay NULL, meaning "nobody has ruled on
+        //    this", which lets the read-time detector classify historic
+        //    transfers on the same evidence as new ones. Backfilling a state
+        //    here would freeze today's detector output into the database and
+        //    make a later improvement unable to correct it.
+        for (final GeneratedColumn<Object> column in <GeneratedColumn<Object>>[
+          transactions.fxRateDate,
+          transactions.fxRateSource,
+          transactions.conversionPending,
+          transactions.internalTransferGroupId,
+          transactions.internalTransferState,
         ]) {
           await m.addColumn(transactions, column);
         }

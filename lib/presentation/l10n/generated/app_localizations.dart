@@ -835,6 +835,144 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Categorisation comes later — this will be saved as Uncategorised and you can categorise it from the list.'**
   String get completeCategoryDeferred;
+
+  /// The sign convention's user-facing contract (defect O-QA-2, lib/core/money/sign_convention.dart). A minus sign is never interpreted as 'this is a refund' — the direction control says that.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter an amount greater than zero, then choose Money in or Money out'**
+  String get amountMustBePositive;
+
+  /// S-11 field label — AC-B9.3 requires the rate AND its date to be inspectable (KHA-70).
+  ///
+  /// In en, this message translates to:
+  /// **'Rate date'**
+  String get txnFieldFxRateDate;
+
+  /// Shown in place of a rate date the message never stated. An undated rate must say so rather than look authoritative (KHA-70).
+  ///
+  /// In en, this message translates to:
+  /// **'Date unknown'**
+  String get txnFxRateDateUnknown;
+
+  /// S-11 field label — where the conversion rate came from (ADR-009).
+  ///
+  /// In en, this message translates to:
+  /// **'Rate source'**
+  String get txnFieldFxRateSource;
+
+  /// ExchangeRateSource.smsImplied.
+  ///
+  /// In en, this message translates to:
+  /// **'Implied by the bank\'s own converted amount'**
+  String get txnFxSourceSmsImplied;
+
+  /// ExchangeRateSource.smsStated.
+  ///
+  /// In en, this message translates to:
+  /// **'Stated in the bank\'s message'**
+  String get txnFxSourceSmsStated;
+
+  /// ExchangeRateSource.user.
+  ///
+  /// In en, this message translates to:
+  /// **'Entered by you'**
+  String get txnFxSourceUser;
+
+  /// ExchangeRateSource.carriedForward — marked as such per ADR-009.
+  ///
+  /// In en, this message translates to:
+  /// **'Most recent known rate, carried forward'**
+  String get txnFxSourceCarriedForward;
+
+  /// ADR-009 case 4. Shown on a foreign-currency transaction with no conversion, so its absence from the period total is visible rather than silent.
+  ///
+  /// In en, this message translates to:
+  /// **'Not converted to {currency} — this message stated no rate, and the app never invents one'**
+  String txnFxNotConverted(String currency);
+
+  /// design.md 3.3 — a transfer between the user's own accounts. Excluded from spend (AC-B11.1). Icon + these words; never colour alone (NFR-U4).
+  ///
+  /// In en, this message translates to:
+  /// **'Internal transfer'**
+  String get txnBadgeInternalTransfer;
+
+  /// AC-B11.2 — the app could not determine whether this is the user's own account, so it says so instead of guessing. Still counted as spend until confirmed.
+  ///
+  /// In en, this message translates to:
+  /// **'Possible internal transfer'**
+  String get txnBadgeInternalTransferCandidate;
+
+  /// S-11 explanation under the internal-transfer badge, so the exclusion is auditable (NFR-A6).
+  ///
+  /// In en, this message translates to:
+  /// **'Excluded from spend totals — moving money to yourself is not spending'**
+  String get txnInternalTransferExcludedNote;
+
+  /// AC-B11.2 / risk R-7 — the unknown state is made visible rather than resolved by a guess.
+  ///
+  /// In en, this message translates to:
+  /// **'Still counted as spend until you confirm this went to your own account'**
+  String get txnInternalTransferCandidateNote;
+
+  /// Transaction type label (salary_income). Recorded as income, never as spend (AC-B10.1).
+  ///
+  /// In en, this message translates to:
+  /// **'Salary / income'**
+  String get txnTypeSalaryIncome;
+
+  /// AC-B9.2 / ADR-009 — the explicit incompleteness line under a base-currency total. A total that quietly omits a purchase is worse than one that admits it is incomplete.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{1 transaction not converted} other{{count} transactions not converted}}'**
+  String totalsNotConverted(int count);
+
+  /// S-32 heading (AC-B10.3).
+  ///
+  /// In en, this message translates to:
+  /// **'Spent vs kept'**
+  String get spentVsKeptTitle;
+
+  /// S-32 row — net spend after refunds, excluding internal transfers.
+  ///
+  /// In en, this message translates to:
+  /// **'Spent'**
+  String get spentVsKeptSpent;
+
+  /// S-32 row — salary and third-party incoming transfers (AC-B10.1).
+  ///
+  /// In en, this message translates to:
+  /// **'Received'**
+  String get spentVsKeptIncome;
+
+  /// S-32 row — received minus spent (AC-B10.3). Negative means the user spent more than came in.
+  ///
+  /// In en, this message translates to:
+  /// **'Kept this period'**
+  String get spentVsKeptNet;
+
+  /// S-32 row — AC-B10.2. Neither spend nor income: the money is still the user's, it has stopped being traceable.
+  ///
+  /// In en, this message translates to:
+  /// **'Cash withdrawn'**
+  String get spentVsKeptCashOut;
+
+  /// S-32 row — US-B11's exclusion shown as a figure so it can be checked, not left as a silent gap.
+  ///
+  /// In en, this message translates to:
+  /// **'Internal transfers excluded'**
+  String get spentVsKeptInternalExcluded;
+
+  /// Shown when any component of the report omits an unconvertible transaction (ADR-009).
+  ///
+  /// In en, this message translates to:
+  /// **'Some transactions could not be converted, so these figures are incomplete'**
+  String get spentVsKeptIncomplete;
+
+  /// AC-B11.2 — unproven internal-transfer candidates and unclassifiable movements make the figures provisional.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{1 transaction needs review before these figures are final} other{{count} transactions need review before these figures are final}}'**
+  String spentVsKeptNeedsReview(int count);
 }
 
 class _AppLocalizationsDelegate

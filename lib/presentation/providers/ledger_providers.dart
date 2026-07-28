@@ -183,6 +183,44 @@ final StreamProvider<List<BankTreeNode>> bankTreeProvider =
       }
     });
 
+/// **S-32 — the period's spent-vs-kept breakdown (AC-B10.3).**
+///
+/// Derived from the same `watchLive()` stream the bank tree uses, so the
+/// headline figure on Home and the per-bank figures can never come from two
+/// different reads of the ledger. NFR-A6 again: one source, one arithmetic.
+///
+/// The internal-transfer detector is run over the **whole** live set here
+/// (`LedgerTotals.report` does it when `transfers` is omitted), which is the
+/// only slice in which both legs of a transfer are guaranteed to be visible.
+final StreamProvider<PeriodReport> periodReportProvider =
+    StreamProvider<PeriodReport>((Ref ref) async* {
+      final UnlockedDatabaseSession? session = await ref.watch(
+        unlockedDatabaseSessionProvider.future,
+      );
+      if (session == null) {
+        // Locked: there is no database to read, and the honest value is "no
+        // figures", not a stale cache of the last unlocked state (ADR-005).
+        yield PeriodReport.empty;
+        return;
+      }
+
+      final LedgerDaos? daos = await ref.watch(ledgerDaosProvider.future);
+      final PeriodRange period = ref.watch(ledgerPeriodProvider);
+
+      await for (final List<TransactionRow> rows
+          in session.transactionDao.watchLive()) {
+        final Map<int, LedgerInstrument> byId = <int, LedgerInstrument>{
+          if (daos != null)
+            for (final InstrumentRow row in await daos.instrumentDao.all())
+              row.id: toLedgerInstrument(row),
+        };
+        yield LedgerTotals.report(
+          toLedgerTransactions(rows, instrumentsById: byId),
+          period: period,
+        );
+      }
+    });
+
 /// KHA-64's S-19 write path, bound to the unlocked session.
 final FutureProvider<UnparsedCompletionService?>
 unparsedCompletionServiceProvider = FutureProvider<UnparsedCompletionService?>((

@@ -113,7 +113,21 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    // Two spinners now rather than one: since P3b-1 the screen also renders
+    // the Spent-vs-Kept card (AC-B10.3), which reads a provider hanging off
+    // the same unsettled session. Counting spinners was always a proxy —
+    // what this test actually exists to pin is the **absence of a premature
+    // answer**, so that is asserted directly.
+    expect(find.byType(CircularProgressIndicator), findsWidgets);
+    expect(
+      find.text('Encrypted datastore: open — audit trail ready'),
+      findsNothing,
+    );
+    expect(find.text('Encrypted datastore: unavailable'), findsNothing);
+    // …and, critically for a money screen, no figure at all while the data
+    // is unknown. A "0.00" shown during loading is a number the user may
+    // read and believe.
+    expect(find.textContaining('SAR'), findsNothing);
 
     // Clean up the never-completing future's pending timer expectations by
     // disposing the tree; nothing else to assert here.

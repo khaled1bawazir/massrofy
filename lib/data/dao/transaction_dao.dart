@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 
 import '../../core/money/currency_exponents.dart';
 import '../../core/money/money.dart';
+import '../../core/money/sign_convention.dart';
 import '../db/app_database.dart';
 import '../db/tables/transaction_table.dart';
 import 'audit_log_dao.dart';
@@ -221,6 +222,9 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
     Money? convertedAmount,
     Money? feeAmount,
     String? fxRate,
+    DateTime? fxRateDate,
+    String? fxRateSource,
+    bool conversionPending = false,
     Money? remainingBalance,
     String? merchantRawText,
     String? counterpartyName,
@@ -244,6 +248,13 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
     DateTime? now,
   }) {
     final DateTime timestamp = now ?? DateTime.now();
+    // Defence in depth for the sign convention: the pipeline already routes a
+    // negative or zero amount to the review queue rather than reaching here
+    // (see `IngestionPipeline._writeTransaction`), so this throw is for a
+    // future caller that forgets. Failing loudly at the write boundary beats
+    // a negative magnitude reaching a total three screens away, where it
+    // would silently invert the movement direction — defect O-QA-2's shape.
+    checkMovementAmount(amount, context: 'insertFromParsedSms');
     return transaction<int>(() async {
       final int id = await into(transactions).insert(
         TransactionsCompanion.insert(
@@ -268,6 +279,13 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
             feeAmount == null ? null : _toMinorUnitsBestEffort(feeAmount),
           ),
           fxRate: Value<String?>(fxRate),
+          // KHA-70 / AC-B9.3. All three are written from what the message
+          // supported and are left NULL/false otherwise — never defaulted, so
+          // "we do not know the rate date" stays distinguishable from "the
+          // rate date is today".
+          fxRateDate: Value<DateTime?>(fxRateDate),
+          fxRateSource: Value<String?>(fxRateSource),
+          conversionPending: Value<bool>(conversionPending),
           remainingBalanceAmount: Value<String?>(
             remainingBalance?.toCanonicalString(),
           ),
@@ -386,6 +404,13 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
     DateTime? now,
   }) {
     final DateTime timestamp = now ?? DateTime.now();
+    // **This is defect O-QA-2's write path.** The S-19 form accepted a
+    // negative amount and let it invert the movement direction; KHA-26 owns
+    // the field-level validation and the error message, but the invariant
+    // itself belongs here, where every completion must pass through it.
+    // `lib/core/money/sign_convention.dart` states the contract the form has
+    // to satisfy.
+    checkMovementAmount(amount, context: 'insertManualCompletion');
     return transaction<int>(() async {
       final int id = await into(transactions).insert(
         TransactionsCompanion.insert(

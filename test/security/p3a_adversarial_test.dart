@@ -464,33 +464,36 @@ void main() {
       );
     });
 
-    test(
-      'a NEGATIVE amount typed on S-19 is accepted and inverts the sign '
-      'of the movement — recorded as an observation, not an exploit',
-      () async {
-        // The direction control already expresses debit vs credit, so a typed
-        // "-50" is a second, redundant way to say "credit". It is only
-        // self-inflicted (single-user, offline app) but it means two different
-        // inputs produce the same ledger effect.
-        final int id = await completeWith(amount: '-50.00', currency: 'SAR');
-        final TransactionRow row = await transactionDao.byId(id);
+    test('a NEGATIVE amount can no longer reach the ledger — O-QA-2, closed at '
+        'the domain layer by P3b-1', () async {
+      // **This test used to assert the defect.** QA observed on PR #11 that
+      // a typed "-50" was accepted on S-19 and silently inverted the
+      // movement direction: the direction control already expresses debit
+      // vs credit, so the minus sign became a second, contradictory way of
+      // saying "credit", and the period total quietly went down by 50
+      // instead of up.
+      //
+      // KHA-28 settled the sign convention (amount is a non-negative
+      // magnitude; the sign lives in `direction` —
+      // `lib/core/money/sign_convention.dart`), and the DAO now enforces it
+      // at the write boundary. The field-level message on the S-19 form is
+      // KHA-26's half of the fix, in P3b-2; this asserts the half that
+      // makes the bad value unstorable regardless of which form is asking.
+      await expectLater(
+        completeWith(amount: '-50.00', currency: 'SAR'),
+        throwsA(isA<ArgumentError>()),
+      );
 
-        expect(row.amountAmount, '-50');
-        expect(row.direction, 'debit');
+      // Nothing was written. A rejected write that left a half-row behind
+      // would be a worse defect than the one being fixed.
+      expect(await transactionDao.all(), isEmpty);
+    });
 
-        final PeriodTotals totals = LedgerTotals.spend(
-          toLedgerTransactions(await transactionDao.all()),
-          period: PeriodRange.unbounded(),
-        );
-        expect(
-          totals.forCurrency('SAR')!.toCanonicalString(),
-          '-50',
-          reason:
-              'a debit of a negative amount reduces spend — see the QA note '
-              'in docs/test-plan.md §Epic B observations',
-        );
-      },
-    );
+    test('zero is still a valid amount — it is a different fact from unknown '
+        '(KHA-25), and the sign rule must not have swept it up', () async {
+      final int id = await completeWith(amount: '0', currency: 'SAR');
+      expect((await transactionDao.byId(id)).amountAmount, '0');
+    });
   });
 
   // ---------------------------------------------------------------------

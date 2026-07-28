@@ -30,6 +30,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:massrofy/data/db/app_database.dart';
 
 import '../../support/plain_test_database.dart';
+import 'schema_v4_migration_test.dart' show v4TransactionColumns;
 
 /// The columns v3 adds to `transactions`, in SQL naming.
 const List<String> _v3TransactionColumns = <String>[
@@ -67,8 +68,13 @@ void main() {
     setUp(() => db = openPlainTestDatabase());
     tearDown(() async => db.close());
 
-    test('reports schemaVersion 3', () {
-      expect(db.schemaVersion, 3);
+    test('is at least at v3', () {
+      // Deliberately `greaterThanOrEqualTo` rather than an equality on 3.
+      // This file owns *v3's* additions; the exact current version is
+      // asserted once, by the newest migration test (`schema_v4_...`), so
+      // shipping v5 does not mean editing every older migration test — which
+      // is how those tests end up being edited without being read.
+      expect(db.schemaVersion, greaterThanOrEqualTo(3));
     });
 
     test('creates the bank and instrument tables', () async {
@@ -184,7 +190,15 @@ void main() {
       await db.customStatement('PRAGMA foreign_keys = OFF;');
       await db.customStatement('DROP TABLE instrument;');
       await db.customStatement('DROP TABLE bank;');
-      for (final String column in _v3TransactionColumns) {
+      // Everything v3 **and later** added has to come off, not just v3's:
+      // `onCreate` built the *current* schema, and leaving a v4 column behind
+      // while claiming `user_version = 2` would make the v3→v4 branch fail
+      // with "duplicate column name" — a test failure that looks like a
+      // migration bug and is not one.
+      for (final String column in <String>[
+        ..._v3TransactionColumns,
+        ...v4TransactionColumns,
+      ]) {
         await db.customStatement(
           'ALTER TABLE transactions DROP COLUMN $column;',
         );

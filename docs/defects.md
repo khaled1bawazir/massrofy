@@ -110,6 +110,17 @@ for what did surface, correctly classified as risks and gaps rather than defects
   three §4.2 columns are still absent.
 - **Linear:** **KHA-70** (`Bug`), related to KHA-27 and KHA-25. Owner:
   mobile-engineer.
+- **Status: FIXED in P3b-1** (2026-07-29). Schema **v4** adds `fx_rate_date`,
+  `fx_rate_source` and `conversion_pending`; the parser writes all three from
+  what the message supports and leaves them NULL where it does not; the S-11 FX
+  block renders the rate date (or the literal words *"Date unknown"*) and the
+  rate source beside every rate. Both halves of the done check exist:
+  `test/widget/p3b_screens_test.dart` asserts a rate is never rendered without
+  one of the two, and `test/features/ledger/p3b_ingestion_totals_test.dart`
+  asserts a message stating no rate stores NULL rather than a default. The
+  migration deliberately backfills nothing — a backfilled rate date would be
+  fabricated provenance, which is this defect one level deeper
+  (`test/data/db/schema_v4_migration_test.dart`).
 
 ---
 
@@ -200,6 +211,21 @@ is a deliberate change rather than a silent one.
   control, or normalise sign + direction on save.
 - **Routed to:** KHA-26 (manual entry / edit — the issue that owns form
   validation, AC-B4.2). Not filed as a separate `bug`.
+- **Status: half fixed in P3b-1** (2026-07-29), and the half that is fixed is the
+  one that made the other half undecidable.
+  - **The domain half is closed.** KHA-28 settled the sign convention and it is
+    written out in full in `lib/core/money/sign_convention.dart`: an amount is a
+    non-negative magnitude, the sign lives in `direction`, and **zero stays
+    valid** (KHA-25 — zero and unknown are different facts). `TransactionDao`
+    now refuses a negative magnitude at the write boundary, and the ingestion
+    pipeline routes one to the review queue rather than storing it. The
+    adversarial test that used to assert this defect
+    (`test/security/p3a_adversarial_test.dart`) now asserts the fix.
+  - **The form half stays with KHA-26 (P3b-2):** the field-level error message
+    (`AppLocalizations.amountMustBePositive`, added here) and the "point at the
+    direction control" affordance. The contract KHA-26 must satisfy is
+    enumerated in the doc comment on `sign_convention.dart`, so it is building
+    against a settled decision rather than guessing what "negative" means.
 
 ---
 

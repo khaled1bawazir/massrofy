@@ -437,4 +437,97 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get completeCategoryDeferred =>
       'Categorisation comes later — this will be saved as Uncategorised and you can categorise it from the list.';
+
+  @override
+  String get amountMustBePositive =>
+      'Enter an amount greater than zero, then choose Money in or Money out';
+
+  @override
+  String get txnFieldFxRateDate => 'Rate date';
+
+  @override
+  String get txnFxRateDateUnknown => 'Date unknown';
+
+  @override
+  String get txnFieldFxRateSource => 'Rate source';
+
+  @override
+  String get txnFxSourceSmsImplied =>
+      'Implied by the bank\'s own converted amount';
+
+  @override
+  String get txnFxSourceSmsStated => 'Stated in the bank\'s message';
+
+  @override
+  String get txnFxSourceUser => 'Entered by you';
+
+  @override
+  String get txnFxSourceCarriedForward =>
+      'Most recent known rate, carried forward';
+
+  @override
+  String txnFxNotConverted(String currency) {
+    return 'Not converted to $currency — this message stated no rate, and the app never invents one';
+  }
+
+  @override
+  String get txnBadgeInternalTransfer => 'Internal transfer';
+
+  @override
+  String get txnBadgeInternalTransferCandidate => 'Possible internal transfer';
+
+  @override
+  String get txnInternalTransferExcludedNote =>
+      'Excluded from spend totals — moving money to yourself is not spending';
+
+  @override
+  String get txnInternalTransferCandidateNote =>
+      'Still counted as spend until you confirm this went to your own account';
+
+  @override
+  String get txnTypeSalaryIncome => 'Salary / income';
+
+  @override
+  String totalsNotConverted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count transactions not converted',
+      one: '1 transaction not converted',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get spentVsKeptTitle => 'Spent vs kept';
+
+  @override
+  String get spentVsKeptSpent => 'Spent';
+
+  @override
+  String get spentVsKeptIncome => 'Received';
+
+  @override
+  String get spentVsKeptNet => 'Kept this period';
+
+  @override
+  String get spentVsKeptCashOut => 'Cash withdrawn';
+
+  @override
+  String get spentVsKeptInternalExcluded => 'Internal transfers excluded';
+
+  @override
+  String get spentVsKeptIncomplete =>
+      'Some transactions could not be converted, so these figures are incomplete';
+
+  @override
+  String spentVsKeptNeedsReview(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count transactions need review before these figures are final',
+      one: '1 transaction needs review before these figures are final',
+    );
+    return '$_temp0';
+  }
 }

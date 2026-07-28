@@ -434,4 +434,102 @@ class AppLocalizationsAr extends AppLocalizations {
   @override
   String get completeCategoryDeferred =>
       'التصنيف يأتي لاحقاً — ستُحفظ المعاملة كـ«غير مصنفة» ويمكنك تصنيفها من قائمتها.';
+
+  @override
+  String get amountMustBePositive =>
+      'أدخل مبلغاً أكبر من صفر، ثم اختر «إيداع» أو «سحب»';
+
+  @override
+  String get txnFieldFxRateDate => 'تاريخ سعر الصرف';
+
+  @override
+  String get txnFxRateDateUnknown => 'التاريخ غير معروف';
+
+  @override
+  String get txnFieldFxRateSource => 'مصدر سعر الصرف';
+
+  @override
+  String get txnFxSourceSmsImplied =>
+      'مستنتج من المبلغ المحوَّل في رسالة البنك';
+
+  @override
+  String get txnFxSourceSmsStated => 'مذكور في رسالة البنك';
+
+  @override
+  String get txnFxSourceUser => 'أدخلته بنفسك';
+
+  @override
+  String get txnFxSourceCarriedForward => 'آخر سعر معروف، منقول من عملية سابقة';
+
+  @override
+  String txnFxNotConverted(String currency) {
+    return 'لم يُحوَّل إلى $currency — لم تذكر الرسالة سعر صرف، والتطبيق لا يخترع سعراً';
+  }
+
+  @override
+  String get txnBadgeInternalTransfer => 'تحويل داخلي';
+
+  @override
+  String get txnBadgeInternalTransferCandidate => 'قد يكون تحويلاً داخلياً';
+
+  @override
+  String get txnInternalTransferExcludedNote =>
+      'مستثنى من إجمالي الإنفاق — تحويل المال إلى حسابك ليس إنفاقاً';
+
+  @override
+  String get txnInternalTransferCandidateNote =>
+      'يُحتسب ضمن الإنفاق حتى تؤكد أنه إلى حسابك الخاص';
+
+  @override
+  String get txnTypeSalaryIncome => 'راتب / دخل';
+
+  @override
+  String totalsNotConverted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count معاملة لم تُحوَّل',
+      many: '$count معاملة لم تُحوَّل',
+      few: '$count معاملات لم تُحوَّل',
+      two: 'معاملتان لم تُحوَّلا',
+      one: 'معاملة واحدة لم تُحوَّل',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get spentVsKeptTitle => 'المصروف مقابل المتبقي';
+
+  @override
+  String get spentVsKeptSpent => 'المصروف';
+
+  @override
+  String get spentVsKeptIncome => 'الوارد';
+
+  @override
+  String get spentVsKeptNet => 'المتبقي في هذه الفترة';
+
+  @override
+  String get spentVsKeptCashOut => 'نقد مسحوب';
+
+  @override
+  String get spentVsKeptInternalExcluded => 'تحويلات داخلية مستثناة';
+
+  @override
+  String get spentVsKeptIncomplete =>
+      'تعذّر تحويل بعض المعاملات، لذلك هذه الأرقام غير مكتملة';
+
+  @override
+  String spentVsKeptNeedsReview(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count معاملة تحتاج مراجعة قبل اعتماد هذه الأرقام',
+      many: '$count معاملة تحتاج مراجعة قبل اعتماد هذه الأرقام',
+      few: '$count معاملات تحتاج مراجعة قبل اعتماد هذه الأرقام',
+      two: 'معاملتان تحتاجان مراجعة قبل اعتماد هذه الأرقام',
+      one: 'معاملة واحدة تحتاج مراجعة قبل اعتماد هذه الأرقام',
+    );
+    return '$_temp0';
+  }
 }

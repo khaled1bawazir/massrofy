@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../features/ledger/period_totals.dart';
 import '../../features/security/app_lock_controller.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../providers/app_providers.dart';
+import '../providers/ledger_providers.dart';
+import '../widgets/spent_vs_kept_card.dart';
 
 /// **P1 scope note:** the real Home dashboard (S-08,
 /// `docs/mockups/home.html`) — current-month total, review-count card,
@@ -48,6 +51,15 @@ class HomePlaceholderScreen extends ConsumerWidget {
             // database + audit-chain-key wiring actually ran, not a
             // user-facing feature (the real Home screen is P5 work).
             _DatabaseSessionStatus(sessionAsync: sessionAsync),
+            const SizedBox(height: 20),
+            // **P3b-1 — S-32's figure, made reachable.** design.md puts the
+            // full Spent-vs-Kept screen in P5, but AC-B10.3's arithmetic
+            // ships now, and a computation with no production call site is
+            // library code rather than shipped behaviour (the P1 review's
+            // finding). Rendering it here means the whole chain — unlock,
+            // decrypt, read the ledger, classify, convert, net — actually
+            // executes in the running app.
+            const _SpentVsKeptSection(),
             const SizedBox(height: 24),
             FilledButton.icon(
               onPressed: () =>
@@ -56,6 +68,46 @@ class HomePlaceholderScreen extends ConsumerWidget {
               label: const Text('Lock now'),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The four states design.md §3.4 requires of every screen section, for the
+/// one section on this screen that reads real data.
+///
+/// **Locked** is not a fifth branch here: while the app is locked
+/// `periodReportProvider` yields [PeriodReport.empty], because ADR-005 makes
+/// the lock cryptographic and there is genuinely no database to read. The
+/// empty state and the locked state look the same *and should* — in both, the
+/// honest statement is "no figures", not a cached number from last time.
+class _SpentVsKeptSection extends ConsumerWidget {
+  const _SpentVsKeptSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AsyncValue<PeriodReport> reportAsync = ref.watch(
+      periodReportProvider,
+    );
+    final AppLocalizations l10n = AppLocalizations.of(context);
+
+    return reportAsync.when(
+      data: (PeriodReport report) => SpentVsKeptCard(report: report),
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: SizedBox(
+          height: 16,
+          width: 16,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      ),
+      // A failed read must never render as "0.00" — a zero the user believes
+      // is worse than an error they can act on.
+      error: (Object error, StackTrace stackTrace) => Text(
+        l10n.totalsNoneForPeriod,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: Theme.of(context).colorScheme.error,
         ),
       ),
     );

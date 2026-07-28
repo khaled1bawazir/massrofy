@@ -18,7 +18,9 @@
 /// silently.
 library;
 
+import 'base_currency.dart';
 import 'instrument_identity.dart';
+import 'internal_transfer.dart';
 import 'ledger_transaction.dart';
 import 'period_totals.dart';
 
@@ -133,7 +135,19 @@ abstract final class BankTreeBuilder {
     required List<LedgerInstrument> instruments,
     required List<LedgerTransaction> transactions,
     required PeriodRange period,
+    String baseCurrencyCode = BaseCurrency.defaultCode,
   }) {
+    // **AC-B11.1 depends on this line being here and not one level down.**
+    //
+    // The two legs of an internal transfer live on two *different*
+    // instruments, so a detector run per instrument would never see a pair
+    // and every internal transfer would be counted as spend. It is analysed
+    // once over the whole set and the result is handed to each per-instrument
+    // total below — see `LedgerTotals.report`'s note on slicing.
+    final InternalTransferAnalysis transfers = InternalTransferDetector.analyze(
+      transactions,
+    );
+
     // Transactions grouped by instrument id once, rather than filtering the
     // whole list per instrument — with a few thousand transactions and a
     // handful of instruments the difference is real on a mid-range phone.
@@ -164,6 +178,8 @@ abstract final class BankTreeBuilder {
           instrumentById: instrumentById,
           byInstrument: byInstrument,
           period: period,
+          baseCurrencyCode: baseCurrencyCode,
+          transfers: transfers,
         ),
     ];
   }
@@ -174,6 +190,8 @@ abstract final class BankTreeBuilder {
     required Map<int, LedgerInstrument> instrumentById,
     required Map<int, List<LedgerTransaction>> byInstrument,
     required PeriodRange period,
+    required String baseCurrencyCode,
+    required InternalTransferAnalysis transfers,
   }) {
     final List<InstrumentSummary> accounts = <InstrumentSummary>[];
     final List<InstrumentSummary> cards = <InstrumentSummary>[];
@@ -186,7 +204,12 @@ abstract final class BankTreeBuilder {
 
       final InstrumentSummary summary = InstrumentSummary(
         instrument: instrument,
-        totals: LedgerTotals.spend(own, period: period),
+        totals: LedgerTotals.spend(
+          own,
+          period: period,
+          baseCurrencyCode: baseCurrencyCode,
+          transfers: transfers,
+        ),
         settlementAccountLabel: _labelForSettlement(
           instrument.settlementAccountId,
           instrumentById,
@@ -207,7 +230,12 @@ abstract final class BankTreeBuilder {
       // Computed over the same transactions the per-instrument figures came
       // from, so "the bank total equals the sum of its instruments" is true
       // by construction rather than by two independent queries agreeing.
-      totals: LedgerTotals.spend(bankTransactions, period: period),
+      totals: LedgerTotals.spend(
+        bankTransactions,
+        period: period,
+        baseCurrencyCode: baseCurrencyCode,
+        transfers: transfers,
+      ),
     );
   }
 

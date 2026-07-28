@@ -39,11 +39,20 @@ import 'package:drift/drift.dart';
 ///  - **`deletedAt`** — soft delete previously recorded *that* a row was
 ///    deleted but not *when*, which AC-B6.4 needs.
 ///
+/// **P3b-1 (KHA-27, KHA-28, KHA-29, KHA-70) adds the columns a period total
+/// needs to *mean* something:** the rest of the FX block (`fxRateDate`,
+/// `fxRateSource`, `conversionPending`) and the internal-transfer link
+/// (`internalTransferGroupId`, `internalTransferState`). KHA-28 needed no new
+/// column at all — see the note on `direction` below and the full statement of
+/// the sign convention in `lib/core/money/sign_convention.dart`.
+///
 /// **Still not here, deliberately:** foreign keys to `Category` and
 /// `Merchant` (P4 owns those tables), `isExcluded` and the restore UX
-/// (KHA-26, P3b), internal-transfer links (KHA-29), refund/fee parent links
-/// (KHA-28) and categorisation confidence (P4). Each arrives with the
-/// behaviour that gives it meaning, rather than as an unused column.
+/// (KHA-26, P3b-2), the fee's `parentTransactionId` child-row form (ADR-009's
+/// stronger variant of PRD §3.4's "own field" — the field form ships now
+/// because the parser produces one row per message, and the child-row form is
+/// a P4 reporting decision) and categorisation confidence (P4). Each arrives
+/// with the behaviour that gives it meaning, rather than as an unused column.
 ///
 /// The SQL table is named `transactions` (plural) rather than the singular
 /// domain word, specifically to avoid any ambiguity with SQLite's own
@@ -94,6 +103,58 @@ class Transactions extends Table {
   /// amount of money, so it is not a `Money` triple either.
   TextColumn get fxRate => text().nullable()();
 
+  // --- P3b-1: the rest of architecture §4.2's FX block (KHA-27, KHA-70) -----
+  //
+  // Schema v3 shipped `fxRate` alone, so the detail screen rendered a rate the
+  // user could not date — defect D-QA-2 / KHA-70. AC-B9.3 asks for the rate
+  // **and its date**, and ADR-009 asks for the source and for an explicit
+  // "not converted" state. All three land together, because a rate without a
+  // date and a provenance is exactly the authoritative-looking-but-unverifiable
+  // figure this app exists to avoid.
+
+  /// The date [fxRate] applies to.
+  ///
+  /// **NULL is a real, expected value** and must never be defaulted: it means
+  /// the message stated no date, which the UI renders as the words *"date
+  /// unknown"*. Storing `now()` here instead would fabricate a fact.
+  DateTimeColumn get fxRateDate => dateTime().nullable()();
+
+  /// `sms_implied` | `sms_stated` | `user` | `carried_forward` — ADR-009's
+  /// table, mirrored by `FxRateSource` in `features/ledger/base_currency.dart`.
+  TextColumn get fxRateSource => text().nullable()();
+
+  /// **ADR-009 case 4.** True for a foreign-currency transaction whose message
+  /// supplied neither a converted amount nor a rate.
+  ///
+  /// Such a row is excluded from base-currency totals and counted on an
+  /// explicit "N transactions not converted" line, so reconciliation is
+  /// *visibly* incomplete rather than silently wrong. Defaults to false, which
+  /// is correct for every existing row: a base-currency transaction is never
+  /// pending, and a foreign one that already stored a converted amount is not
+  /// either.
+  BoolColumn get conversionPending =>
+      boolean().withDefault(const Constant(false))();
+
+  // --- P3b-1: internal transfers (KHA-29, US-B11) ---------------------------
+
+  /// The pair this transaction belongs to (architecture §4.2
+  /// `InternalTransferLink.groupId`), when a link has been **persisted**.
+  ///
+  /// Read-time detection (`features/ledger/internal_transfer.dart`) derives
+  /// pairs without writing anything, because the two legs routinely arrive in
+  /// separate messages hours apart and a decision taken at ingestion would
+  /// have to be revisited when the second one lands. This column exists for
+  /// the user's own confirmation, which P3b-2 wires up.
+  TextColumn get internalTransferGroupId => text().nullable()();
+
+  /// `internal` | `candidate` | `external`, or NULL for "nobody has ruled on
+  /// this".
+  ///
+  /// A stored value **outranks** anything derived: it records a decision a
+  /// person made (AC-B11.2), and a screen re-deriving over the top of it would
+  /// silently overrule the user.
+  TextColumn get internalTransferState => text().nullable()();
+
   // --- P2: when, and which way ---------------------------------------------
 
   /// When the movement happened, per the message, in UTC.
@@ -109,10 +170,16 @@ class Transactions extends Table {
   /// explainable rather than mysterious.
   TextColumn get timeSource => text().nullable()();
 
-  /// `debit` | `credit`. A refund is a credit and **reduces** period spend
-  /// (US-B7); it is never stored as a negative debit, because a negative
-  /// amount would break every `Money` invariant that assumes sign lives in
-  /// the direction field.
+  /// `debit` | `credit`. **This column is where the sign of a movement
+  /// lives, and it is the only place it lives** — `amount_amount` is always a
+  /// non-negative magnitude.
+  ///
+  /// A refund is a credit and **reduces** period spend (US-B7); it is never
+  /// stored as a negative debit. `lib/core/money/sign_convention.dart`
+  /// is the full statement of this decision, including why a signed amount
+  /// was rejected and what it obliges the manual-entry form to validate
+  /// (defect O-QA-2). Read it before adding any write path that touches
+  /// money.
   TextColumn get direction => text().withDefault(const Constant('debit'))();
 
   /// The matched rule's `messageType`, e.g. `pos_purchase`, `installment`.

@@ -130,5 +130,34 @@
   "completeSave": "حفظ كمعاملة",
   "completeOriginalMessage": "الرسالة الأصلية",
   "completeUnavailable": "لم تعد هذه الرسالة في قائمة المراجعة",
-  "completeCategoryDeferred": "التصنيف يأتي لاحقاً — ستُحفظ المعاملة كـ«غير مصنفة» ويمكنك تصنيفها من قائمتها."
+  "completeCategoryDeferred": "التصنيف يأتي لاحقاً — ستُحفظ المعاملة كـ«غير مصنفة» ويمكنك تصنيفها من قائمتها.",
+
+  "amountMustBePositive": "أدخل مبلغاً أكبر من صفر، ثم اختر «إيداع» أو «سحب»",
+
+  "txnFieldFxRateDate": "تاريخ سعر الصرف",
+  "txnFxRateDateUnknown": "التاريخ غير معروف",
+  "txnFieldFxRateSource": "مصدر سعر الصرف",
+  "txnFxSourceSmsImplied": "مستنتج من المبلغ المحوَّل في رسالة البنك",
+  "txnFxSourceSmsStated": "مذكور في رسالة البنك",
+  "txnFxSourceUser": "أدخلته بنفسك",
+  "txnFxSourceCarriedForward": "آخر سعر معروف، منقول من عملية سابقة",
+  "txnFxNotConverted": "لم يُحوَّل إلى {currency} — لم تذكر الرسالة سعر صرف، والتطبيق لا يخترع سعراً",
+
+  "txnBadgeInternalTransfer": "تحويل داخلي",
+  "txnBadgeInternalTransferCandidate": "قد يكون تحويلاً داخلياً",
+  "txnInternalTransferExcludedNote": "مستثنى من إجمالي الإنفاق — تحويل المال إلى حسابك ليس إنفاقاً",
+  "txnInternalTransferCandidateNote": "يُحتسب ضمن الإنفاق حتى تؤكد أنه إلى حسابك الخاص",
+
+  "txnTypeSalaryIncome": "راتب / دخل",
+
+  "totalsNotConverted": "{count, plural, one{معاملة واحدة لم تُحوَّل} two{معاملتان لم تُحوَّلا} few{{count} معاملات لم تُحوَّل} many{{count} معاملة لم تُحوَّل} other{{count} معاملة لم تُحوَّل}}",
+
+  "spentVsKeptTitle": "المصروف مقابل المتبقي",
+  "spentVsKeptSpent": "المصروف",
+  "spentVsKeptIncome": "الوارد",
+  "spentVsKeptNet": "المتبقي في هذه الفترة",
+  "spentVsKeptCashOut": "نقد مسحوب",
+  "spentVsKeptInternalExcluded": "تحويلات داخلية مستثناة",
+  "spentVsKeptIncomplete": "تعذّر تحويل بعض المعاملات، لذلك هذه الأرقام غير مكتملة",
+  "spentVsKeptNeedsReview": "{count, plural, one{معاملة واحدة تحتاج مراجعة قبل اعتماد هذه الأرقام} two{معاملتان تحتاجان مراجعة قبل اعتماد هذه الأرقام} few{{count} معاملات تحتاج مراجعة قبل اعتماد هذه الأرقام} many{{count} معاملة تحتاج مراجعة قبل اعتماد هذه الأرقام} other{{count} معاملة تحتاج مراجعة قبل اعتماد هذه الأرقام}}"
 }

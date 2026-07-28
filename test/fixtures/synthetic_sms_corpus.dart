@@ -402,6 +402,133 @@ const List<SmsFixture> aljaziraFixtures = <SmsFixture>[
     affectsSpend: true,
   ),
 
+  // --- P3b-1 additions: the types a period total needs in order to mean
+  // something (KHA-27, KHA-28, KHA-29) -------------------------------------
+  //
+  // These four templates are **extrapolated, not observed.** PRD §3.4's sample
+  // set covered nine message types and none of them was a refund, an ATM
+  // withdrawal, or a foreign purchase without an inline conversion — yet
+  // AC-B7.1, AC-B10.1 and AC-B10.2 are all written as "given an SMS
+  // describing…". So the shapes below follow the *field-label style* the same
+  // bank uses for its observed templates (Arabic labels, `key:value`, the same
+  // date format) rather than being invented from nothing. That is stated
+  // plainly here so a reviewer knows which fixtures rest on real structural
+  // evidence and which rest on a consistent extension of it — and so that,
+  // when real samples of these types arrive (OQ-2 is explicitly still open for
+  // "declines, partial refunds"), whoever updates them knows these are the
+  // ones to check first.
+
+  // --- 10/13 Refund to a card (KHA-28, AC-B7.1) ----------------------------
+  //
+  // `direction: credit`, and note `affectsSpend: true` — a refund very much
+  // affects the spend total; it *reduces* it. `false` would exclude it
+  // entirely and leave the original purchase standing at full price.
+  SmsFixture(
+    id: 'baj-15-refund',
+    sender: 'BAJ',
+    body:
+        'استرجاع مبلغ\n'
+        'بطاقة:فيزا-****9013\n'
+        'مبلغ:187.46 SAR\n'
+        'من:GLOBAL CLOUD SERVICES\n'
+        'في:29-07-26 10:15',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'refund',
+    ruleId: 'baj-refund-ar',
+    amount: '187.46',
+    currency: 'SAR',
+    merchant: 'GLOBAL CLOUD SERVICES',
+    instrumentMasked: '****9013',
+    instrumentKind: 'card',
+    instrumentNetwork: 'فيزا',
+    occurredAtUtc: '2026-07-29T07:15:00.000Z',
+    direction: 'credit',
+    affectsSpend: true,
+  ),
+
+  // --- 11/13 ATM cash withdrawal (KHA-29, AC-B10.2) ------------------------
+  SmsFixture(
+    id: 'baj-16-atm-withdrawal',
+    sender: 'BAJ',
+    body:
+        'سحب نقدي\n'
+        'من حساب:****3388\n'
+        'مبلغ:500.00 SAR\n'
+        'الصراف:ATM-RIYADH-0042\n'
+        'في:27-07-26 18:22',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'withdrawal',
+    ruleId: 'baj-atm-withdrawal-ar',
+    amount: '500',
+    currency: 'SAR',
+    merchant: 'ATM-RIYADH-0042',
+    instrumentMasked: '****3388',
+    instrumentKind: 'account',
+    occurredAtUtc: '2026-07-27T15:22:00.000Z',
+    direction: 'debit',
+    affectsSpend: false,
+  ),
+
+  // --- 12/13 Salary credit (KHA-29, AC-B10.1) ------------------------------
+  //
+  // Distinct from `baj-04-transfer-in-salary`, deliberately: that fixture is
+  // the *generic* incoming transfer that happens to be a salary, and it must
+  // keep classifying as `transfer_in`. This one names the salary explicitly
+  // and must outrank it. Together they pin the priority ordering.
+  SmsFixture(
+    id: 'baj-17-salary',
+    sender: 'BAJ',
+    body:
+        'راتب\n'
+        'إلى حساب:****3388\n'
+        'مبلغ:14500.00 SAR\n'
+        'من:ALFA TRADING COMPANY\n'
+        'رقم العملية:TRX8850999\n'
+        'في:25-07-26 07:30',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'salary_income',
+    ruleId: 'baj-salary-ar',
+    amount: '14500',
+    currency: 'SAR',
+    instrumentMasked: '****3388',
+    instrumentKind: 'account',
+    counterpartyName: 'ALFA TRADING COMPANY',
+    referenceNumber: 'TRX8850999',
+    occurredAtUtc: '2026-07-25T04:30:00.000Z',
+    direction: 'credit',
+    affectsSpend: false,
+  ),
+
+  // --- 13/13 Foreign purchase with NO conversion (KHA-27, ADR-009 case 4) --
+  //
+  // The message states EUR and nothing else — no converted amount, no rate.
+  // ADR-009 forbids inventing one, so this transaction is recorded in full,
+  // is **excluded from the base-currency total**, and is counted on the
+  // "N transactions not converted" line. It is the fixture that proves the
+  // app would rather show an incomplete total than a fabricated one.
+  SmsFixture(
+    id: 'baj-18-pos-purchase-foreign-unconverted',
+    sender: 'BAJ',
+    body:
+        'شراء\n'
+        'بطاقة:فيزا-****9013\n'
+        'مبلغ:35.00 EUR\n'
+        'لدى:PARIS BOOKSHOP\n'
+        'في:26-07-26 12:00',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'pos_purchase',
+    ruleId: 'baj-pos-purchase-ar',
+    amount: '35',
+    currency: 'EUR',
+    merchant: 'PARIS BOOKSHOP',
+    instrumentMasked: '****9013',
+    instrumentKind: 'card',
+    instrumentNetwork: 'فيزا',
+    occurredAtUtc: '2026-07-26T09:00:00.000Z',
+    direction: 'debit',
+    affectsSpend: true,
+  ),
+
   // --- Noise from the same (known) sender ----------------------------------
   //
   // AC-A2.1. Note the OTP body contains the word "الشراء" (purchase) on
@@ -674,6 +801,72 @@ const List<SmsFixture> d360Fixtures = <SmsFixture>[
     occurredAtUtc: '2026-07-20T02:00:00.000Z',
     direction: 'debit',
     affectsSpend: true,
+  ),
+
+  // --- P3b-1 additions (see the note in the Aljazira list above for why
+  // these three are extrapolated rather than observed) ----------------------
+
+  // --- 10/12 Refund to a card (KHA-28, AC-B7.1) ----------------------------
+  SmsFixture(
+    id: 'd360-14-refund',
+    sender: 'D360',
+    body:
+        'D360: Refund of SAR 187.46 to Visa Credit Card ending 8821 '
+        'from NORTHWIND SOFTWARE. On 29/07/2026 10:15',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'refund',
+    ruleId: 'd360-refund-en',
+    amount: '187.46',
+    currency: 'SAR',
+    merchant: 'NORTHWIND SOFTWARE',
+    instrumentMasked: '****8821',
+    instrumentKind: 'card',
+    instrumentNetwork: 'visa',
+    instrumentCardType: 'credit',
+    occurredAtUtc: '2026-07-29T07:15:00.000Z',
+    direction: 'credit',
+    affectsSpend: true,
+  ),
+
+  // --- 11/12 ATM cash withdrawal (KHA-29, AC-B10.2) ------------------------
+  SmsFixture(
+    id: 'd360-15-atm-withdrawal',
+    sender: 'D360',
+    body:
+        'D360: Cash withdrawal of SAR 500.00 from account ending 1157 '
+        'at ATM RIYADH 0042. On 27/07/2026 18:22',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'withdrawal',
+    ruleId: 'd360-atm-withdrawal-en',
+    amount: '500',
+    currency: 'SAR',
+    merchant: 'ATM RIYADH 0042',
+    instrumentMasked: '****1157',
+    instrumentKind: 'account',
+    occurredAtUtc: '2026-07-27T15:22:00.000Z',
+    direction: 'debit',
+    affectsSpend: false,
+  ),
+
+  // --- 12/12 Salary credit (KHA-29, AC-B10.1) ------------------------------
+  SmsFixture(
+    id: 'd360-16-salary',
+    sender: 'D360',
+    body:
+        'D360: Salary credit of SAR 14,500.00 to account ending 1157 '
+        'from ALFA TRADING COMPANY. Ref D360-SAL-990112. On 25/07/2026 07:30',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'salary_income',
+    ruleId: 'd360-salary-en',
+    amount: '14500',
+    currency: 'SAR',
+    instrumentMasked: '****1157',
+    instrumentKind: 'account',
+    counterpartyName: 'ALFA TRADING COMPANY',
+    referenceNumber: 'D360-SAL-990112',
+    occurredAtUtc: '2026-07-25T04:30:00.000Z',
+    direction: 'credit',
+    affectsSpend: false,
   ),
 
   // --- Noise ---------------------------------------------------------------

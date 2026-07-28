@@ -451,5 +451,66 @@
   "completeUnavailable": "This item is no longer in the review queue",
   "@completeUnavailable": {"description": "Shown when the message was completed or dismissed elsewhere between the form opening and Save."},
   "completeCategoryDeferred": "Categorisation comes later — this will be saved as Uncategorised and you can categorise it from the list.",
-  "@completeCategoryDeferred": {"description": "S-19 note. The mockup shows a category picker; categories are P4 work, and offering a picker with no categories behind it would be a lie."}
+  "@completeCategoryDeferred": {"description": "S-19 note. The mockup shows a category picker; categories are P4 work, and offering a picker with no categories behind it would be a lie."},
+
+  "amountMustBePositive": "Enter an amount greater than zero, then choose Money in or Money out",
+  "@amountMustBePositive": {"description": "The sign convention's user-facing contract (defect O-QA-2, lib/core/money/sign_convention.dart). A minus sign is never interpreted as 'this is a refund' — the direction control says that."},
+
+  "txnFieldFxRateDate": "Rate date",
+  "@txnFieldFxRateDate": {"description": "S-11 field label — AC-B9.3 requires the rate AND its date to be inspectable (KHA-70)."},
+  "txnFxRateDateUnknown": "Date unknown",
+  "@txnFxRateDateUnknown": {"description": "Shown in place of a rate date the message never stated. An undated rate must say so rather than look authoritative (KHA-70)."},
+  "txnFieldFxRateSource": "Rate source",
+  "@txnFieldFxRateSource": {"description": "S-11 field label — where the conversion rate came from (ADR-009)."},
+  "txnFxSourceSmsImplied": "Implied by the bank's own converted amount",
+  "@txnFxSourceSmsImplied": {"description": "ExchangeRateSource.smsImplied."},
+  "txnFxSourceSmsStated": "Stated in the bank's message",
+  "@txnFxSourceSmsStated": {"description": "ExchangeRateSource.smsStated."},
+  "txnFxSourceUser": "Entered by you",
+  "@txnFxSourceUser": {"description": "ExchangeRateSource.user."},
+  "txnFxSourceCarriedForward": "Most recent known rate, carried forward",
+  "@txnFxSourceCarriedForward": {"description": "ExchangeRateSource.carriedForward — marked as such per ADR-009."},
+  "txnFxNotConverted": "Not converted to {currency} — this message stated no rate, and the app never invents one",
+  "@txnFxNotConverted": {
+    "description": "ADR-009 case 4. Shown on a foreign-currency transaction with no conversion, so its absence from the period total is visible rather than silent.",
+    "placeholders": {"currency": {"type": "String"}}
+  },
+
+  "txnBadgeInternalTransfer": "Internal transfer",
+  "@txnBadgeInternalTransfer": {"description": "design.md 3.3 — a transfer between the user's own accounts. Excluded from spend (AC-B11.1). Icon + these words; never colour alone (NFR-U4)."},
+  "txnBadgeInternalTransferCandidate": "Possible internal transfer",
+  "@txnBadgeInternalTransferCandidate": {"description": "AC-B11.2 — the app could not determine whether this is the user's own account, so it says so instead of guessing. Still counted as spend until confirmed."},
+  "txnInternalTransferExcludedNote": "Excluded from spend totals — moving money to yourself is not spending",
+  "@txnInternalTransferExcludedNote": {"description": "S-11 explanation under the internal-transfer badge, so the exclusion is auditable (NFR-A6)."},
+  "txnInternalTransferCandidateNote": "Still counted as spend until you confirm this went to your own account",
+  "@txnInternalTransferCandidateNote": {"description": "AC-B11.2 / risk R-7 — the unknown state is made visible rather than resolved by a guess."},
+
+  "txnTypeSalaryIncome": "Salary / income",
+  "@txnTypeSalaryIncome": {"description": "Transaction type label (salary_income). Recorded as income, never as spend (AC-B10.1)."},
+
+  "totalsNotConverted": "{count, plural, one{1 transaction not converted} other{{count} transactions not converted}}",
+  "@totalsNotConverted": {
+    "description": "AC-B9.2 / ADR-009 — the explicit incompleteness line under a base-currency total. A total that quietly omits a purchase is worse than one that admits it is incomplete.",
+    "placeholders": {"count": {"type": "int"}}
+  },
+
+  "spentVsKeptTitle": "Spent vs kept",
+  "@spentVsKeptTitle": {"description": "S-32 heading (AC-B10.3)."},
+  "spentVsKeptSpent": "Spent",
+  "@spentVsKeptSpent": {"description": "S-32 row — net spend after refunds, excluding internal transfers."},
+  "spentVsKeptIncome": "Received",
+  "@spentVsKeptIncome": {"description": "S-32 row — salary and third-party incoming transfers (AC-B10.1)."},
+  "spentVsKeptNet": "Kept this period",
+  "@spentVsKeptNet": {"description": "S-32 row — received minus spent (AC-B10.3). Negative means the user spent more than came in."},
+  "spentVsKeptCashOut": "Cash withdrawn",
+  "@spentVsKeptCashOut": {"description": "S-32 row — AC-B10.2. Neither spend nor income: the money is still the user's, it has stopped being traceable."},
+  "spentVsKeptInternalExcluded": "Internal transfers excluded",
+  "@spentVsKeptInternalExcluded": {"description": "S-32 row — US-B11's exclusion shown as a figure so it can be checked, not left as a silent gap."},
+  "spentVsKeptIncomplete": "Some transactions could not be converted, so these figures are incomplete",
+  "@spentVsKeptIncomplete": {"description": "Shown when any component of the report omits an unconvertible transaction (ADR-009)."},
+  "spentVsKeptNeedsReview": "{count, plural, one{1 transaction needs review before these figures are final} other{{count} transactions need review before these figures are final}}",
+  "@spentVsKeptNeedsReview": {
+    "description": "AC-B11.2 — unproven internal-transfer candidates and unclassifiable movements make the figures provisional.",
+    "placeholders": {"count": {"type": "int"}}
+  }
 }

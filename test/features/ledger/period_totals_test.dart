@@ -194,6 +194,106 @@ void main() {
     });
   });
 
+  group('the base-currency figure (KHA-27, AC-B9.2)', () {
+    test('a SAR-only period puts the same number in `base` and in the SAR '
+        'native line, and reports nothing unconverted', () {
+      final PeriodTotals totals = LedgerTotals.spend(<LedgerTransaction>[
+        txn(id: 1, amount: '152.75'),
+        txn(id: 2, amount: '49.99'),
+      ], period: july2026);
+
+      expect(totals.base!.toCanonicalString(), '202.74');
+      expect(totals.baseCurrencyCode, 'SAR');
+      expect(totals.convertedCount, 2);
+      expect(totals.isIncomplete, isFalse);
+      expect(totals.unconvertedCount, 0);
+    });
+
+    test('a period whose only transaction cannot be converted has NO base '
+        'figure at all — null, not zero', () {
+      // Money.zero would claim the user spent nothing this month. What is
+      // true is that we cannot express what they spent in the base currency.
+      final PeriodTotals totals = LedgerTotals.spend(<LedgerTransaction>[
+        txn(id: 1, amount: '35.00', currency: 'EUR'),
+      ], period: july2026);
+
+      expect(totals.base, isNull);
+      expect(totals.isEmpty, isFalse, reason: 'there IS a transaction');
+      expect(totals.unconvertedCount, 1);
+      expect(totals.forCurrency('EUR')!.toCanonicalString(), '35');
+    });
+  });
+
+  group('PeriodReport — the components of a period (AC-B10.3)', () {
+    test('spent-vs-kept is null when neither side has a base figure, rather '
+        'than a confident zero', () {
+      final PeriodReport report = LedgerTotals.report(
+        const <LedgerTransaction>[],
+        period: july2026,
+      );
+      expect(report.netKept, isNull);
+      expect(report.spend.isEmpty, isTrue);
+    });
+
+    test('spend alone still yields a net — a month with outgoings and no '
+        'income is a negative "kept", not an absent one', () {
+      final PeriodReport report = LedgerTotals.report(<LedgerTransaction>[
+        txn(id: 1, amount: '250.00'),
+      ], period: july2026);
+
+      expect(report.netKept!.toCanonicalString(), '-250');
+    });
+
+    test('a period whose spend is entirely UNCONVERTIBLE yields no net at all '
+        '— not "you kept everything"', () {
+      // The subtle one. Income converts, spend does not, and treating the
+      // missing spend figure as zero would tell someone who spent all of it
+      // that they kept 14,500.00 SAR.
+      final PeriodReport report = LedgerTotals.report(<LedgerTransaction>[
+        txn(id: 1, amount: '400.00', currency: 'EUR'),
+        txn(
+          id: 2,
+          amount: '14500.00',
+          direction: 'credit',
+          type: 'salary_income',
+          affectsSpend: false,
+        ),
+      ], period: july2026);
+
+      expect(report.income.base!.toCanonicalString(), '14500');
+      expect(report.spend.base, isNull);
+      expect(report.spend.isEmpty, isFalse, reason: 'there IS spending');
+      expect(report.netKept, isNull);
+      expect(report.isIncomplete, isTrue);
+    });
+
+    test('an empty income component contributes zero rather than blocking the '
+        'net — "nothing came in" is a measurement, not a gap', () {
+      final PeriodReport report = LedgerTotals.report(<LedgerTransaction>[
+        txn(id: 1, amount: '250.00'),
+      ], period: july2026);
+
+      expect(report.income.isEmpty, isTrue);
+      expect(report.netKept!.toCanonicalString(), '-250');
+    });
+
+    test('income is accumulated as a magnitude, so an income figure never '
+        'renders negative', () {
+      final PeriodReport report = LedgerTotals.report(<LedgerTransaction>[
+        txn(
+          id: 1,
+          amount: '14500.00',
+          direction: 'credit',
+          type: 'salary_income',
+          affectsSpend: false,
+        ),
+      ], period: july2026);
+
+      expect(report.income.base!.toCanonicalString(), '14500');
+      expect(report.income.base!.isNegative, isFalse);
+    });
+  });
+
   group('fees are their own figure (PRD 3.4)', () {
     test('a fee is not folded into the spend total', () {
       final List<LedgerTransaction> rows = <LedgerTransaction>[
@@ -217,6 +317,21 @@ void main() {
         ).forCurrency('SAR')!.toCanonicalString(),
         '4.69',
       );
+    });
+
+    test('a fee on a NON-spend movement is still counted — "what did FX cost '
+        'me this month" is a question about all of them', () {
+      final PeriodTotals fees = LedgerTotals.feesFor(<LedgerTransaction>[
+        txn(
+          id: 1,
+          amount: '2000.00',
+          type: 'transfer_out',
+          affectsSpend: false,
+          feeAmount: '15.00',
+        ),
+      ], period: july2026);
+
+      expect(fees.forCurrency('SAR')!.toCanonicalString(), '15');
     });
   });
 }

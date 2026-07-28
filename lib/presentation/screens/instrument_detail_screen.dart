@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../features/ledger/bank_tree.dart';
 import '../../features/ledger/instrument_identity.dart';
+import '../../features/ledger/internal_transfer.dart';
 import '../../features/ledger/ledger_transaction.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../theme/app_colors.dart';
@@ -44,11 +45,22 @@ class InstrumentDetailScreen extends StatelessWidget {
 
   final void Function(LedgerTransaction transaction)? onOpenTransaction;
 
+  /// Transaction id → `internal` | `candidate` | `external` (KHA-29).
+  ///
+  /// Supplied by the caller from `InternalTransferDetector.analyze` over the
+  /// **whole** ledger, because an internal transfer is a property of a pair
+  /// and this screen only ever holds one instrument's side of it. Defaults to
+  /// empty, in which case each row falls back to its own persisted state — so
+  /// a caller that has not wired the detector under-reports rather than
+  /// mislabels, which is the safe way for this to be incomplete.
+  final Map<int, String> internalTransferStates;
+
   const InstrumentDetailScreen({
     required this.summary,
     required this.transactions,
     required this.onRename,
     this.onOpenTransaction,
+    this.internalTransferStates = const <int, String>{},
     super.key,
   });
 
@@ -102,6 +114,8 @@ class InstrumentDetailScreen extends StatelessWidget {
             for (final LedgerTransaction txn in transactions)
               _TransactionRow(
                 transaction: txn,
+                internalTransferState:
+                    internalTransferStates[txn.id] ?? txn.internalTransferState,
                 onTap: onOpenTransaction == null
                     ? null
                     : () => onOpenTransaction!(txn),
@@ -297,14 +311,21 @@ class _IdentityCard extends StatelessWidget {
 /// this screen needs.
 class _TransactionRow extends StatelessWidget {
   final LedgerTransaction transaction;
+  final String? internalTransferState;
   final VoidCallback? onTap;
 
-  const _TransactionRow({required this.transaction, this.onTap});
+  const _TransactionRow({
+    required this.transaction,
+    this.internalTransferState,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final TextTheme text = Theme.of(context).textTheme;
+    final bool isInternal =
+        internalTransferState == InternalTransferState.internal;
 
     return ListTile(
       onTap: onTap,
@@ -315,17 +336,46 @@ class _TransactionRow extends StatelessWidget {
             transactionTypeLabel(l10n, transaction.transactionType),
         style: text.bodyLarge,
       ),
-      subtitle: Text(
-        transaction.occurredAt == null
-            ? l10n.fieldNotStatedInMessage
-            : formatShortDateTime(transaction.occurredAt!),
-        style: text.bodySmall?.copyWith(color: AppColors.ink500),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Text(
+            transaction.occurredAt == null
+                ? l10n.fieldNotStatedInMessage
+                : formatShortDateTime(transaction.occurredAt!),
+            style: text.bodySmall?.copyWith(color: AppColors.ink500),
+          ),
+          // design.md §3.3's internal-transfer row: an icon and the words, on
+          // the row itself, so a user scanning the list can see why a
+          // 2,000 SAR movement is not in the total above it.
+          if (internalTransferState == InternalTransferState.internal ||
+              internalTransferState == InternalTransferState.candidate)
+            Padding(
+              padding: const EdgeInsetsDirectional.only(top: 4),
+              child: InternalTransferBadge(isConfirmed: isInternal),
+            ),
+        ],
       ),
-      trailing: SignedAmountText(
-        amount: transaction.amount,
-        isCredit: transaction.isCredit,
-        style: text.bodyMedium,
-      ),
+      // A confirmed internal transfer carries **no +/− prefix at all**
+      // (design.md §3.3): it is neither spend nor income, and a sign would
+      // put it on one side of a ledger it does not belong to. A *candidate*
+      // keeps its sign, because it is still being counted.
+      trailing: isInternal
+          ? Text(
+              '${formatAmountDigits(transaction.amount)} '
+              '${transaction.amount.currencyCode}',
+              style: text.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: AppColors.ink700,
+              ),
+              textDirection: TextDirection.ltr,
+            )
+          : SignedAmountText(
+              amount: transaction.amount,
+              isCredit: transaction.isCredit,
+              style: text.bodyMedium,
+            ),
     );
   }
 }
