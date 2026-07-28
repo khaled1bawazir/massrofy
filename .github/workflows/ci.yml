@@ -222,7 +222,22 @@ jobs:
         run: bash .github/scripts/check_money_type_ban.sh
 
   # ---------------------------------------------------------------------------
-  # 4b. ADR-003: SQLCipher encryption, exercised for real on Android.
+  # 4b. Everything that can only be proven on a real Android device.
+  #
+  # KHA-75 (2026-07-28) widened this job from one named file to the whole
+  # `integration_test/` directory, and the reason is worth keeping: this job
+  # is the ONLY place in CI where Dart code meets the real Android platform,
+  # and the only place a Dart↔Kotlin platform-channel contract is genuinely
+  # exercised. KHA-75 was a channel-encoding mismatch (`Uint8List` sent,
+  # `java.util.List` expected) that broke the app lock on 100% of devices
+  # while every host-side test stayed green — because a fake MethodChannel
+  # never crosses the codec boundary. `integration_test/keystore_channel_test.dart`
+  # is the guard against a repeat, and it only guards anything if this job
+  # actually runs it. Any future `integration_test/*.dart` is picked up
+  # automatically now, rather than needing this file edited too (and being
+  # silently un-run when nobody remembers).
+  #
+  # ADR-003: SQLCipher encryption, exercised for real on Android.
   #
   # `flutter test` (job 1 above) runs on the HOST runner's Dart VM, where
   # this Android-only app has no genuine SQLCipher native library to load —
@@ -345,7 +360,11 @@ jobs:
   # materially. Both are deliberately out of scope of a timeout fix.
   # ---------------------------------------------------------------------------
   android-sqlcipher-integration-test:
-    name: "ADR-003: SQLCipher integration test (Android emulator)"
+    # Display name only — the job *id* above is what `needs:` and the
+    # aggregate `ci` check reference, so this rename is safe. It is worth
+    # doing because the job stopped being SQLCipher-only in KHA-75 and a
+    # name that lies about scope is how a job quietly stops being trusted.
+    name: "On-device integration tests (Android emulator): ADR-003 SQLCipher + ADR-004 Keystore channel"
     runs-on: ubuntu-latest
     # Without an explicit timeout this job inherits GitHub's 360-minute
     # default, and has previously hung (not failed — genuinely never
@@ -584,7 +603,7 @@ jobs:
           # rather than "whatever the device profile happens to default to".
           disk-size: 4096M
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: timeout --kill-after=60s 960s flutter test integration_test/db_encryption_test.dart -d emulator-5554
+          script: timeout --kill-after=60s 960s flutter test integration_test -d emulator-5554
 
       # KHA-67 defect 3: without this step, attempt 2 does not get a fresh
       # emulator — it silently re-attaches to attempt 1's. Job 90326515099's
@@ -657,7 +676,7 @@ jobs:
           emulator-boot-timeout: 300
           disk-size: 4096M
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: timeout --kill-after=60s 960s flutter test integration_test/db_encryption_test.dart -d emulator-5554
+          script: timeout --kill-after=60s 960s flutter test integration_test -d emulator-5554
 
       - name: Fail the job if every attempt failed
         if: >

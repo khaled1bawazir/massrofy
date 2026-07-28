@@ -43,9 +43,16 @@ class _FakeBiometricGate implements BiometricGate {
   bool nextResult = true;
   int callCount = 0;
 
+  /// When set, [authenticate] throws this instead of returning — how the
+  /// tests reproduce a *device* fault (KHA-72/KHA-75) as opposed to a user
+  /// getting their fingerprint wrong.
+  BiometricGateUnavailableException? throwUnavailable;
+
   @override
   Future<bool> authenticate({required String reason}) async {
     callCount++;
+    final BiometricGateUnavailableException? toThrow = throwUnavailable;
+    if (toThrow != null) throw toThrow;
     return nextResult;
   }
 }
@@ -58,11 +65,18 @@ class _FakeDbMasterKeyRepository implements DbMasterKeyRepository {
   bool throwKeystoreInvalidated = false;
   bool throwGenericError = false;
 
+  /// Set to reproduce KHA-75: the *provisioning* (first-run) call failing
+  /// with a real Keystore platform error, which is the exact path that was
+  /// broken on every Android device.
+  KeystoreOperationException? provisionThrows;
+
   @override
   Future<bool> hasExistingKey() async => keyExists;
 
   @override
   Future<Uint8List> provisionNewDatabaseKey() async {
+    final KeystoreOperationException? toThrow = provisionThrows;
+    if (toThrow != null) throw toThrow;
     keyExists = true;
     return Uint8List.fromList(List<int>.filled(32, 1));
   }
@@ -209,6 +223,127 @@ void main() {
       );
     },
   );
+
+  group('KHA-75 — a Keystore/platform fault is not a failed attempt', () {
+    // The literal reproduction of the shipped bug: the biometric prompt
+    // succeeds, and then first-run key provisioning throws because the
+    // Dart<->Kotlin channel could not decode our own arguments.
+    KeystoreOperationException invalidArgument() =>
+        const KeystoreOperationException(
+          kind: KeystoreFailureKind.invalidArgument,
+          code: 'invalid_argument',
+        );
+
+    test('a failing first-run provision surfaces as failed, never as a '
+        'silent unlock — the key is never produced', () async {
+      keyStore.provisionThrows = invalidArgument();
+      await controller.authenticate();
+
+      final AppLockState state = container.read(appLockControllerProvider);
+      expect(state.status, AppLockStatus.failed);
+      expect(state.isUnlocked, isFalse);
+      expect(controller.unlockedKeyHexOrNull, isNull);
+    });
+
+    test('it does NOT burn the ADR-005 lockout budget — five platform faults '
+        'in a row still leave the user able to retry, because none of them '
+        'was their fault (this is exactly what locked the human out of '
+        'their own app on first launch)', () async {
+      keyStore.provisionThrows = invalidArgument();
+      for (int i = 0; i < 6; i++) {
+        await controller.authenticate();
+      }
+
+      expect(
+        container.read(appLockControllerProvider).status,
+        AppLockStatus.failed,
+        reason: 'a platform fault must never escalate to lockedOut',
+      );
+      expect(
+        lockoutStateRepository.writeCount,
+        0,
+        reason: 'nothing about a platform fault should be persisted',
+      );
+    });
+
+    test('it is logged with a distinct, PII-free category so the failing '
+        'step is identifiable — the old `catch (_)` logged the same '
+        '"lock.auth_failed" as a wrong fingerprint', () async {
+      final DiagnosticRingBuffer buffer = DiagnosticRingBuffer();
+      final ProviderContainer loggingContainer = ProviderContainer();
+      addTearDown(loggingContainer.dispose);
+      final AppLockController loggingController = loggingContainer.read(
+        appLockControllerProvider.notifier,
+      );
+      final _FakeDbMasterKeyRepository store = _FakeDbMasterKeyRepository()
+        ..provisionThrows = invalidArgument();
+      loggingController.configure(
+        biometricGate: _FakeBiometricGate(),
+        keyStore: store,
+        logger: SafeLogger(buffer),
+        lockoutStateRepository: _FakeLockoutStateRepository(),
+      );
+
+      await loggingController.authenticate();
+
+      expect(
+        buffer.entries.map((DiagnosticLogEntry e) => e.message),
+        contains('lock.keystore_error.invalid_argument'),
+      );
+      expect(
+        buffer.entries.map((DiagnosticLogEntry e) => e.message),
+        isNot(contains(startsWith('lock.auth_failed'))),
+      );
+    });
+
+    test('a genuinely wrong/declined credential still counts, so the lockout '
+        'policy is intact', () async {
+      biometricGate.nextResult = false;
+      for (int i = 0; i < 5; i++) {
+        await controller.authenticate();
+      }
+      expect(
+        container.read(appLockControllerProvider).status,
+        AppLockStatus.lockedOut,
+      );
+    });
+  });
+
+  group('KHA-72 (non-UI half) — a throwing biometric gate can no longer hang '
+      'the only screen in the product', () {
+    test(
+      'the state never remains `authenticating` when the gate throws',
+      () async {
+        biometricGate.throwUnavailable =
+            const BiometricGateUnavailableException('uiUnavailable');
+        await controller.authenticate();
+
+        final AppLockState state = container.read(appLockControllerProvider);
+        expect(
+          state.status,
+          isNot(AppLockStatus.authenticating),
+          reason:
+              '`authenticating` renders identically to `locked` on S-09 with '
+              'no banner and no way forward — indistinguishable from a hung app',
+        );
+        expect(state.status, AppLockStatus.failed);
+      },
+    );
+
+    test('a device fault does not increment the lockout counter', () async {
+      biometricGate.throwUnavailable = const BiometricGateUnavailableException(
+        'biometricHardwareTemporarilyUnavailable',
+      );
+      for (int i = 0; i < 6; i++) {
+        await controller.authenticate();
+      }
+      expect(
+        container.read(appLockControllerProvider).status,
+        AppLockStatus.failed,
+      );
+      expect(lockoutStateRepository.writeCount, 0);
+    });
+  });
 
   test('authenticate() before configure() throws a clear StateError', () {
     final ProviderContainer freshContainer = ProviderContainer();

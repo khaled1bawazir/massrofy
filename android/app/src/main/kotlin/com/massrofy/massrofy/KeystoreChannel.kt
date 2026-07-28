@@ -77,21 +77,27 @@ import javax.crypto.spec.GCMParameterSpec
  * relaxation, scoped to a single-user local device where the very next
  * thing the app does after that prompt succeeds is exactly this call.
  *
- * NOTE on test coverage, stated honestly: this class has not been exercised
- * by an automated instrumented test in this PR -- doing so needs a real
- * Android device/emulator with Keystore + biometric hardware, which the
- * environment this PR was built in does not have. The Dart-side contract
- * this channel implements (method names, argument/result shapes, exception
- * mapping) is unit-tested against a fake MethodChannel handler; see
- * `test/core/crypto/android_keystore_key_manager_test.dart`. That test
- * cannot and does not exercise this Kotlin file. See
- * `integration_test/db_encryption_test.dart` and the dedicated
- * `android-sqlcipher-integration-test` CI job for the genuine, on-device
- * coverage this PR adds alongside that honest gap.
+ * ## Test coverage (updated by KHA-75 -- read this before trusting the
+ * Dart-side tests alone)
+ * `test/core/crypto/android_keystore_key_manager_test.dart` covers the
+ * Dart-side contract (method names, argument/result shapes, exception
+ * mapping) against a **fake** MethodChannel handler. That test is
+ * structurally incapable of catching a whole class of bug in this file,
+ * because a fake handler never crosses the Dart->Java codec boundary: it
+ * sees Dart values on both ends. KHA-75 was exactly that bug -- see
+ * [byteArrayArg]'s doc comment -- and it shipped with those tests green.
+ * `integration_test/keystore_channel_test.dart` is the answer: it runs
+ * inside the real app on a real Android device/emulator and invokes THIS
+ * class over the real channel, so the wire encoding is genuinely exercised.
+ * Run both; neither alone is sufficient.
  */
 class KeystoreChannel : MethodChannel.MethodCallHandler {
 
     companion object {
+        /// logcat tag for [logFailure] -- see that method for exactly what
+        /// is and is not written to the platform log, and why.
+        private const val LOG_TAG = "MassrofyKeystore"
+
         /// Argument name every method call carries, naming which Keystore
         /// alias to operate on -- see the class doc comment.
         private const val KEY_ALIAS_ARG = "keyAlias"
@@ -116,7 +122,7 @@ class KeystoreChannel : MethodChannel.MethodCallHandler {
             when (call.method) {
                 "wrapWithKeystoreKek" -> {
                     val keyAlias = stringArg(call, KEY_ALIAS_ARG)
-                    val keyBytes = intListArg(call, "keyBytes")
+                    val keyBytes = byteArrayArg(call, "keyBytes")
                     val (ciphertext, nonce) = wrap(keyAlias, keyBytes)
                     result.success(
                         mapOf(
@@ -127,8 +133,8 @@ class KeystoreChannel : MethodChannel.MethodCallHandler {
                 }
                 "unwrapWithKeystoreKek" -> {
                     val keyAlias = stringArg(call, KEY_ALIAS_ARG)
-                    val ciphertext = intListArg(call, "ciphertext")
-                    val nonce = intListArg(call, "nonce")
+                    val ciphertext = byteArrayArg(call, "ciphertext")
+                    val nonce = byteArrayArg(call, "nonce")
                     val raw = unwrap(keyAlias, ciphertext, nonce)
                     result.success(raw.map { it.toInt() and 0xFF })
                 }
@@ -139,21 +145,135 @@ class KeystoreChannel : MethodChannel.MethodCallHandler {
                 }
                 else -> result.notImplemented()
             }
+        } catch (e: IllegalArgumentException) {
+            // KHA-75: an argument that could not be decoded at all is a
+            // *programming* error in the Dart<->Kotlin contract, and it must
+            // never again be reported with the same code as a genuine
+            // Keystore/TEE failure -- conflating the two is precisely what
+            // made KHA-75 look like an OEM secure-hardware incompatibility
+            // for a whole review cycle. Distinct code, distinct log line.
+            logFailure(call.method, e)
+            result.error("invalid_argument", e.message, null)
+        } catch (e: ClassCastException) {
+            // Also an argument-decoding failure, and caught SEPARATELY from
+            // the generic branch below on purpose. This is the literal
+            // exception KHA-75 threw ("byte[] cannot be cast to
+            // java.util.List"), and under the old code it fell into the
+            // generic `keystore_error` bucket -- which is why the failure was
+            // indistinguishable from a real Keystore fault, and why an
+            // on-device regression test asserting "never invalid_argument"
+            // would have been useless without this branch. Nothing in the
+            // java.security/javax.crypto call graph below throws
+            // ClassCastException, so reaching here means, unambiguously,
+            // that the two halves of this channel disagree about a type.
+            logFailure(call.method, e)
+            result.error("invalid_argument", e.message, null)
+        } catch (e: android.security.keystore.UserNotAuthenticatedException) {
+            // The key exists but no biometric/device-credential
+            // authentication has happened inside [AUTH_VALIDITY_SECONDS].
+            // Its own code so the Dart side can tell "the OS refused the key
+            // because auth went stale" apart from "the key or the platform
+            // is broken" (KHA-75).
+            logFailure(call.method, e)
+            result.error("user_not_authenticated", e.message, null)
         } catch (e: KeyPermanentlyInvalidatedException) {
             // ADR-004's documented recovery trigger: the caller
             // (DbMasterKeyStore, via AndroidKeystoreKeyManager) is expected
             // to catch this on the Dart side, fall back to the Passphrase
             // KEK / recovery secret, and re-provision a fresh Keystore KEK.
+            logFailure(call.method, e)
             result.error("key_permanently_invalidated", e.message, null)
         } catch (e: Exception) {
+            logFailure(call.method, e)
             result.error("keystore_error", e.message, null)
         }
     }
 
-    private fun intListArg(call: MethodCall, name: String): ByteArray {
-        val list = call.argument<List<Int>>(name)
-            ?: throw IllegalArgumentException("$name is required")
-        return ByteArray(list.size) { i -> list[i].toByte() }
+    /**
+     * Emits ONE `adb logcat`-visible line per failed Keystore operation
+     * (KHA-75).
+     *
+     * ## Why this exists and why it is safe (NFR-S2/NFR-S4)
+     * Before this, every failure inside [onMethodCall] became an opaque
+     * `PlatformException` on the Dart side, which `AppLockController` then
+     * swallowed into a generic "Authentication failed" -- indistinguishable
+     * from a wrong fingerprint. On a real device with no attached debugger
+     * that left literally nothing to diagnose from, and cost two review
+     * cycles (KHA-71, then KHA-75) chasing a phantom OEM/TEE incompatibility
+     * that turned out to be a one-line argument-decoding bug.
+     *
+     * What is logged is deliberately only:
+     *  - the channel method name (a fixed, compile-time vocabulary of three
+     *    strings), and
+     *  - the **exception class name** (framework-owned, e.g.
+     *    `ClassCastException`, `UserNotAuthenticatedException`).
+     *
+     * What is deliberately NOT logged: the key alias, the exception
+     * *message*, the stack trace, and above all any argument value. Key
+     * material, ciphertext and nonces never reach this method, and the two
+     * fields that are logged cannot carry user data by construction --
+     * there is no code path that puts a value into either of them. That
+     * combination is enough to identify the failing step immediately while
+     * satisfying ADR-015's "no free text that could carry a value" rule.
+     */
+    private fun logFailure(method: String?, e: Exception) {
+        android.util.Log.e(
+            LOG_TAG,
+            "keystore op failed: method=$method exception=${e.javaClass.simpleName}"
+        )
+    }
+
+    /**
+     * Reads a byte-array argument off a [MethodCall].
+     *
+     * ## Read this before changing the type here -- it is the KHA-75 bug
+     * Flutter's `StandardMessageCodec` encodes Dart's **`Uint8List`** as a
+     * dedicated typed-data buffer, which this (Kotlin) side of the channel
+     * decodes as a Java **`byte[]`**. Only a *plain* `List<int>` is encoded
+     * as a list and decoded as `java.util.List<Integer>`. These are two
+     * different wire representations of "some bytes", and they are not
+     * interchangeable.
+     *
+     * This method used to read `call.argument<List<Int>>(name)`
+     * unconditionally. Every production call site passes a `Uint8List`
+     * (`DbMasterKeyStore` generates the DB Master Key as one;
+     * `WrappedKey.ciphertext`/`.nonce` are both `Uint8List`), so **every**
+     * real wrap and unwrap threw
+     * `ClassCastException: byte[] cannot be cast to java.util.List` -- on
+     * every Android device, first run and every run after. The app could
+     * never be unlocked by anybody. The Dart-side unit test did not catch it
+     * because a fake `MethodChannel` handler sees the Dart value on both
+     * ends (`Uint8List` in, `Uint8List` out); the `byte[]` vs `List<Integer>`
+     * distinction only exists inside the *Java* decoder, so no amount of
+     * Dart-only testing could have surfaced it. See
+     * `integration_test/keystore_channel_test.dart` for the on-device test
+     * that genuinely covers this now.
+     *
+     * Both encodings are accepted here on purpose. `Uint8List` is the one
+     * `AndroidKeystoreKeyManager` now guarantees to send (it normalises
+     * every caller's bytes before invoking), and the `List<Int>` branch is
+     * kept so a future caller -- or a hand-written test harness -- that
+     * sends a plain list still works instead of failing in this same
+     * confusing way.
+     */
+    private fun byteArrayArg(call: MethodCall, name: String): ByteArray {
+        return when (val raw = call.argument<Any>(name)) {
+            null -> throw IllegalArgumentException("$name is required")
+            is ByteArray -> raw
+            is List<*> -> ByteArray(raw.size) { i ->
+                val element = raw[i]
+                if (element !is Number) {
+                    throw IllegalArgumentException(
+                        "$name must contain only numbers"
+                    )
+                }
+                element.toByte()
+            }
+            else -> throw IllegalArgumentException(
+                "$name must be a byte array or a list of ints, was " +
+                    raw.javaClass.simpleName
+            )
+        }
     }
 
     private fun stringArg(call: MethodCall, name: String): String {
