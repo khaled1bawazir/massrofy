@@ -71,3 +71,18 @@ Format per entry:
   written to stop, one level up. **-> An issue born in review must get its milestone/phase set
   at creation, not just its owner and labels. "It has a ticket" is not the same as "it is in a
   phase".**
+
+- **[2026-07-29] [process]** Human feedback, worth carrying forward as-is: **the phase order
+  (P1 foundation -> P2 ingestion -> P3 domain model -> ... -> P5 UI) is architecturally correct
+  — each phase genuinely needs the one before it — but it is strictly horizontal (one layer,
+  fully, before the next), so nothing a human can actually see or use exists until P5. By the
+  end of P3b, the team had shipped real money math, multi-currency, refunds, entity resolution,
+  two real-device security fixes, and 800+ passing tests — and the app still only ever showed a
+  lock screen and a literal placeholder screen, because nothing had wired a UI to any of it yet.
+  The work was real; it did not *feel* real, and the only way to check progress was reading
+  build-log/test-plan rather than using the thing. **-> For the next product built this way,
+  plan one thin end-to-end vertical slice early (e.g. right after P1's foundation: one screen,
+  one real data path, deliberately minimal) alongside the horizontal phases, purely so there is
+  something a human can open and see working before the *entire* domain model is done. This is
+  a planning/sequencing change for `docs/build-plan.md`'s next `/kickoff`, not a P3b-2 change —
+  P3b-2 keeps building on the existing plan. Revisit when scoping the next project's phase 0.**
