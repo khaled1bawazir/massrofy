@@ -2,16 +2,32 @@ STATUS: APPROVED
 
 # Massrofy — Architecture Decision Record
 
-**Version:** 1.0
-**Date:** 2026-07-27
+**Version:** 1.1
+**Date:** 2026-07-28 (v1.0: 2026-07-27)
 **Author:** solution-architect agent (phase 3 — architecture, human gate 2)
 **Sources of truth:** `docs/PRD.md` v0.3 (STATUS: Approved), `docs/build-plan.md` v1.0
-**Repository state:** greenfield — no code, no repo, no existing Flutter project. Every
-pattern in this document is established here, not inherited.
+**Repository state at v1.0:** greenfield. **At v1.1:** P1 merged (`9d1487c`), P2 open as PR #2.
+Every pattern in this document is established here, not inherited.
 
 > **This document does not authorise itself.** The human reviews it and changes the status
 > line above to `APPROVED`. `/build` refuses to start until this file and `docs/design.md`
 > are both approved. Nothing in this document is a licence to write feature code.
+
+> **v1.1 is an amendment to an already-approved document, not a re-opening of gate 2.** It
+> resolves two escalations raised by mobile-engineer during the build (KHA-56, KHA-57) and
+> changes nothing else. The status line stays `APPROVED`. **However, ADR-018 materially
+> reduces what NFR-R1 commits to** (see H-13) — that reduction is a product-level fact the
+> human should read even though it does not, in my judgement, require re-approving the whole
+> architecture. If the human disagrees with H-13, ADR-018 is the one decision to re-open.
+
+---
+
+## Changelog
+
+| Version | Date | Change |
+|---|---|---|
+| **1.1** | 2026-07-28 | **ADR-018 added** — resolves the ADR-005 (cryptographic app lock) vs ADR-006 (background ingestion) conflict raised as **KHA-56**. Background ingestion is suspended while the app is locked; NFR-R1 is restated as an unlocked-window commitment. ADR-005 and ADR-006 amended in place; ADR-006's latency table replaced with one carrying a lock-state axis. **ADR-013 rewritten** to ratify and make normative the widened PAN/secret detection raised as **KHA-57** (originating defect KHA-54) — and to close two defects of the same class that KHA-54's fix did **not** close (the greedy grouped-PAN window, and grouped IBANs). §6.8, §8.1 (H-6, H-13, H-14), §8.2 (O-5, O-6), §8.3 (R-1) and §9 updated to match. |
+| 1.0 | 2026-07-27 | Initial ADR (ADR-001..ADR-017), written against a greenfield repository. |
 
 ---
 
@@ -325,6 +341,10 @@ every recovery event and on demand from Settings; the backup data key is fresh p
 ### ADR-005 — App lock is enforced **cryptographically**, not by navigation.
 
 **Serves NFR-S3, AC-F1.1, AC-F1.2.**
+**Amended by ADR-018 (v1.1).** ADR-005 is **unchanged and upheld**; ADR-018 records what it
+costs — namely that background SMS ingestion cannot run while the app is locked — and decides
+that we pay that cost rather than weaken this decision. Read ADR-018 before touching the app
+lock, the Keystore key policy, or the lock grace timer.
 
 **Decision.**
 
@@ -346,11 +366,25 @@ every recovery event and on demand from Settings; the backup data key is fresh p
   passphrase path, exponential backoff after 5 failures, backoff state stored outside the
   encrypted DB (it must survive a locked DB).
 
+**Implementation note (P1, ratified here because ADR-018 depends on it).** `massrofy.dbkek` is
+created as a **time-bound** user-authentication key — `setUserAuthenticationParameters(5,
+AUTH_BIOMETRIC_STRONG | AUTH_DEVICE_CREDENTIAL)` — not an auth-per-operation key. That was the
+correct call: `local_auth` cannot hand a `CryptoObject` to our Keystore channel, so an
+auth-per-operation key throws `UserNotAuthenticatedException` on every call. **The 5-second
+validity window is the whole of the relaxation and it must stay small** — it is what makes
+"unwrap immediately after the prompt succeeds" work, and it is *also* the reason a background
+isolate can never unwrap opportunistically. Any proposal to lengthen it is a proposal to weaken
+the app lock, and must come back through this ADR. See `android/.../KeystoreChannel.kt`.
+
 ---
 
 ### ADR-006 — SMS ingestion: a **wake-only broadcast receiver + a content-provider watermark**, with a periodic self-healing sweep and an opt-in foreground service.
 
 **Answers A-2. Mitigates R-1. Serves NFR-R1, NFR-R3, NFR-R5, NFR-R6, NFR-A7, AC-A3.3.**
+**Amended by ADR-018 (v1.1).** The three-layer mechanism below stands exactly as written. What
+v1.0 got wrong is the **assumption, never stated, that the worker can open the database.** It
+cannot while the app is locked (ADR-005). ADR-018 resolves that and **replaces the latency table
+in this ADR** — the table below is superseded and retained only so the correction is legible.
 
 **Context.** `android.provider.Telephony.SMS_RECEIVED` is on Android's implicit-broadcast
 exemption list, so a manifest-registered receiver is delivered even when the app process is
@@ -404,9 +438,16 @@ imposes runtime caps on `dataSync` foreground services that make them unsuitable
 continuous monitor; `specialUse` normally invites Play policy review, which does not apply to
 us (X16, side-load only).
 
-**Honest latency statement (this is what NFR-R1 actually gets).**
+**Honest latency statement — ⚠️ SUPERSEDED by ADR-018's table. Do not quote this one.**
 
-| Situation | SMS-to-visible |
+> This table is wrong in one specific and important way: **every row silently assumes the
+> database can be opened.** Under ADR-005 that is only true while the app is unlocked. The rows
+> below therefore describe the *unlocked* device only. ADR-018 §"What NFR-R1 actually commits
+> to" carries the corrected table, with a lock-state axis. Kept here, struck rather than
+> deleted, because a reader who finds the old numbers quoted somewhere else needs to be able to
+> see that they were superseded and why.
+
+| Situation (⚠️ **unlocked app only**) | SMS-to-visible |
 |---|---|
 | App in foreground | immediate (< 1 s) |
 | App backgrounded, normal standby bucket, broadcast delivered | **1–3 s (target)** |
@@ -416,8 +457,9 @@ us (X16, side-load only).
 
 **These numbers are provisional on the P0 spike (KHA-7)** and must be confirmed against the
 user's actual device and Android version before this ADR's latency claims are treated as
-settled. If the spike shows the broadcast is suppressed on the target device, Layer 3 becomes
-**default-on** and the human should be told that NFR-R1 is being bought with battery. **See §8.**
+settled. **ADR-018 changes what that spike is for:** it no longer decides whether Layer 3 goes
+default-on to protect NFR-R1 (it cannot), only whether the wake signal survives on this OEM at
+all. **See §8, H-6.**
 
 **Permissions in the release build (complete list).**
 `RECEIVE_SMS`, `READ_SMS`, `RECEIVE_BOOT_COMPLETED`, `USE_BIOMETRIC`, `POST_NOTIFICATIONS`
@@ -688,24 +730,193 @@ accident. Separate use-cases, separate outputs.
 ### ADR-013 — Redaction happens at the **ingestion boundary**, enforced by a type.
 
 **Answers A-13. Serves NFR-S2, NFR-C2, NFR-P1.**
+**Rewritten at v1.1 to resolve KHA-57.** v1.0's "what gets redacted" table was a *sketch* — it
+described the intent in one line per pattern and left the shape of the pattern to the
+implementer. KHA-54 proved that was not good enough: three under-redaction defects all fitted
+inside v1.0's literal wording. §"The normative patterns" below replaces the sketch. **It is
+deliberately over-specified.** Redaction is the one place in this app where a plausible-looking
+implementation and a correct one are indistinguishable by eye, and where the failure is silent,
+permanent, and exactly what NFR-S2/NFR-C2 exist to prevent.
 
 **Where.** In `SmsSanitizer`, between "read from the SMS content provider" and "write anything
 to the database". **Raw, unredacted SMS text is never persisted, not even briefly.**
 
-**What gets redacted.**
+**Order of the pipeline, normative** (P2 implements this and it must not drift):
 
-| Pattern | Action |
-|---|---|
-| Luhn-valid digit runs of length 13–19 (a PAN) | Replace with `****<last4>`; set `panRedacted = true`; store only the last 4 |
-| Digits (3–8) preceded by `CVV`/`CVC`/`PIN`/`OTP`/`رمز`/`الرقم السري`/`كلمة المرور` | Replace with `[REDACTED]` |
-| IBAN-shaped `SA\d{22}` | Replace with `SA**…<last4>` |
-| Per-bank `redact[]` regexes from the rule pack | Applied as declared — extensible per bank without a code change |
-| Any message classified `intent: ignore, messageType: otp` | Body never persisted at all (NFR-P4) |
+```
+raw body ─► SmsSanitizer.sanitize(raw, extraRedactPatterns: pack.redact[])  ADR-013  ◄── this ADR
+             └─► SanitizedSmsText          ─────────────► persisted as RawMessage.sanitizedBody
+                    └─► SmsTextNormalizer.normalize(...)  ADR-007 step 1
+                           ├─► MessageParser
+                           └─► ContentHmac (dedup key, ADR-017 D1)
+```
+
+Two consequences that are decisions, not accidents, and are ratified here:
+
+1. **Sanitisation runs on the raw body, before normalisation.** So `SmsSanitizer` may **not**
+   assume the normaliser has already folded digit families, stripped bidi controls, or collapsed
+   whitespace. Every one of those is a way a PAN escapes. The sanitizer does its own folding, for
+   matching purposes only.
+2. **What is persisted is the sanitised *raw* text, not the normalised text.** AC-B1.2 requires
+   the user to verify a parse against something that looks like what their bank actually sent.
 
 **How it is enforced (the mechanism, not the intention).** The raw-message DAO's insert method
 accepts **only** a `SanitizedSmsText` value type. `SanitizedSmsText` has a private constructor
 and can be produced **only** by `SmsSanitizer`. A developer cannot write an unsanitised `String`
 into the message table because the code will not compile.
+
+---
+
+#### The normative patterns (v1.1 — this is the ratified wording; cite it by name)
+
+**§13.1 — What counts as a digit.** Any of: ASCII `0-9`; Arabic-Indic `U+0660–U+0669`; Extended
+(Persian) Arabic-Indic `U+06F0–U+06F9`. Dart's `\d` is ASCII-only, so **`\d` is a defect in this
+file** and CI review should treat it as one. Luhn is computed on digit *values*, so a PAN written
+in Arabic-Indic numerals checksums identically to the same PAN in ASCII and cannot evade the rule
+by changing script.
+
+**§13.2 — Ignorable characters.** Before matching, and **for matching purposes only**, remove:
+bidi controls `U+200E`, `U+200F`, `U+061C`, `U+202A–U+202E`, `U+2066–U+2069`, and the soft hyphen
+`U+00AD`. *Why this is load-bearing:* an Arabic RTL bank template routinely wraps a Latin-script
+number in directional marks. One `U+200F` sitting between two groups of a card number defeats the
+grouped-PAN rule below entirely, and — per §13.1's ordering note — the sanitizer cannot rely on
+the normaliser to have removed it, because the normaliser runs afterwards. The characters are
+removed from the *matching view* of the text; the persisted string retains its original
+formatting outside the replaced spans.
+
+**§13.3 — Group separators.** Exactly **one** character from: SPACE `U+0020`, NBSP `U+00A0`,
+NARROW NBSP `U+202F`, HYPHEN-MINUS `U+002D`, EN DASH `U+2013`.
+
+Deliberately **excluded**, with reasons, so nobody re-adds them on a hunch:
+
+| Excluded | Why |
+|---|---|
+| The full stop `.` | It is the decimal and thousands separator in amounts. Including it trades a real risk of destroying a transaction amount (which sends a genuine transaction to the review queue) for coverage of a PAN format issuers do not use |
+| Newline | A line break in a bank SMS separates *fields*. Joining across one fuses two unrelated numbers, and Luhn is only a 1-in-10 filter, so the fused result would sometimes validate |
+| A **run** of two or more separators | Same reason: it lets the pattern swallow two numbers that merely sit near each other in a sentence |
+
+**§13.4 — PAN detection (the rule KHA-57 ratifies, plus the defect it must also close).**
+
+A *digit-group sequence* is `g1 sep g2 sep … sep gn`, where each `gi` is a maximal run of **two or
+more** digits (§13.1) and each `sep` is a single separator (§13.3). `n = 1` is the ordinary
+contiguous case.
+
+For each maximal digit-group sequence in the message:
+
+1. Enumerate the contiguous windows `gi..gj`, **longest first, then leftmost**.
+2. Concatenate the window's digits (separators discarded).
+3. If the concatenation is **13–19 digits long AND Luhn-valid** (ISO/IEC 7812-1): replace the
+   whole matched span *including its internal separators* with `****<last4>`, set
+   `panRedacted = true`, and resume scanning after the window.
+4. Otherwise try the next window. If no window matches, the text is left exactly as it was.
+
+> **The "longest window, then backtrack" scan is the part that must not be simplified away, and
+> it is not what shipped.** PR #2 tests only the *maximal* sequence. That leaves a real PAN in
+> cleartext whenever a bank template puts another grouped number immediately after the card
+> number: `purchase 4111 1111 1111 1111 45` matches as one 18-digit sequence, fails Luhn, and is
+> returned **untouched — PAN and all — with `panRedacted = false`.** That is the identical
+> failure mode as KHA-54 gap 3, and the KHA-54 corpus misses it only because every fixture
+> happens to place a non-digit token (`SAR`) immediately after the PAN. **Closing this is a
+> condition of ratifying the widening** (see §8.1 H-14).
+
+**Why Luhn stays, rather than "redact every long number".** A blunt rule would destroy
+transaction reference numbers, which are ADR-017 D2's reliable duplicate key. That is a
+correctness regression bought for no security gain. Luhn is what makes this rule *precise*
+instead of merely aggressive, and it is the reason the window may be widened safely.
+
+**Why the window is 13–19 and not 12–19.** 12-digit Maestro PANs are **out of scope, explicitly**.
+Lowering the floor to 12 materially increases collisions with reference numbers and account
+suffixes. The wider context matters here: by CON-3 and NFR-S2 the messages we actually expect
+carry a *masked* last-4, so a full PAN in a bank's own SMS is already anomalous. **This whole rule
+is a backstop.** A backstop should be calibrated for precision against the numbers that
+legitimately appear, not for maximum recall against one that should never appear at all.
+
+**§13.5 — IBAN detection.** Same ignorable-character and separator handling as §13.2/§13.3.
+
+- **MUST:** `SA` (case-insensitive) followed by 22 digits, **tolerating single group separators
+  between groups.** Replace with `SA**…<last4>`. *This closes a defect of exactly the KHA-54 gap-3
+  class that KHA-54's fix did not touch:* the conventional print form of a Saudi IBAN is
+  `SA03 8000 0000 6080 1016 7519`, and a contiguous-only `SA[digits]{22}` pattern does not match
+  it, so the grouped form currently survives in full (see §8.1 H-14).
+- **SHOULD (follow-up, not blocking):** generalise to `[A-Za-z]{2}[digits]{2}[A-Za-z0-9]{11,30}`
+  gated on the **ISO 7064 mod-97-10 check digit** — the IBAN analogue of Luhn, and precise for the
+  same reason. This picks up a foreign counterparty IBAN on an outbound international transfer,
+  which is third-party PII we have no reason to retain (NFR-P1). Deferred only because it is
+  additional surface on an open PR, not because it is doubtful. Tracked as **O-6**.
+
+**§13.6 — Secret-adjacency sweep (CVV / PIN / OTP / passwords).**
+
+Ratified as implemented in PR #2, with two **corrections to v1.0's wording**:
+
+- v1.0 said "digits (3–8)". **The upper bound is withdrawn.** A 9-digit code is still a secret; an
+  upper bound is an under-redaction bug wearing a specificity costume. The rule is **every digit
+  run of 3 or more digits, no upper bound.**
+- v1.0 said "preceded by", implying one direction and the nearest run. **Both are withdrawn.** The
+  rule is **every** qualifying run within the window, in **either** direction. KHA-54 gaps 1 and 2
+  were both caused by "the nearest run, in one direction".
+
+Normative window: within **12 words** of a secret keyword, with a hard ceiling of **120
+characters**, measured over the text strictly between the keyword and the run. Word-counting is
+the primary bound and the character count is only a ceiling — measuring in characters alone is
+precisely what let `"Your verification code, valid for 5 minutes, is 903212"` redact nothing.
+Replacement is `[REDACTED]` (the whole run; the last 4 are **not** retained — unlike a PAN, no
+part of a secret has downstream value).
+
+Keyword set, ratified: `CVV`, `CVC`, `PIN`, `OTP`, `one-time password` / `one time password`,
+`verification code`, `access code`, `رمز التحقق`, `رمز الدخول`, `رمز التفعيل`, `رمز`,
+`الرقم السري`, `كلمة المرور`. Case-insensitive. **Adding a synonym is a data change and needs no
+ADR amendment; removing one does.**
+
+**§13.7 — Per-bank `redact[]` from the rule pack (ADR-007).** Applied **last**, after §13.4–§13.6.
+Replace the named `(?<secret>…)` group if present, otherwise the whole match, with `[REDACTED]`.
+The generic passes are the fallback for any sender whose pack declares no `redact[]`; a per-bank
+pattern is never a *substitute* for the generic path, and a change that weakens the generic path
+"because the rule pack covers it" should be rejected.
+
+**§13.8 — Messages classified `intent: ignore, messageType: otp`.** Body never persisted at all
+(NFR-P4, §4.2 `RawMessage` retention rules). Unchanged from v1.0.
+
+---
+
+#### Over-redaction is the ratified failure mode — and it has a floor
+
+The asymmetry is the whole argument and it is worth stating once, precisely, so that every future
+tuning decision resolves the same way:
+
+> A destroyed amount produces a message that fails to parse, lands in the review queue (US-A4),
+> and is **visible to the user and recoverable in one tap**. A surviving live PAN or one-time code
+> is **invisible and permanent**. These are not symmetric errors, so the thresholds must not be
+> tuned symmetrically. **When in doubt, redact.** This is the same reasoning ADR-017 uses to bias
+> toward flagging over auto-removal, and the same banking-domain default that runs through this
+> whole document.
+
+**But "when in doubt, redact" is a bias, not a licence.** Three bounds keep it honest, and all
+three are testable:
+
+1. Luhn (§13.4) and mod-97 (§13.5) mean the identifier rules fire on numbers that are
+   *structurally* card/account numbers, not on long numbers generally.
+2. The 12-word / 120-character window (§13.6) means a keyword near the start of a message cannot
+   cause the whole message to be destroyed. There is a required regression test for exactly this:
+   a purchase amount far from an OTP keyword **must survive**.
+3. The secret sweep only fires in a message that contains a secret keyword at all — and such a
+   message is almost always `intent: ignore`, whose body is discarded anyway. The realistic
+   over-redaction blast radius is a transaction message that mentions a code, which is precisely
+   the case where a secret would otherwise be persisted.
+
+#### Testing obligations (binding on engineers and QA)
+
+- **Assert exact output, never `contains('[REDACTED]')`.** That assertion shape is what let the
+  original KHA-54 leak pass green: `"Your OTP for account [REDACTED] is 567890"` satisfies it
+  while publishing a live code. Every redaction test pins the whole expected string **and**
+  asserts that no 3-digit window of the secret survives anywhere in the output.
+- **Every new redaction test must be confirmed to fail against the pre-fix implementation.** A
+  test that was green before the fix is not a regression test.
+- Required fixtures, in addition to the existing KHA-54 corpus: a grouped PAN followed
+  immediately by another grouped number (§13.4's backtracking case); a grouped SA IBAN (§13.5); a
+  PAN with a bidi mark between groups (§13.2); a PAN separated by NBSP; a grouped date and a
+  grouped reference number that must **survive** (precision, not just recall).
+
+#### What this buys us against the compliance requirements
 
 **NFR-C2 satisfaction.** We do not attempt to *secure* cardholder data — we **avoid handling it**,
 which is what NFR-C2 asks for. A full PAN or any sensitive authentication datum is destroyed at
@@ -826,6 +1037,155 @@ prefer the auditable, recoverable error.
 
 ---
 
+### ADR-018 — Background ingestion is **suspended while the app is locked.** NFR-R1 is an unlocked-window commitment.
+
+**Added v1.1. Resolves KHA-56. Amends ADR-005 (upheld unchanged) and ADR-006 (latency table
+replaced). Touches NFR-R1, NFR-S1, NFR-S3, NFR-A7, AC-A1.4, AC-F1.2, and risk R-1.**
+
+**The conflict, stated exactly.** ADR-005 makes the app lock cryptographic: the DB Master Key is
+unwrapped only through a Keystore key created with `setUserAuthenticationRequired(true)`, so
+failing or skipping authentication means the database *physically cannot be opened*. ADR-006
+assumes a background worker can read SMS and write transactions while the user is away. **Both
+cannot be true at once, and v1.0 never noticed**, because ADR-006 was written from the ingestion
+side and ADR-005 from the security side and neither names the other.
+
+As implemented, the key is **time-bound with a 5-second authentication validity window**
+(ADR-005 implementation note). A background isolate woken by an SMS broadcast has no user
+present and no recent authentication, so it cannot unwrap the key — not sometimes, not usually,
+**never**, unless a human happened to authenticate within the previous five seconds. Since the
+lock grace timer defaults to 0 s, *the app is locked from the moment the user leaves it*. The
+locked case is therefore not an edge case; **it is the normal case.**
+
+mobile-engineer implemented `runBackgroundIngestion()` as a documented no-op that does not
+advance the watermark, so nothing is lost, and escalated rather than deciding. That was the
+right call and this ADR ratifies it.
+
+**Options considered.**
+
+| Option | Assessment |
+|---|---|
+| **(a) A locked run is a no-op. The watermark does not advance; the messages stay in the SMS provider; the post-unlock sweep picks up everything since the watermark.** (What PR #2 shipped) | Zero security cost. Zero new stores, keys, or code paths. Correctness fully preserved (NFR-A7, AC-A1.4 — the message *is* there when the user next opens the app, which is what that criterion actually asks for). Cost: near-real-time ingestion does not happen while locked. **Chosen — see the four arguments below.** |
+| (b) A second Keystore key with `setUserAuthenticationRequired(false)`, protecting a small encrypted **"ingest inbox"**. The background worker parses into the inbox; on unlock the inbox drains into the ledger | The only option that genuinely delivers near-real-time ingestion while locked. **Rejected** — it buys no durability, buys latency no one can observe, and punctures the single strongest claim this architecture makes. Full reasoning below |
+| (c) A plaintext staging file or queue | **Rejected outright.** Contradicts NFR-S1 in the plainest possible way. Recorded only because it is the obvious shortcut and someone will suggest it again |
+| (d) Weaken the lock itself — drop `setUserAuthenticationRequired(true)` on `massrofy.dbkek`, or stretch the 5-second validity window to minutes or hours so the worker can slip in | **Rejected.** This deletes ADR-005 and downgrades AC-F1.2 from a cryptographic guarantee to a navigational one. We would be trading the app's headline security property for background convenience — the exact inversion of the banking-domain default |
+| (e) Lean on ADR-006's Layer-3 foreground service to keep the process, and the in-memory key, resident | **Rejected as a solution, because it is not one.** ADR-005 zeroes the in-memory key on lock. Process residency does not survive that. A foreground service that is running while the app is locked is burning battery to hold a key it no longer has |
+
+**Why (b) loses, in four arguments. This is the substance of the decision.**
+
+1. **It buys no durability — only latency.** The SMS content provider is already a durable,
+   OS-managed store of exactly these messages, and ADR-006 deliberately made it the queue (that
+   is precisely why the receiver carries no content). An ingest inbox would be a **second copy of
+   the same financial data, in a weaker container, to avoid re-reading a store that never went
+   away.** Nothing is protected against loss that is not already protected.
+2. **The latency it buys has no observer.** NFR-R1 exists so that the user "opens the app and
+   trusts the numbers" (PRD §1). **While the app is locked, the user is not looking at it.** The
+   requirement that genuinely matters is *"by the time the first screen renders after unlock,
+   everything has been ingested and the total is right"* — and option (a) satisfies that, because
+   the post-unlock sweep runs the identical pipeline over a handful of messages in milliseconds.
+   Option (b) spends a real security concession on a number nobody reads.
+3. **It punctures the one claim this architecture is proudest of.** §6.8 says a lost or stolen
+   **unlocked** phone is mitigated *because the lock is cryptographic*. An auth-free inbox holds
+   the most recent transactions — amounts, merchants, masked instrument identifiers, timestamps —
+   readable by anyone who can run code as this app on a device that is OS-unlocked but
+   Massrofy-locked. Narrow, yes. But it turns "nothing is readable" into "the most recent ones
+   are readable", and that is a sentence the transparency screen (US-F4, NFR-P6) would then have
+   to say out loud. **A security property you have to add a footnote to is a materially weaker
+   property.**
+4. **It does not even move the audit boundary forward.** The audit hash-chain key
+   (`massrofy.auditchain`) is itself auth-gated, so an inbox write can carry no audit entry and
+   no chain link. Entries would still be minted at drain time. So (b) delivers no earlier
+   auditability, and it *adds*: a second store for erase-all to reach (ADR-011), a second thing
+   to decide about in backup (ADR-012), a second key lifecycle, and a permanent second answer to
+   "where does sensitive data live" (§4.3).
+
+**Banking-domain default, applied explicitly:** prefer the more secure and more auditable option,
+and do not create a second copy of financial data in a weaker container to buy latency the user
+cannot perceive. That default and the engineering analysis point the same way here, which is the
+comfortable case.
+
+**Decision.**
+
+1. **`runBackgroundIngestion()` is a no-op when the database cannot be opened. This is the
+   design, not a stub.** It MUST NOT advance the watermark, and it MUST report success to
+   WorkManager rather than failure — retrying would burn the backoff budget on a condition only a
+   human unlocking the phone can clear. The code comment in
+   `lib/features/ingestion/background_entrypoint.dart` should be updated from "raising this as an
+   ADR gap" to citing ADR-018.
+2. **It MUST emit a diagnostic event** (`ingest.skipped.locked`, counts only, ADR-015) so
+   Settings → Diagnostics → parser health can show how often the locked path fires. This is what
+   turns an invisible behaviour into an observable one, and it is the evidence the human will
+   need if H-13 is ever revisited.
+3. **Unlock MUST run a sweep as part of the unlock transition** — not lazily after the home
+   screen has already painted. The home screen MUST show an explicit "updating" state until the
+   post-unlock sweep completes and MUST NOT render a stale month total as though it were final.
+   *A wrong number shown confidently for 800 ms is worse than a spinner shown honestly for 800
+   ms*, and for this product — whose entire success criterion is "the user trusts the numbers" —
+   that is not a small point. **This is a new requirement on the presentation phase and on the
+   designer's loading states (D-8).**
+4. **The lock grace default stays 0 seconds.** While unlocked — foreground, or backgrounded
+   inside a user-configured grace window — the in-memory key is live and ADR-006 Layer 1 works
+   exactly as specified, in 1–3 s. Do not widen the default grace to buy latency; that is option
+   (d) in disguise.
+5. **Optional, opt-in "arrival nudge" — default OFF, and it is a compensating control, not
+   compliance with NFR-R1.** A locked-state wake MAY post a **content-free** local notification
+   ("A new bank message is waiting — unlock to record it"). It MUST match the sender against the
+   **bundled** rule pack's `senderPatterns` only (a Flutter asset, readable with no database), so
+   it never fires for personal SMS; imported packs live in the encrypted DB and are therefore
+   unavailable while locked, which MUST be stated rather than worked around. It MUST retain
+   nothing (NFR-P4 — a momentary classification step), MUST contain no amount, merchant, or
+   instrument identifier, and MUST use `VISIBILITY_SECRET` so a lock-screen preview leaks
+   nothing. **This is the only way to recover the *spirit* of NFR-R1 while locked at zero
+   security cost — because it moves a notification, not data.** Scoped to the notifications phase
+   (P6/P7), not to P2. Put to the human as **H-13**.
+6. **ADR-006 Layer 3 is re-scoped, not removed.** Its remaining value is keeping the *wake
+   signal* alive on hostile OEMs so the periodic sweep is not suppressed — which matters mostly
+   for the user who keeps the app open. **It cannot deliver near-real-time ingestion while
+   locked, because it cannot open the database either.** It stays off by default, and it MUST NOT
+   be made default-on on the strength of NFR-R1. See the revision to H-6.
+
+**What NFR-R1 actually commits to now. This table supersedes ADR-006's.**
+
+| App state | SMS-to-visible |
+|---|---|
+| Foreground, unlocked | **< 1 s** |
+| Backgrounded but still inside the lock grace window (key in memory), broadcast delivered | **1–3 s** — but note the grace default is 0 s, so this row is empty unless the user opts in |
+| **Locked — the default state whenever the user is not in the app** | **Not ingested until unlock.** Visible within **~1 s of the unlock completing**, via the mandatory post-unlock sweep (decision 3). Nothing is lost: the watermark has not moved |
+| Locked, *and* the broadcast was suppressed by an OEM battery manager or the restricted bucket | **Identical to the row above.** Suppression is irrelevant while locked — the post-unlock sweep is unconditional and watermark-driven. R-1 has, in the locked case, stopped mattering |
+| Force-stopped by the user | Until next app open (Android suppresses all delivery to force-stopped apps; no mitigation exists) |
+| Layer 3 enabled | **No change to any row above.** It buys process residency, not key access |
+
+> **Stated plainly, because the PRD deserves a straight answer.** NFR-R1 / OQ-16 asks for
+> "single-digit seconds from SMS arrival to appearing in-app, not merely by the time the app is
+> next opened." **As shipped, that holds only while the app is unlocked. While locked — which is
+> most of the time — the commitment is "single-digit seconds from unlock, with nothing lost and
+> nothing silently reordered."** That is a genuine reduction against the PRD's wording and it is
+> put to the human as **H-13** rather than quietly reinterpreted. What we are *not* willing to do
+> is buy the original wording with a second, weaker copy of the user's financial history.
+>
+> Note also what does **not** change: **AC-A1.4** — *"given a new SMS arrives while the app is not
+> in the foreground, when the user next opens the app, then that transaction is already
+> present"* — is fully satisfied, and NFR-A7 (never silently discard) is untouched. The reduction
+> is confined to latency, and only to latency observed by nobody.
+
+**Consequences.**
+
+- *Good:* ADR-005's guarantee survives intact and §6.8's threat table needs no footnote. AC-F1.2
+  ("no transaction data, totals, or card identifiers are visible") remains cryptographic and now
+  extends, without qualification, to data that arrived *while* locked.
+- *Good:* no second store, no second key, no second thing for ADR-011 erase-all and ADR-012
+  backup to reason about. The simplest possible resolution is also the most secure one.
+- *Bad / accepted:* the P0 spike KHA-7's original question is now largely moot for the locked
+  case, and NFR-R1's headline number is smaller than the PRD implies. Both are stated rather than
+  absorbed.
+- *Bad / accepted:* a user who never opens the app for a week has no ingestion for a week. That is
+  also true of every other design that respects ADR-005, and their data is intact and complete
+  the moment they do open it.
+- **Revisit trigger:** if the diagnostics from decision 2 show the locked path firing constantly
+  *and* the user reports the post-unlock wait as perceptible, the next thing to try is decision 5
+  (the nudge), then a shorter grace *offered* to the user — **not** option (b).
+
+---
+
 ## 3. Module structure and boundaries
 
 There are no services and no network calls, so "service boundaries" here means **module
@@ -894,6 +1254,9 @@ SMS arrives
    ▼
 WorkManager expedited job ──► background FlutterEngine (Dart entrypoint)
    │
+   ├─ app LOCKED? ──► no-op. Watermark unchanged, diagnostic event only. ADR-018
+   │                  (the messages wait in the SMS provider; the post-unlock
+   │                   sweep runs this identical pipeline and loses nothing)
    ▼
 ingestion: read content://sms/inbox WHERE date > watermark            ADR-006
    ▼
@@ -1081,7 +1444,8 @@ nullable (US-B14) · `linkSource` (`sms_repayment` | `user` | null) · `linkObse
 
 | Data | Location | Protection |
 |---|---|---|
-| Redacted SMS text | `RawMessage.sanitizedBody` | SQLCipher whole-DB; PAN/CVV/PIN destroyed **before** insert (ADR-013) |
+| Redacted SMS text | `RawMessage.sanitizedBody` | SQLCipher whole-DB; PAN/CVV/PIN destroyed **before** insert (ADR-013 §13.1–§13.8) |
+| SMS that arrived while the app was **locked** | **Nowhere of ours** — they stay in the Android SMS content provider until unlock | ADR-018: there is deliberately **no** staging store, inbox, or auth-free cache. Whatever protects the OS's own SMS store protects them, and Massrofy holds no second copy |
 | Amounts, merchants, counterparties | `Transaction` | SQLCipher; never logged (ADR-015); never in an unencrypted backup |
 | Masked instrument identifiers | `Instrument.maskedIdentifier` | Masked at the source; there is no column able to hold a full PAN |
 | Audit history | `AuditEntry` | SQLCipher + append-only triggers + HMAC chain |
@@ -1331,7 +1695,7 @@ this, since it is one of the few genuinely reassuring things we can say without 
 
 | Threat | Mitigated? |
 |---|---|
-| Lost/stolen unlocked phone | Yes — app lock is cryptographic (ADR-005); switcher snapshot obscured (ADR-014) |
+| Lost/stolen unlocked phone | Yes — app lock is cryptographic (ADR-005); switcher snapshot obscured (ADR-014). **And this claim needs no footnote**, because ADR-018 declined to create an auth-free staging store for SMS that arrive while locked. There is no subset of the ledger readable without authentication |
 | Lost/stolen locked phone | Yes — DB key is Keystore-wrapped behind user auth; database file is opaque |
 | Cloud account compromise | Yes — provider holds ciphertext only; the key is never in the cloud (ADR-012) |
 | Malicious app on the device reading our files | Yes — app-private storage + whole-DB encryption |
@@ -1392,7 +1756,8 @@ share action; a parser-health panel. No remote sink exists or can exist.
 | Work | Where |
 |---|---|
 | UI reads | Drift streams → Riverpod. Reactive, no polling |
-| SMS ingestion | Background isolate via WorkManager (ADR-006) |
+| SMS ingestion | Background isolate via WorkManager (ADR-006) — **but only while the app is unlocked; a locked run is a no-op that does not advance the watermark (ADR-018)** |
+| Post-unlock sweep | Part of the unlock transition, **before** the home screen presents a total as final (ADR-018 decision 3) |
 | Historical import | Background isolate, chunked, cancellable, progress-reporting (AC-A3.2, NFR-R3) |
 | Rule-pack evaluation | Background isolate with a per-rule timeout (ADR-007) |
 | Backup encryption | Background isolate (ADR-012) |
@@ -1440,13 +1805,15 @@ equivalents. This binds QA and production-support as much as engineering.
 | **H-3** | **PDF statement import** (R-6, ADR-016). Recommend **CSV in v1, PDF in v1.1**, behind a `StatementSource` port so PDF drops in later without redesign | Needs an explicit yes/no; build-plan §7.3 item 3 |
 | **H-4** | **No key escrow.** If the Recovery Phrase is lost, the backup **and** (after a Keystore invalidation) the local database are permanently unrecoverable. Any escrow contradicts AC-I2.1 | Confirm you accept this |
 | **H-5** | **Biometric re-enrollment friction.** We choose `setInvalidatedByBiometricEnrollment(true)` — the secure setting — so adding a fingerprint forces one Recovery-Phrase entry. The alternative lets anyone who can add a biometric inherit database access | Confirm the friction is acceptable |
-| **H-6** | **NFR-R1 is provisional on the P0 spike (KHA-7).** If the target device suppresses background broadcasts, the Layer-3 foreground service becomes default-on, buying seconds with battery (NFR-R7). Otherwise worst case is ~15 minutes | Pre-authorise the fallback, or accept the degraded latency |
+| **H-6** | **~~NFR-R1 is provisional on the P0 spike (KHA-7)~~ — REVISED at v1.1 by ADR-018.** The spike no longer decides NFR-R1: Layer 3 cannot buy latency while the app is locked, because it cannot open the database either. The spike's remaining question is narrower — does the `SMS_RECEIVED` wake signal survive on this OEM at all, which affects only the *unlocked* rows of ADR-018's table | Either run KHA-7 for the narrowed question or retire it explicitly. **Do not make Layer 3 default-on on NFR-R1 grounds; it would cost battery and deliver nothing** |
 | **H-7** | **`recordCounts` sits in the cleartext backup header** so a backup can be verified non-empty without decrypting. It leaks approximate activity volume to anyone holding the file | Say the word and it moves inside the ciphertext |
 | **H-8** | **Recovery secret format:** a 12-word BIP-39 mnemonic (chosen) vs a Base32 code vs a user passphrase. We generate it rather than let the user choose one, specifically to close the weak-passphrase half of R-2 | Confirm; the designer needs this for the backup flow |
 | **H-9** | **Base currency defaults to SAR**, user-changeable | Confirm |
 | **H-10** | **Internal transfers are never auto-confirmed** — a candidate pair always waits for the user (AC-B11.2, R-7). Safer, but potentially tedious in month one | Confirm the bias toward asking |
 | **H-11** | **Google Drive API adapter deferred to v1.1** (ADR-001 option (c), behind the `BackupTarget` port). v1 is SAF-only, which means the user must have a sync app pointed at the folder | Confirm SAF-only is acceptable UX for v1 |
 | **H-12** | **Play publication is architecturally foreclosed.** ADR-006 depends on `RECEIVE_SMS`/`READ_SMS`, which Play restricts to default SMS handlers. NFR-C3 is satisfied *by* side-loading. Publishing later would require re-architecting ingestion | Acknowledge the lock-in |
+| **H-13** | **⚠️ NFR-R1 is reduced. This is the one item in v1.1 you should actually weigh.** ADR-018 decides that background SMS ingestion is suspended while the app is locked, because the alternative is a second, auth-free copy of your financial data. **Net effect: "seconds from SMS arrival" holds while the app is unlocked; while locked it becomes "seconds from unlock, with nothing lost."** AC-A1.4 is still fully met. If you want the *feel* of the original, ADR-018 decision 5 offers an opt-in, content-free "a bank message is waiting" notification at zero security cost | **Confirm the reduction**, and say yes/no to building the opt-in nudge in P6/P7. If you would rather have the original latency and accept an auth-free ingest inbox, say so — but read ADR-018's four arguments first; I recommend against it clearly |
+| **H-14** | **Ratifying ADR-013's widening surfaced two live defects of the same class that KHA-54's fix did *not* close.** (i) The grouped-PAN scan tests only the maximal digit-group sequence, so `4111 1111 1111 1111 45` leaves a full PAN in cleartext with `panRedacted = false`. (ii) Grouped SA IBANs (`SA03 8000 0000 6080 1016 7519`) are not matched at all. Both are security defects in an open PR, not future work | **No decision needed — flagging for visibility.** These are must-fix under §13.4/§13.5 before PR #2 merges, and should be raised as `bug` issues routed to mobile-engineer. Tell me if you want them held to a follow-up instead |
 
 ### 8.2 Residual open questions I am deliberately **not** deciding here
 
@@ -1456,12 +1823,14 @@ equivalents. This binds QA and production-support as much as engineering.
 | **O-2** | **Rule-pack signing for imported packs.** v1 ships unsigned, mitigated by declarative-only rules, a regex timeout, mandatory user review of the diff, and no network permission | Signing needs a key-distribution story that only matters once packs are shared beyond the user. Revisit if that changes |
 | **O-3** | **Exact wording of the erase-all cloud-trash warning** (ADR-011) and the backup-freshness copy (ADR-012) | Designer's call (D-10), with the architectural facts fixed here |
 | **O-4** | Whether the diagnostic ring buffer should survive erase-all for post-mortem purposes | Currently: it is wiped, because AC-F3.1 says "all data". Raise only if production-support finds this blocking |
+| **O-5** | **`setInvalidatedByBiometricEnrollment` shipped as `false` in P1, where ADR-004 specifies `true`.** Observed while researching KHA-56; **not** part of either escalation and **not** decided here. The engineer's reasoning is sound and documented in `KeystoreChannel.kt`: `true` is only safe once `unwrapWithRecoverySecret` is real, which is Epic I / P8, and shipping it today would mean the first biometric re-enrolment permanently destroys the database with no way back | **This must flip to `true` in P8, in the same PR that makes the recovery path real.** Until then H-5's stated posture is not yet in force and the human should know that. Recommend a Linear issue blocking P8 exit so it cannot be forgotten — silence here is how a temporary deviation becomes permanent |
+| **O-6** | **Generic IBAN detection via the ISO 7064 mod-97-10 check** (ADR-013 §13.5 SHOULD), covering foreign counterparty IBANs on outbound international transfers | Deferred as additional surface on an already-large open PR, not because it is doubtful. It is the exact analogue of Luhn and would be precise rather than blunt. Pick it up in P3 or as a standalone hardening issue |
 
 ### 8.3 Risk register updates (against build-plan §6)
 
 | Risk | Status after this ADR |
 |---|---|
-| **R-1** background SMS reliability | **Bounded, not eliminated.** Three-layer design (ADR-006): 1–3 s normal, ~15 min worst case, opt-in foreground service for hostile OEMs. Honest latency table published. **Still gated on the KHA-7 spike** (H-6) |
+| **R-1** background SMS reliability | **Re-characterised at v1.1 by ADR-018, and largely dissolved.** Three-layer design still stands for the *unlocked* case (1–3 s normal, ~15 min worst case, opt-in foreground service for hostile OEMs). But while the app is **locked** — the normal state — no layer can write, so OEM broadcast suppression stops mattering: the unconditional post-unlock sweep catches everything either way. **R-1's remaining exposure is confined to the unlocked window.** The residual risk has moved from "will a broadcast arrive" to "does the post-unlock sweep complete before the user reads a total" — which ADR-018 decision 3 answers with a mandatory updating state. KHA-7 narrowed accordingly (H-6) |
 | **R-2** backup key recovery | **Closed.** App-generated 128-bit Recovery Phrase, HKDF/Argon2id, salt in the cleartext envelope header, nothing device-bound required to restore (ADR-004, ADR-012). QA must test restore on a device that has never seen the original Keystore |
 | **R-3** exact decimal money | **Closed by construction.** `Money` cannot round-trip a float; cross-currency arithmetic throws; CI bans `double` in money paths and `SUM()` on money columns (ADR-002) |
 | **R-4** parser brittleness | **Mitigated.** Data-driven rule packs, importable without an APK reinstall, corpus regression in CI, review queue as the never-lose-a-message safety net (ADR-007) |
@@ -1482,7 +1851,7 @@ equivalents. This binds QA and production-support as much as engineering.
 | Flag | Answer |
 |---|---|
 | A-1 backend or not | **ADR-001** — no backend, no API, no `INTERNET` permission |
-| A-2 background SMS + honest latency | **ADR-006** — three layers, latency table, provisional on KHA-7 |
+| A-2 background SMS + honest latency | **ADR-006** (three layers) **+ ADR-018** (what happens while locked; the superseding latency table) |
 | A-3 encryption at rest, key storage, rotation, credential change | **ADR-003** + **ADR-004** |
 | A-4 backup key derivation, escrow, recovery | **ADR-012** (+ ADR-004) — generated Recovery Phrase, no escrow |
 | A-5 exact-decimal money + CI enforcement | **ADR-002** |
@@ -1493,7 +1862,7 @@ equivalents. This binds QA and production-support as much as engineering.
 | A-10 audit-trail enforcement boundary | **ADR-010** — stated, not over-claimed |
 | A-11 PDF feasibility | **ADR-016** — recommend descope, decision **H-3** |
 | A-12 erase-all reaching every copy | **ADR-011** — including what we cannot reach |
-| A-13 redaction before storage | **ADR-013** — type-enforced at the ingestion boundary |
+| A-13 redaction before storage | **ADR-013** — type-enforced at the ingestion boundary; normative patterns in §13.1–§13.8 (v1.1) |
 | A-14 diagnostics without telemetry | **ADR-015** |
 | A-15 `FLAG_SECURE` vs QA screenshots | **ADR-014** — no shipped bypass |
 
@@ -1502,8 +1871,8 @@ equivalents. This binds QA and production-support as much as engineering.
 | NFR | Where |
 |---|---|
 | S1 encrypted at rest | ADR-003, ADR-004, §6.2 |
-| S2 masked identifiers, never store PAN/CVV/PIN | ADR-013, §4.2 `Instrument`, §6.4 |
-| S3 biometric/passcode gate | ADR-005 |
+| S2 masked identifiers, never store PAN/CVV/PIN | ADR-013 §13.1–§13.8, §4.2 `Instrument`, §6.4 |
+| S3 biometric/passcode gate | ADR-005 (+ ADR-018 — what the gate costs, and why we pay it) |
 | S4 no sensitive values in logs | ADR-015, §7.3 |
 | S5 TLS if any network | §6.3 — vacuous under ADR-001 |
 | S6 no third-party telemetry | ADR-001 (structural), ADR-015 |
@@ -1517,7 +1886,7 @@ equivalents. This binds QA and production-support as much as engineering.
 | A5 explicit currency, no blind cross-currency sums | ADR-002 (throws), ADR-009 |
 | A6 totals traceable, no orphan derived figures | §7.5 — no persisted derived totals |
 | A7 never silently discard a financial SMS | ADR-007 step 4, ADR-017, §7.1 |
-| R1 seconds latency | ADR-006 (+ H-6) |
+| R1 seconds latency | ADR-006 for the unlocked window; **ADR-018 supersedes the commitment while locked** (seconds from unlock, nothing lost). Reduction put to the human as **H-13** |
 | R2 responsive main screen | §7.5 — Drift streams, isolates |
 | R3 resumable non-blocking import | ADR-006, §7.2 |
 | R4 fully offline | ADR-001 — offline is the only mode |

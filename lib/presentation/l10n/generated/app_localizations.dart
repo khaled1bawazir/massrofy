@@ -181,6 +181,180 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'This is the Massrofy foundation build. SMS ingestion, categorisation, and reporting are built in later phases — this screen only proves the app launches, unlocks, and reads/writes its encrypted store correctly.'**
   String get homePlaceholderBody;
+
+  /// S-02 headline (docs/mockups/onboarding.html). Shown BEFORE the OS permission dialog — design flag D-9, AC-A1.2.
+  ///
+  /// In en, this message translates to:
+  /// **'Why Massrofy needs SMS access'**
+  String get smsRationaleTitle;
+
+  /// S-02 explanation card body.
+  ///
+  /// In en, this message translates to:
+  /// **'Your bank sends transaction alerts by SMS. Massrofy reads only those messages, on your device, to build a picture of your spending.'**
+  String get smsRationaleLead;
+
+  /// S-02 guarantee bullet 1. Backed by ADR-001: the release build declares no INTERNET permission, so this is an OS-enforced property, not a promise.
+  ///
+  /// In en, this message translates to:
+  /// **'Everything is processed on your phone'**
+  String get smsRationalePointOnDevice;
+
+  /// S-02 guarantee bullet 2 (AC-F4.2).
+  ///
+  /// In en, this message translates to:
+  /// **'No data is sent to us or to anyone else'**
+  String get smsRationalePointNoSharing;
+
+  /// S-02 guarantee bullet 3.
+  ///
+  /// In en, this message translates to:
+  /// **'You can revoke access at any time'**
+  String get smsRationalePointRevocable;
+
+  /// S-02 guarantee bullet 4. This is literally true per NFR-P4: a message from an unrecognised sender produces no database row at all.
+  ///
+  /// In en, this message translates to:
+  /// **'Non-financial messages are ignored and never stored'**
+  String get smsRationalePointNoiseIgnored;
+
+  /// S-02 primary CTA — opens the OS permission dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Grant SMS access'**
+  String get smsRationaleGrant;
+
+  /// S-02 secondary CTA. Declining leads to S-04 limited mode, never to a dead end.
+  ///
+  /// In en, this message translates to:
+  /// **'Not now'**
+  String get smsRationaleNotNow;
+
+  /// S-04 headline. Covers both permission-declined and permission-revoked (AC-A1.2, AC-A1.3).
+  ///
+  /// In en, this message translates to:
+  /// **'Limited mode is on'**
+  String get smsLimitedModeTitle;
+
+  /// S-04 body. The 'already have is still intact' half is required by AC-A1.3 — a user who fears their history is gone may reinstall, which would actually destroy it.
+  ///
+  /// In en, this message translates to:
+  /// **'Without SMS access, transactions will not be added automatically. Any data you already have is still intact, and you can add transactions manually at any time.'**
+  String get smsLimitedModeBody;
+
+  /// S-04 primary CTA when the permission is permanently denied — the OS silently no-ops a re-request, so a deep link is the only honest offer.
+  ///
+  /// In en, this message translates to:
+  /// **'Open system settings'**
+  String get smsLimitedModeOpenSettings;
+
+  /// S-04 primary CTA when the permission was merely declined and the OS dialog will still appear.
+  ///
+  /// In en, this message translates to:
+  /// **'Grant SMS access'**
+  String get smsLimitedModeTryAgain;
+
+  /// S-04 fallback CTA — the app must never be a dead end (AC-A1.2).
+  ///
+  /// In en, this message translates to:
+  /// **'Add a transaction manually'**
+  String get smsLimitedModeAddManually;
+
+  /// AC-A1.3 persistent banner shown on Home when access was granted and later revoked — including by Android 11+'s automatic permission reset for unused apps.
+  ///
+  /// In en, this message translates to:
+  /// **'SMS access was turned off'**
+  String get smsRevokedBannerTitle;
+
+  /// S-05 headline (AC-A3.2).
+  ///
+  /// In en, this message translates to:
+  /// **'Importing your messages'**
+  String get importProgressTitle;
+
+  /// S-05 live count.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} transactions found so far…'**
+  String importProgressFound(int count);
+
+  /// S-05 dismiss action. The import is non-blocking per NFR-R2/AC-A3.2 — the user is never trapped on this screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue in the background'**
+  String get importProgressContinueInBackground;
+
+  /// Sets the expectation set by AC-A3.1 (OQ-11 resolved: current calendar month, not full history) so an empty-looking result is not mistaken for a failure.
+  ///
+  /// In en, this message translates to:
+  /// **'Massrofy imports messages from the start of this month.'**
+  String get importProgressScopeNote;
+
+  /// S-18 app-bar title.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs review'**
+  String get needsReviewTitle;
+
+  /// S-18 tab 1 — messages the parser could not turn into a transaction (US-A4). Kept separate from low-confidence items, which are a different problem with a different fix.
+  ///
+  /// In en, this message translates to:
+  /// **'Not understood ({count})'**
+  String needsReviewTabUnparsed(int count);
+
+  /// S-18 tab 2 — parsed transactions flagged for the user, including ADR-017 possible duplicates.
+  ///
+  /// In en, this message translates to:
+  /// **'Low confidence ({count})'**
+  String needsReviewTabLowConfidence(int count);
+
+  /// S-18 empty state. Reassurance, not an error — deliberately not styled as a warning.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing needs review right now'**
+  String get needsReviewEmpty;
+
+  /// S-18 empty-state body.
+  ///
+  /// In en, this message translates to:
+  /// **'Every message and transaction is understood and categorised.'**
+  String get needsReviewEmptyBody;
+
+  /// S-18 primary action on an unparsed message — opens S-19 (AC-A4.2).
+  ///
+  /// In en, this message translates to:
+  /// **'Fill in details'**
+  String get needsReviewFillInDetails;
+
+  /// S-18 dismissal (US-A4). Marks the message as dismissed; never deletes it, so a later inbox sweep cannot resurrect it.
+  ///
+  /// In en, this message translates to:
+  /// **'Not a transaction'**
+  String get needsReviewNotATransaction;
+
+  /// S-18 metadata line under a raw message preview.
+  ///
+  /// In en, this message translates to:
+  /// **'Received {time} · From: {sender}'**
+  String needsReviewReceivedFrom(String time, String sender);
+
+  /// Badge on a transaction flagged by ADR-017's D2/D3 tiers. Both transactions stay in every total until the user decides — never auto-removed.
+  ///
+  /// In en, this message translates to:
+  /// **'Possible duplicate'**
+  String get needsReviewPossibleDuplicate;
+
+  /// Explains UnparsedReason.noRuleMatched in plain language — usually means the bank changed its template (risk R-4).
+  ///
+  /// In en, this message translates to:
+  /// **'This message did not match any known format'**
+  String get needsReviewReasonNoRule;
+
+  /// Explains UnparsedReason.requiredFieldMissing / extractionRegexFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Some details were missing from this message'**
+  String get needsReviewReasonMissingField;
 }
 
 class _AppLocalizationsDelegate

@@ -53,4 +53,108 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get homePlaceholderBody =>
       'This is the Massrofy foundation build. SMS ingestion, categorisation, and reporting are built in later phases — this screen only proves the app launches, unlocks, and reads/writes its encrypted store correctly.';
+
+  @override
+  String get smsRationaleTitle => 'Why Massrofy needs SMS access';
+
+  @override
+  String get smsRationaleLead =>
+      'Your bank sends transaction alerts by SMS. Massrofy reads only those messages, on your device, to build a picture of your spending.';
+
+  @override
+  String get smsRationalePointOnDevice =>
+      'Everything is processed on your phone';
+
+  @override
+  String get smsRationalePointNoSharing =>
+      'No data is sent to us or to anyone else';
+
+  @override
+  String get smsRationalePointRevocable => 'You can revoke access at any time';
+
+  @override
+  String get smsRationalePointNoiseIgnored =>
+      'Non-financial messages are ignored and never stored';
+
+  @override
+  String get smsRationaleGrant => 'Grant SMS access';
+
+  @override
+  String get smsRationaleNotNow => 'Not now';
+
+  @override
+  String get smsLimitedModeTitle => 'Limited mode is on';
+
+  @override
+  String get smsLimitedModeBody =>
+      'Without SMS access, transactions will not be added automatically. Any data you already have is still intact, and you can add transactions manually at any time.';
+
+  @override
+  String get smsLimitedModeOpenSettings => 'Open system settings';
+
+  @override
+  String get smsLimitedModeTryAgain => 'Grant SMS access';
+
+  @override
+  String get smsLimitedModeAddManually => 'Add a transaction manually';
+
+  @override
+  String get smsRevokedBannerTitle => 'SMS access was turned off';
+
+  @override
+  String get importProgressTitle => 'Importing your messages';
+
+  @override
+  String importProgressFound(int count) {
+    return '$count transactions found so far…';
+  }
+
+  @override
+  String get importProgressContinueInBackground => 'Continue in the background';
+
+  @override
+  String get importProgressScopeNote =>
+      'Massrofy imports messages from the start of this month.';
+
+  @override
+  String get needsReviewTitle => 'Needs review';
+
+  @override
+  String needsReviewTabUnparsed(int count) {
+    return 'Not understood ($count)';
+  }
+
+  @override
+  String needsReviewTabLowConfidence(int count) {
+    return 'Low confidence ($count)';
+  }
+
+  @override
+  String get needsReviewEmpty => 'Nothing needs review right now';
+
+  @override
+  String get needsReviewEmptyBody =>
+      'Every message and transaction is understood and categorised.';
+
+  @override
+  String get needsReviewFillInDetails => 'Fill in details';
+
+  @override
+  String get needsReviewNotATransaction => 'Not a transaction';
+
+  @override
+  String needsReviewReceivedFrom(String time, String sender) {
+    return 'Received $time · From: $sender';
+  }
+
+  @override
+  String get needsReviewPossibleDuplicate => 'Possible duplicate';
+
+  @override
+  String get needsReviewReasonNoRule =>
+      'This message did not match any known format';
+
+  @override
+  String get needsReviewReasonMissingField =>
+      'Some details were missing from this message';
 }

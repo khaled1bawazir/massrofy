@@ -757,6 +757,28 @@ class $RawMessagesTable extends RawMessages
         ),
         defaultValue: const Constant(false),
       );
+  static const VerificationMeta _unparsedReasonMeta = const VerificationMeta(
+    'unparsedReason',
+  );
+  @override
+  late final GeneratedColumn<String> unparsedReason = GeneratedColumn<String>(
+    'unparsed_reason',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _unparsedRuleIdMeta = const VerificationMeta(
+    'unparsedRuleId',
+  );
+  @override
+  late final GeneratedColumn<String> unparsedRuleId = GeneratedColumn<String>(
+    'unparsed_rule_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -781,6 +803,8 @@ class $RawMessagesTable extends RawMessages
     classification,
     panRedacted,
     dismissedAsNotTransaction,
+    unparsedReason,
+    unparsedRuleId,
     createdAt,
   ];
   @override
@@ -878,6 +902,24 @@ class $RawMessagesTable extends RawMessages
         ),
       );
     }
+    if (data.containsKey('unparsed_reason')) {
+      context.handle(
+        _unparsedReasonMeta,
+        unparsedReason.isAcceptableOrUnknown(
+          data['unparsed_reason']!,
+          _unparsedReasonMeta,
+        ),
+      );
+    }
+    if (data.containsKey('unparsed_rule_id')) {
+      context.handle(
+        _unparsedRuleIdMeta,
+        unparsedRuleId.isAcceptableOrUnknown(
+          data['unparsed_rule_id']!,
+          _unparsedRuleIdMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -933,6 +975,14 @@ class $RawMessagesTable extends RawMessages
         DriftSqlType.bool,
         data['${effectivePrefix}dismissed_as_not_transaction'],
       )!,
+      unparsedReason: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}unparsed_reason'],
+      ),
+      unparsedRuleId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}unparsed_rule_id'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -979,7 +1029,19 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
   /// 'ignored_marketing' | 'ignored_info'`.
   final String classification;
   final bool panRedacted;
+
+  /// US-A4's "not a transaction" dismissal. A dismissed row leaves the review
+  /// queue but is **kept**, so the same message re-read from the provider on
+  /// a later sweep is not resurrected as a new review item.
   final bool dismissedAsNotTransaction;
+
+  /// One of `UnparsedReason`'s constants, or `NULL` when the message parsed
+  /// or was ignored.
+  final String? unparsedReason;
+
+  /// The `ruleId` that matched but could not complete, when there was one.
+  /// `NULL` when no rule matched at all.
+  final String? unparsedRuleId;
   final DateTime createdAt;
   const RawMessageRow({
     required this.id,
@@ -992,6 +1054,8 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
     required this.classification,
     required this.panRedacted,
     required this.dismissedAsNotTransaction,
+    this.unparsedReason,
+    this.unparsedRuleId,
     required this.createdAt,
   });
   @override
@@ -1015,6 +1079,12 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
     map['dismissed_as_not_transaction'] = Variable<bool>(
       dismissedAsNotTransaction,
     );
+    if (!nullToAbsent || unparsedReason != null) {
+      map['unparsed_reason'] = Variable<String>(unparsedReason);
+    }
+    if (!nullToAbsent || unparsedRuleId != null) {
+      map['unparsed_rule_id'] = Variable<String>(unparsedRuleId);
+    }
     map['created_at'] = Variable<DateTime>(createdAt);
     return map;
   }
@@ -1037,6 +1107,12 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
       classification: Value(classification),
       panRedacted: Value(panRedacted),
       dismissedAsNotTransaction: Value(dismissedAsNotTransaction),
+      unparsedReason: unparsedReason == null && nullToAbsent
+          ? const Value.absent()
+          : Value(unparsedReason),
+      unparsedRuleId: unparsedRuleId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(unparsedRuleId),
       createdAt: Value(createdAt),
     );
   }
@@ -1059,6 +1135,8 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
       dismissedAsNotTransaction: serializer.fromJson<bool>(
         json['dismissedAsNotTransaction'],
       ),
+      unparsedReason: serializer.fromJson<String?>(json['unparsedReason']),
+      unparsedRuleId: serializer.fromJson<String?>(json['unparsedRuleId']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
     );
   }
@@ -1078,6 +1156,8 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
       'dismissedAsNotTransaction': serializer.toJson<bool>(
         dismissedAsNotTransaction,
       ),
+      'unparsedReason': serializer.toJson<String?>(unparsedReason),
+      'unparsedRuleId': serializer.toJson<String?>(unparsedRuleId),
       'createdAt': serializer.toJson<DateTime>(createdAt),
     };
   }
@@ -1093,6 +1173,8 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
     String? classification,
     bool? panRedacted,
     bool? dismissedAsNotTransaction,
+    Value<String?> unparsedReason = const Value.absent(),
+    Value<String?> unparsedRuleId = const Value.absent(),
     DateTime? createdAt,
   }) => RawMessageRow(
     id: id ?? this.id,
@@ -1110,6 +1192,12 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
     panRedacted: panRedacted ?? this.panRedacted,
     dismissedAsNotTransaction:
         dismissedAsNotTransaction ?? this.dismissedAsNotTransaction,
+    unparsedReason: unparsedReason.present
+        ? unparsedReason.value
+        : this.unparsedReason,
+    unparsedRuleId: unparsedRuleId.present
+        ? unparsedRuleId.value
+        : this.unparsedRuleId,
     createdAt: createdAt ?? this.createdAt,
   );
   RawMessageRow copyWithCompanion(RawMessagesCompanion data) {
@@ -1138,6 +1226,12 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
       dismissedAsNotTransaction: data.dismissedAsNotTransaction.present
           ? data.dismissedAsNotTransaction.value
           : this.dismissedAsNotTransaction,
+      unparsedReason: data.unparsedReason.present
+          ? data.unparsedReason.value
+          : this.unparsedReason,
+      unparsedRuleId: data.unparsedRuleId.present
+          ? data.unparsedRuleId.value
+          : this.unparsedRuleId,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
     );
   }
@@ -1155,6 +1249,8 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
           ..write('classification: $classification, ')
           ..write('panRedacted: $panRedacted, ')
           ..write('dismissedAsNotTransaction: $dismissedAsNotTransaction, ')
+          ..write('unparsedReason: $unparsedReason, ')
+          ..write('unparsedRuleId: $unparsedRuleId, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
@@ -1172,6 +1268,8 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
     classification,
     panRedacted,
     dismissedAsNotTransaction,
+    unparsedReason,
+    unparsedRuleId,
     createdAt,
   );
   @override
@@ -1188,6 +1286,8 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
           other.classification == this.classification &&
           other.panRedacted == this.panRedacted &&
           other.dismissedAsNotTransaction == this.dismissedAsNotTransaction &&
+          other.unparsedReason == this.unparsedReason &&
+          other.unparsedRuleId == this.unparsedRuleId &&
           other.createdAt == this.createdAt);
 }
 
@@ -1202,6 +1302,8 @@ class RawMessagesCompanion extends UpdateCompanion<RawMessageRow> {
   final Value<String> classification;
   final Value<bool> panRedacted;
   final Value<bool> dismissedAsNotTransaction;
+  final Value<String?> unparsedReason;
+  final Value<String?> unparsedRuleId;
   final Value<DateTime> createdAt;
   const RawMessagesCompanion({
     this.id = const Value.absent(),
@@ -1214,6 +1316,8 @@ class RawMessagesCompanion extends UpdateCompanion<RawMessageRow> {
     this.classification = const Value.absent(),
     this.panRedacted = const Value.absent(),
     this.dismissedAsNotTransaction = const Value.absent(),
+    this.unparsedReason = const Value.absent(),
+    this.unparsedRuleId = const Value.absent(),
     this.createdAt = const Value.absent(),
   });
   RawMessagesCompanion.insert({
@@ -1227,6 +1331,8 @@ class RawMessagesCompanion extends UpdateCompanion<RawMessageRow> {
     required String classification,
     this.panRedacted = const Value.absent(),
     this.dismissedAsNotTransaction = const Value.absent(),
+    this.unparsedReason = const Value.absent(),
+    this.unparsedRuleId = const Value.absent(),
     this.createdAt = const Value.absent(),
   }) : sender = Value(sender),
        receivedAt = Value(receivedAt),
@@ -1243,6 +1349,8 @@ class RawMessagesCompanion extends UpdateCompanion<RawMessageRow> {
     Expression<String>? classification,
     Expression<bool>? panRedacted,
     Expression<bool>? dismissedAsNotTransaction,
+    Expression<String>? unparsedReason,
+    Expression<String>? unparsedRuleId,
     Expression<DateTime>? createdAt,
   }) {
     return RawValuesInsertable({
@@ -1257,6 +1365,8 @@ class RawMessagesCompanion extends UpdateCompanion<RawMessageRow> {
       if (panRedacted != null) 'pan_redacted': panRedacted,
       if (dismissedAsNotTransaction != null)
         'dismissed_as_not_transaction': dismissedAsNotTransaction,
+      if (unparsedReason != null) 'unparsed_reason': unparsedReason,
+      if (unparsedRuleId != null) 'unparsed_rule_id': unparsedRuleId,
       if (createdAt != null) 'created_at': createdAt,
     });
   }
@@ -1272,6 +1382,8 @@ class RawMessagesCompanion extends UpdateCompanion<RawMessageRow> {
     Value<String>? classification,
     Value<bool>? panRedacted,
     Value<bool>? dismissedAsNotTransaction,
+    Value<String?>? unparsedReason,
+    Value<String?>? unparsedRuleId,
     Value<DateTime>? createdAt,
   }) {
     return RawMessagesCompanion(
@@ -1286,6 +1398,8 @@ class RawMessagesCompanion extends UpdateCompanion<RawMessageRow> {
       panRedacted: panRedacted ?? this.panRedacted,
       dismissedAsNotTransaction:
           dismissedAsNotTransaction ?? this.dismissedAsNotTransaction,
+      unparsedReason: unparsedReason ?? this.unparsedReason,
+      unparsedRuleId: unparsedRuleId ?? this.unparsedRuleId,
       createdAt: createdAt ?? this.createdAt,
     );
   }
@@ -1325,6 +1439,12 @@ class RawMessagesCompanion extends UpdateCompanion<RawMessageRow> {
         dismissedAsNotTransaction.value,
       );
     }
+    if (unparsedReason.present) {
+      map['unparsed_reason'] = Variable<String>(unparsedReason.value);
+    }
+    if (unparsedRuleId.present) {
+      map['unparsed_rule_id'] = Variable<String>(unparsedRuleId.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -1344,6 +1464,8 @@ class RawMessagesCompanion extends UpdateCompanion<RawMessageRow> {
           ..write('classification: $classification, ')
           ..write('panRedacted: $panRedacted, ')
           ..write('dismissedAsNotTransaction: $dismissedAsNotTransaction, ')
+          ..write('unparsedReason: $unparsedReason, ')
+          ..write('unparsedRuleId: $unparsedRuleId, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
@@ -1424,6 +1546,265 @@ class $TransactionsTable extends Transactions
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _convertedAmountAmountMeta =
+      const VerificationMeta('convertedAmountAmount');
+  @override
+  late final GeneratedColumn<String> convertedAmountAmount =
+      GeneratedColumn<String>(
+        'converted_amount_amount',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _convertedAmountCurrencyMeta =
+      const VerificationMeta('convertedAmountCurrency');
+  @override
+  late final GeneratedColumn<String> convertedAmountCurrency =
+      GeneratedColumn<String>(
+        'converted_amount_currency',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _convertedAmountMinorMeta =
+      const VerificationMeta('convertedAmountMinor');
+  @override
+  late final GeneratedColumn<int> convertedAmountMinor = GeneratedColumn<int>(
+    'converted_amount_minor',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _feeAmountAmountMeta = const VerificationMeta(
+    'feeAmountAmount',
+  );
+  @override
+  late final GeneratedColumn<String> feeAmountAmount = GeneratedColumn<String>(
+    'fee_amount_amount',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _feeAmountCurrencyMeta = const VerificationMeta(
+    'feeAmountCurrency',
+  );
+  @override
+  late final GeneratedColumn<String> feeAmountCurrency =
+      GeneratedColumn<String>(
+        'fee_amount_currency',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _feeAmountMinorMeta = const VerificationMeta(
+    'feeAmountMinor',
+  );
+  @override
+  late final GeneratedColumn<int> feeAmountMinor = GeneratedColumn<int>(
+    'fee_amount_minor',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _fxRateMeta = const VerificationMeta('fxRate');
+  @override
+  late final GeneratedColumn<String> fxRate = GeneratedColumn<String>(
+    'fx_rate',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _occurredAtMeta = const VerificationMeta(
+    'occurredAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> occurredAt = GeneratedColumn<DateTime>(
+    'occurred_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _timeSourceMeta = const VerificationMeta(
+    'timeSource',
+  );
+  @override
+  late final GeneratedColumn<String> timeSource = GeneratedColumn<String>(
+    'time_source',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _directionMeta = const VerificationMeta(
+    'direction',
+  );
+  @override
+  late final GeneratedColumn<String> direction = GeneratedColumn<String>(
+    'direction',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('debit'),
+  );
+  static const VerificationMeta _transactionTypeMeta = const VerificationMeta(
+    'transactionType',
+  );
+  @override
+  late final GeneratedColumn<String> transactionType = GeneratedColumn<String>(
+    'transaction_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('unknown'),
+  );
+  static const VerificationMeta _affectsSpendMeta = const VerificationMeta(
+    'affectsSpend',
+  );
+  @override
+  late final GeneratedColumn<bool> affectsSpend = GeneratedColumn<bool>(
+    'affects_spend',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("affects_spend" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _referenceNumberMeta = const VerificationMeta(
+    'referenceNumber',
+  );
+  @override
+  late final GeneratedColumn<String> referenceNumber = GeneratedColumn<String>(
+    'reference_number',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _instrumentKindMeta = const VerificationMeta(
+    'instrumentKind',
+  );
+  @override
+  late final GeneratedColumn<String> instrumentKind = GeneratedColumn<String>(
+    'instrument_kind',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _instrumentMaskedRefMeta =
+      const VerificationMeta('instrumentMaskedRef');
+  @override
+  late final GeneratedColumn<String> instrumentMaskedRef =
+      GeneratedColumn<String>(
+        'instrument_masked_ref',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _provenanceMeta = const VerificationMeta(
+    'provenance',
+  );
+  @override
+  late final GeneratedColumn<String> provenance = GeneratedColumn<String>(
+    'provenance',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('sms'),
+  );
+  static const VerificationMeta _sourceMessageIdMeta = const VerificationMeta(
+    'sourceMessageId',
+  );
+  @override
+  late final GeneratedColumn<int> sourceMessageId = GeneratedColumn<int>(
+    'source_message_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _rulePackIdMeta = const VerificationMeta(
+    'rulePackId',
+  );
+  @override
+  late final GeneratedColumn<String> rulePackId = GeneratedColumn<String>(
+    'rule_pack_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _rulePackVersionMeta = const VerificationMeta(
+    'rulePackVersion',
+  );
+  @override
+  late final GeneratedColumn<String> rulePackVersion = GeneratedColumn<String>(
+    'rule_pack_version',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _ruleIdMeta = const VerificationMeta('ruleId');
+  @override
+  late final GeneratedColumn<String> ruleId = GeneratedColumn<String>(
+    'rule_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _needsReviewMeta = const VerificationMeta(
+    'needsReview',
+  );
+  @override
+  late final GeneratedColumn<bool> needsReview = GeneratedColumn<bool>(
+    'needs_review',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("needs_review" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _reviewReasonMeta = const VerificationMeta(
+    'reviewReason',
+  );
+  @override
+  late final GeneratedColumn<String> reviewReason = GeneratedColumn<String>(
+    'review_reason',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _possibleDuplicateOfIdMeta =
+      const VerificationMeta('possibleDuplicateOfId');
+  @override
+  late final GeneratedColumn<int> possibleDuplicateOfId = GeneratedColumn<int>(
+    'possible_duplicate_of_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _isDeletedMeta = const VerificationMeta(
     'isDeleted',
   );
@@ -1471,6 +1852,29 @@ class $TransactionsTable extends Transactions
     amountCurrency,
     amountMinor,
     categoryId,
+    convertedAmountAmount,
+    convertedAmountCurrency,
+    convertedAmountMinor,
+    feeAmountAmount,
+    feeAmountCurrency,
+    feeAmountMinor,
+    fxRate,
+    occurredAt,
+    timeSource,
+    direction,
+    transactionType,
+    affectsSpend,
+    referenceNumber,
+    instrumentKind,
+    instrumentMaskedRef,
+    provenance,
+    sourceMessageId,
+    rulePackId,
+    rulePackVersion,
+    ruleId,
+    needsReview,
+    reviewReason,
+    possibleDuplicateOfId,
     isDeleted,
     createdAt,
     updatedAt,
@@ -1538,6 +1942,195 @@ class $TransactionsTable extends Transactions
         categoryId.isAcceptableOrUnknown(data['category_id']!, _categoryIdMeta),
       );
     }
+    if (data.containsKey('converted_amount_amount')) {
+      context.handle(
+        _convertedAmountAmountMeta,
+        convertedAmountAmount.isAcceptableOrUnknown(
+          data['converted_amount_amount']!,
+          _convertedAmountAmountMeta,
+        ),
+      );
+    }
+    if (data.containsKey('converted_amount_currency')) {
+      context.handle(
+        _convertedAmountCurrencyMeta,
+        convertedAmountCurrency.isAcceptableOrUnknown(
+          data['converted_amount_currency']!,
+          _convertedAmountCurrencyMeta,
+        ),
+      );
+    }
+    if (data.containsKey('converted_amount_minor')) {
+      context.handle(
+        _convertedAmountMinorMeta,
+        convertedAmountMinor.isAcceptableOrUnknown(
+          data['converted_amount_minor']!,
+          _convertedAmountMinorMeta,
+        ),
+      );
+    }
+    if (data.containsKey('fee_amount_amount')) {
+      context.handle(
+        _feeAmountAmountMeta,
+        feeAmountAmount.isAcceptableOrUnknown(
+          data['fee_amount_amount']!,
+          _feeAmountAmountMeta,
+        ),
+      );
+    }
+    if (data.containsKey('fee_amount_currency')) {
+      context.handle(
+        _feeAmountCurrencyMeta,
+        feeAmountCurrency.isAcceptableOrUnknown(
+          data['fee_amount_currency']!,
+          _feeAmountCurrencyMeta,
+        ),
+      );
+    }
+    if (data.containsKey('fee_amount_minor')) {
+      context.handle(
+        _feeAmountMinorMeta,
+        feeAmountMinor.isAcceptableOrUnknown(
+          data['fee_amount_minor']!,
+          _feeAmountMinorMeta,
+        ),
+      );
+    }
+    if (data.containsKey('fx_rate')) {
+      context.handle(
+        _fxRateMeta,
+        fxRate.isAcceptableOrUnknown(data['fx_rate']!, _fxRateMeta),
+      );
+    }
+    if (data.containsKey('occurred_at')) {
+      context.handle(
+        _occurredAtMeta,
+        occurredAt.isAcceptableOrUnknown(data['occurred_at']!, _occurredAtMeta),
+      );
+    }
+    if (data.containsKey('time_source')) {
+      context.handle(
+        _timeSourceMeta,
+        timeSource.isAcceptableOrUnknown(data['time_source']!, _timeSourceMeta),
+      );
+    }
+    if (data.containsKey('direction')) {
+      context.handle(
+        _directionMeta,
+        direction.isAcceptableOrUnknown(data['direction']!, _directionMeta),
+      );
+    }
+    if (data.containsKey('transaction_type')) {
+      context.handle(
+        _transactionTypeMeta,
+        transactionType.isAcceptableOrUnknown(
+          data['transaction_type']!,
+          _transactionTypeMeta,
+        ),
+      );
+    }
+    if (data.containsKey('affects_spend')) {
+      context.handle(
+        _affectsSpendMeta,
+        affectsSpend.isAcceptableOrUnknown(
+          data['affects_spend']!,
+          _affectsSpendMeta,
+        ),
+      );
+    }
+    if (data.containsKey('reference_number')) {
+      context.handle(
+        _referenceNumberMeta,
+        referenceNumber.isAcceptableOrUnknown(
+          data['reference_number']!,
+          _referenceNumberMeta,
+        ),
+      );
+    }
+    if (data.containsKey('instrument_kind')) {
+      context.handle(
+        _instrumentKindMeta,
+        instrumentKind.isAcceptableOrUnknown(
+          data['instrument_kind']!,
+          _instrumentKindMeta,
+        ),
+      );
+    }
+    if (data.containsKey('instrument_masked_ref')) {
+      context.handle(
+        _instrumentMaskedRefMeta,
+        instrumentMaskedRef.isAcceptableOrUnknown(
+          data['instrument_masked_ref']!,
+          _instrumentMaskedRefMeta,
+        ),
+      );
+    }
+    if (data.containsKey('provenance')) {
+      context.handle(
+        _provenanceMeta,
+        provenance.isAcceptableOrUnknown(data['provenance']!, _provenanceMeta),
+      );
+    }
+    if (data.containsKey('source_message_id')) {
+      context.handle(
+        _sourceMessageIdMeta,
+        sourceMessageId.isAcceptableOrUnknown(
+          data['source_message_id']!,
+          _sourceMessageIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('rule_pack_id')) {
+      context.handle(
+        _rulePackIdMeta,
+        rulePackId.isAcceptableOrUnknown(
+          data['rule_pack_id']!,
+          _rulePackIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('rule_pack_version')) {
+      context.handle(
+        _rulePackVersionMeta,
+        rulePackVersion.isAcceptableOrUnknown(
+          data['rule_pack_version']!,
+          _rulePackVersionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('rule_id')) {
+      context.handle(
+        _ruleIdMeta,
+        ruleId.isAcceptableOrUnknown(data['rule_id']!, _ruleIdMeta),
+      );
+    }
+    if (data.containsKey('needs_review')) {
+      context.handle(
+        _needsReviewMeta,
+        needsReview.isAcceptableOrUnknown(
+          data['needs_review']!,
+          _needsReviewMeta,
+        ),
+      );
+    }
+    if (data.containsKey('review_reason')) {
+      context.handle(
+        _reviewReasonMeta,
+        reviewReason.isAcceptableOrUnknown(
+          data['review_reason']!,
+          _reviewReasonMeta,
+        ),
+      );
+    }
+    if (data.containsKey('possible_duplicate_of_id')) {
+      context.handle(
+        _possibleDuplicateOfIdMeta,
+        possibleDuplicateOfId.isAcceptableOrUnknown(
+          data['possible_duplicate_of_id']!,
+          _possibleDuplicateOfIdMeta,
+        ),
+      );
+    }
     if (data.containsKey('is_deleted')) {
       context.handle(
         _isDeletedMeta,
@@ -1589,6 +2182,98 @@ class $TransactionsTable extends Transactions
         DriftSqlType.string,
         data['${effectivePrefix}category_id'],
       ),
+      convertedAmountAmount: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}converted_amount_amount'],
+      ),
+      convertedAmountCurrency: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}converted_amount_currency'],
+      ),
+      convertedAmountMinor: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}converted_amount_minor'],
+      ),
+      feeAmountAmount: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}fee_amount_amount'],
+      ),
+      feeAmountCurrency: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}fee_amount_currency'],
+      ),
+      feeAmountMinor: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}fee_amount_minor'],
+      ),
+      fxRate: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}fx_rate'],
+      ),
+      occurredAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}occurred_at'],
+      ),
+      timeSource: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}time_source'],
+      ),
+      direction: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}direction'],
+      )!,
+      transactionType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}transaction_type'],
+      )!,
+      affectsSpend: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}affects_spend'],
+      )!,
+      referenceNumber: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}reference_number'],
+      ),
+      instrumentKind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}instrument_kind'],
+      ),
+      instrumentMaskedRef: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}instrument_masked_ref'],
+      ),
+      provenance: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}provenance'],
+      )!,
+      sourceMessageId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}source_message_id'],
+      ),
+      rulePackId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}rule_pack_id'],
+      ),
+      rulePackVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}rule_pack_version'],
+      ),
+      ruleId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}rule_id'],
+      ),
+      needsReview: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}needs_review'],
+      )!,
+      reviewReason: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}review_reason'],
+      ),
+      possibleDuplicateOfId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}possible_duplicate_of_id'],
+      ),
       isDeleted: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}is_deleted'],
@@ -1621,6 +2306,89 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
   /// intentionally loose in this P1-minimal table.
   final String? categoryId;
 
+  /// The bank's own inline conversion into the base currency, where the
+  /// message supplied one. ADR-009 prefers the bank's figure over anything
+  /// we could derive: it is what actually hit the account.
+  final String? convertedAmountAmount;
+  final String? convertedAmountCurrency;
+  final int? convertedAmountMinor;
+  final String? feeAmountAmount;
+  final String? feeAmountCurrency;
+  final int? feeAmountMinor;
+
+  /// Exact decimal **string**, never a float (ADR-002). A rate is not an
+  /// amount of money, so it is not a `Money` triple either.
+  final String? fxRate;
+
+  /// When the movement happened, per the message, in UTC.
+  ///
+  /// Distinct from `createdAt` (when *we* recorded it) on purpose: a
+  /// historical import writes rows today for purchases made three weeks ago,
+  /// and a period total keyed on `createdAt` would put every one of them in
+  /// the wrong month.
+  final DateTime? occurredAt;
+
+  /// `sms_explicit` | `sms_local_assumed` | `received_at_fallback`
+  /// (architecture §7.4). Recorded so an odd-looking timestamp is
+  /// explainable rather than mysterious.
+  final String? timeSource;
+
+  /// `debit` | `credit`. A refund is a credit and **reduces** period spend
+  /// (US-B7); it is never stored as a negative debit, because a negative
+  /// amount would break every `Money` invariant that assumes sign lives in
+  /// the direction field.
+  final String direction;
+
+  /// The matched rule's `messageType`, e.g. `pos_purchase`, `installment`.
+  final String transactionType;
+
+  /// Whether this counts toward "money spent" (US-B10/B11). `false` for
+  /// internal transfers, salary income, and card repayment.
+  final bool affectsSpend;
+
+  /// Present on transfers and some bill payments (PRD §3.4). The reliable
+  /// duplicate key when it exists (ADR-017 D2).
+  final String? referenceNumber;
+
+  /// `card` | `account`, from the matched rule's declaration — never guessed
+  /// from digit length (AC-B13.1/2).
+  final String? instrumentKind;
+
+  /// Already masked, e.g. `****4821`. There is deliberately no column in this
+  /// schema capable of holding a full PAN (NFR-S2, architecture §4.2).
+  final String? instrumentMaskedRef;
+
+  /// `sms` | `manual` | `statement`. P7 must not create a fourth, untracked
+  /// path (build-plan §5).
+  final String provenance;
+
+  /// FK to `raw_message.id`, so the user can open a transaction and read the
+  /// message it came from to verify the parse (AC-B1.2).
+  final int? sourceMessageId;
+
+  /// Which pack, version and rule produced this row. A rule change never
+  /// rewrites history (ADR-007 "Provenance"); these three columns are what
+  /// make it possible to tell later which parse produced which number.
+  final String? rulePackId;
+  final String? rulePackVersion;
+  final String? ruleId;
+
+  /// Set by ADR-017's D3 heuristic tier and by any other "we are not sure"
+  /// signal. Surfaced in the Needs Review inbox (design.md S-18).
+  final bool needsReview;
+
+  /// A machine-readable reason, e.g. `possible_duplicate`. Never free text.
+  final String? reviewReason;
+
+  /// The transaction this one *might* duplicate.
+  ///
+  /// **Both rows stay in the list and in the totals until the user decides**
+  /// (ADR-017 D3). The bias is deliberate and asymmetric: an inflated total
+  /// is visible and correctable; a silently deleted real transaction is
+  /// invisible and uncorrectable. Banking default — prefer the auditable,
+  /// recoverable error.
+  final int? possibleDuplicateOfId;
+
   /// Soft delete (US-B8) — hidden from normal lists/totals but retained and
   /// restorable. Only "erase everything" (ADR-011, P8) is a true hard
   /// delete.
@@ -1634,6 +2402,29 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     required this.amountCurrency,
     required this.amountMinor,
     this.categoryId,
+    this.convertedAmountAmount,
+    this.convertedAmountCurrency,
+    this.convertedAmountMinor,
+    this.feeAmountAmount,
+    this.feeAmountCurrency,
+    this.feeAmountMinor,
+    this.fxRate,
+    this.occurredAt,
+    this.timeSource,
+    required this.direction,
+    required this.transactionType,
+    required this.affectsSpend,
+    this.referenceNumber,
+    this.instrumentKind,
+    this.instrumentMaskedRef,
+    required this.provenance,
+    this.sourceMessageId,
+    this.rulePackId,
+    this.rulePackVersion,
+    this.ruleId,
+    required this.needsReview,
+    this.reviewReason,
+    this.possibleDuplicateOfId,
     required this.isDeleted,
     required this.createdAt,
     required this.updatedAt,
@@ -1650,6 +2441,67 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     map['amount_minor'] = Variable<int>(amountMinor);
     if (!nullToAbsent || categoryId != null) {
       map['category_id'] = Variable<String>(categoryId);
+    }
+    if (!nullToAbsent || convertedAmountAmount != null) {
+      map['converted_amount_amount'] = Variable<String>(convertedAmountAmount);
+    }
+    if (!nullToAbsent || convertedAmountCurrency != null) {
+      map['converted_amount_currency'] = Variable<String>(
+        convertedAmountCurrency,
+      );
+    }
+    if (!nullToAbsent || convertedAmountMinor != null) {
+      map['converted_amount_minor'] = Variable<int>(convertedAmountMinor);
+    }
+    if (!nullToAbsent || feeAmountAmount != null) {
+      map['fee_amount_amount'] = Variable<String>(feeAmountAmount);
+    }
+    if (!nullToAbsent || feeAmountCurrency != null) {
+      map['fee_amount_currency'] = Variable<String>(feeAmountCurrency);
+    }
+    if (!nullToAbsent || feeAmountMinor != null) {
+      map['fee_amount_minor'] = Variable<int>(feeAmountMinor);
+    }
+    if (!nullToAbsent || fxRate != null) {
+      map['fx_rate'] = Variable<String>(fxRate);
+    }
+    if (!nullToAbsent || occurredAt != null) {
+      map['occurred_at'] = Variable<DateTime>(occurredAt);
+    }
+    if (!nullToAbsent || timeSource != null) {
+      map['time_source'] = Variable<String>(timeSource);
+    }
+    map['direction'] = Variable<String>(direction);
+    map['transaction_type'] = Variable<String>(transactionType);
+    map['affects_spend'] = Variable<bool>(affectsSpend);
+    if (!nullToAbsent || referenceNumber != null) {
+      map['reference_number'] = Variable<String>(referenceNumber);
+    }
+    if (!nullToAbsent || instrumentKind != null) {
+      map['instrument_kind'] = Variable<String>(instrumentKind);
+    }
+    if (!nullToAbsent || instrumentMaskedRef != null) {
+      map['instrument_masked_ref'] = Variable<String>(instrumentMaskedRef);
+    }
+    map['provenance'] = Variable<String>(provenance);
+    if (!nullToAbsent || sourceMessageId != null) {
+      map['source_message_id'] = Variable<int>(sourceMessageId);
+    }
+    if (!nullToAbsent || rulePackId != null) {
+      map['rule_pack_id'] = Variable<String>(rulePackId);
+    }
+    if (!nullToAbsent || rulePackVersion != null) {
+      map['rule_pack_version'] = Variable<String>(rulePackVersion);
+    }
+    if (!nullToAbsent || ruleId != null) {
+      map['rule_id'] = Variable<String>(ruleId);
+    }
+    map['needs_review'] = Variable<bool>(needsReview);
+    if (!nullToAbsent || reviewReason != null) {
+      map['review_reason'] = Variable<String>(reviewReason);
+    }
+    if (!nullToAbsent || possibleDuplicateOfId != null) {
+      map['possible_duplicate_of_id'] = Variable<int>(possibleDuplicateOfId);
     }
     map['is_deleted'] = Variable<bool>(isDeleted);
     map['created_at'] = Variable<DateTime>(createdAt);
@@ -1669,6 +2521,65 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       categoryId: categoryId == null && nullToAbsent
           ? const Value.absent()
           : Value(categoryId),
+      convertedAmountAmount: convertedAmountAmount == null && nullToAbsent
+          ? const Value.absent()
+          : Value(convertedAmountAmount),
+      convertedAmountCurrency: convertedAmountCurrency == null && nullToAbsent
+          ? const Value.absent()
+          : Value(convertedAmountCurrency),
+      convertedAmountMinor: convertedAmountMinor == null && nullToAbsent
+          ? const Value.absent()
+          : Value(convertedAmountMinor),
+      feeAmountAmount: feeAmountAmount == null && nullToAbsent
+          ? const Value.absent()
+          : Value(feeAmountAmount),
+      feeAmountCurrency: feeAmountCurrency == null && nullToAbsent
+          ? const Value.absent()
+          : Value(feeAmountCurrency),
+      feeAmountMinor: feeAmountMinor == null && nullToAbsent
+          ? const Value.absent()
+          : Value(feeAmountMinor),
+      fxRate: fxRate == null && nullToAbsent
+          ? const Value.absent()
+          : Value(fxRate),
+      occurredAt: occurredAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(occurredAt),
+      timeSource: timeSource == null && nullToAbsent
+          ? const Value.absent()
+          : Value(timeSource),
+      direction: Value(direction),
+      transactionType: Value(transactionType),
+      affectsSpend: Value(affectsSpend),
+      referenceNumber: referenceNumber == null && nullToAbsent
+          ? const Value.absent()
+          : Value(referenceNumber),
+      instrumentKind: instrumentKind == null && nullToAbsent
+          ? const Value.absent()
+          : Value(instrumentKind),
+      instrumentMaskedRef: instrumentMaskedRef == null && nullToAbsent
+          ? const Value.absent()
+          : Value(instrumentMaskedRef),
+      provenance: Value(provenance),
+      sourceMessageId: sourceMessageId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sourceMessageId),
+      rulePackId: rulePackId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(rulePackId),
+      rulePackVersion: rulePackVersion == null && nullToAbsent
+          ? const Value.absent()
+          : Value(rulePackVersion),
+      ruleId: ruleId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(ruleId),
+      needsReview: Value(needsReview),
+      reviewReason: reviewReason == null && nullToAbsent
+          ? const Value.absent()
+          : Value(reviewReason),
+      possibleDuplicateOfId: possibleDuplicateOfId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(possibleDuplicateOfId),
       isDeleted: Value(isDeleted),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
@@ -1687,6 +2598,41 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       amountCurrency: serializer.fromJson<String>(json['amountCurrency']),
       amountMinor: serializer.fromJson<int>(json['amountMinor']),
       categoryId: serializer.fromJson<String?>(json['categoryId']),
+      convertedAmountAmount: serializer.fromJson<String?>(
+        json['convertedAmountAmount'],
+      ),
+      convertedAmountCurrency: serializer.fromJson<String?>(
+        json['convertedAmountCurrency'],
+      ),
+      convertedAmountMinor: serializer.fromJson<int?>(
+        json['convertedAmountMinor'],
+      ),
+      feeAmountAmount: serializer.fromJson<String?>(json['feeAmountAmount']),
+      feeAmountCurrency: serializer.fromJson<String?>(
+        json['feeAmountCurrency'],
+      ),
+      feeAmountMinor: serializer.fromJson<int?>(json['feeAmountMinor']),
+      fxRate: serializer.fromJson<String?>(json['fxRate']),
+      occurredAt: serializer.fromJson<DateTime?>(json['occurredAt']),
+      timeSource: serializer.fromJson<String?>(json['timeSource']),
+      direction: serializer.fromJson<String>(json['direction']),
+      transactionType: serializer.fromJson<String>(json['transactionType']),
+      affectsSpend: serializer.fromJson<bool>(json['affectsSpend']),
+      referenceNumber: serializer.fromJson<String?>(json['referenceNumber']),
+      instrumentKind: serializer.fromJson<String?>(json['instrumentKind']),
+      instrumentMaskedRef: serializer.fromJson<String?>(
+        json['instrumentMaskedRef'],
+      ),
+      provenance: serializer.fromJson<String>(json['provenance']),
+      sourceMessageId: serializer.fromJson<int?>(json['sourceMessageId']),
+      rulePackId: serializer.fromJson<String?>(json['rulePackId']),
+      rulePackVersion: serializer.fromJson<String?>(json['rulePackVersion']),
+      ruleId: serializer.fromJson<String?>(json['ruleId']),
+      needsReview: serializer.fromJson<bool>(json['needsReview']),
+      reviewReason: serializer.fromJson<String?>(json['reviewReason']),
+      possibleDuplicateOfId: serializer.fromJson<int?>(
+        json['possibleDuplicateOfId'],
+      ),
       isDeleted: serializer.fromJson<bool>(json['isDeleted']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
@@ -1702,6 +2648,33 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       'amountCurrency': serializer.toJson<String>(amountCurrency),
       'amountMinor': serializer.toJson<int>(amountMinor),
       'categoryId': serializer.toJson<String?>(categoryId),
+      'convertedAmountAmount': serializer.toJson<String?>(
+        convertedAmountAmount,
+      ),
+      'convertedAmountCurrency': serializer.toJson<String?>(
+        convertedAmountCurrency,
+      ),
+      'convertedAmountMinor': serializer.toJson<int?>(convertedAmountMinor),
+      'feeAmountAmount': serializer.toJson<String?>(feeAmountAmount),
+      'feeAmountCurrency': serializer.toJson<String?>(feeAmountCurrency),
+      'feeAmountMinor': serializer.toJson<int?>(feeAmountMinor),
+      'fxRate': serializer.toJson<String?>(fxRate),
+      'occurredAt': serializer.toJson<DateTime?>(occurredAt),
+      'timeSource': serializer.toJson<String?>(timeSource),
+      'direction': serializer.toJson<String>(direction),
+      'transactionType': serializer.toJson<String>(transactionType),
+      'affectsSpend': serializer.toJson<bool>(affectsSpend),
+      'referenceNumber': serializer.toJson<String?>(referenceNumber),
+      'instrumentKind': serializer.toJson<String?>(instrumentKind),
+      'instrumentMaskedRef': serializer.toJson<String?>(instrumentMaskedRef),
+      'provenance': serializer.toJson<String>(provenance),
+      'sourceMessageId': serializer.toJson<int?>(sourceMessageId),
+      'rulePackId': serializer.toJson<String?>(rulePackId),
+      'rulePackVersion': serializer.toJson<String?>(rulePackVersion),
+      'ruleId': serializer.toJson<String?>(ruleId),
+      'needsReview': serializer.toJson<bool>(needsReview),
+      'reviewReason': serializer.toJson<String?>(reviewReason),
+      'possibleDuplicateOfId': serializer.toJson<int?>(possibleDuplicateOfId),
       'isDeleted': serializer.toJson<bool>(isDeleted),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
@@ -1715,6 +2688,29 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     String? amountCurrency,
     int? amountMinor,
     Value<String?> categoryId = const Value.absent(),
+    Value<String?> convertedAmountAmount = const Value.absent(),
+    Value<String?> convertedAmountCurrency = const Value.absent(),
+    Value<int?> convertedAmountMinor = const Value.absent(),
+    Value<String?> feeAmountAmount = const Value.absent(),
+    Value<String?> feeAmountCurrency = const Value.absent(),
+    Value<int?> feeAmountMinor = const Value.absent(),
+    Value<String?> fxRate = const Value.absent(),
+    Value<DateTime?> occurredAt = const Value.absent(),
+    Value<String?> timeSource = const Value.absent(),
+    String? direction,
+    String? transactionType,
+    bool? affectsSpend,
+    Value<String?> referenceNumber = const Value.absent(),
+    Value<String?> instrumentKind = const Value.absent(),
+    Value<String?> instrumentMaskedRef = const Value.absent(),
+    String? provenance,
+    Value<int?> sourceMessageId = const Value.absent(),
+    Value<String?> rulePackId = const Value.absent(),
+    Value<String?> rulePackVersion = const Value.absent(),
+    Value<String?> ruleId = const Value.absent(),
+    bool? needsReview,
+    Value<String?> reviewReason = const Value.absent(),
+    Value<int?> possibleDuplicateOfId = const Value.absent(),
     bool? isDeleted,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -1727,6 +2723,53 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     amountCurrency: amountCurrency ?? this.amountCurrency,
     amountMinor: amountMinor ?? this.amountMinor,
     categoryId: categoryId.present ? categoryId.value : this.categoryId,
+    convertedAmountAmount: convertedAmountAmount.present
+        ? convertedAmountAmount.value
+        : this.convertedAmountAmount,
+    convertedAmountCurrency: convertedAmountCurrency.present
+        ? convertedAmountCurrency.value
+        : this.convertedAmountCurrency,
+    convertedAmountMinor: convertedAmountMinor.present
+        ? convertedAmountMinor.value
+        : this.convertedAmountMinor,
+    feeAmountAmount: feeAmountAmount.present
+        ? feeAmountAmount.value
+        : this.feeAmountAmount,
+    feeAmountCurrency: feeAmountCurrency.present
+        ? feeAmountCurrency.value
+        : this.feeAmountCurrency,
+    feeAmountMinor: feeAmountMinor.present
+        ? feeAmountMinor.value
+        : this.feeAmountMinor,
+    fxRate: fxRate.present ? fxRate.value : this.fxRate,
+    occurredAt: occurredAt.present ? occurredAt.value : this.occurredAt,
+    timeSource: timeSource.present ? timeSource.value : this.timeSource,
+    direction: direction ?? this.direction,
+    transactionType: transactionType ?? this.transactionType,
+    affectsSpend: affectsSpend ?? this.affectsSpend,
+    referenceNumber: referenceNumber.present
+        ? referenceNumber.value
+        : this.referenceNumber,
+    instrumentKind: instrumentKind.present
+        ? instrumentKind.value
+        : this.instrumentKind,
+    instrumentMaskedRef: instrumentMaskedRef.present
+        ? instrumentMaskedRef.value
+        : this.instrumentMaskedRef,
+    provenance: provenance ?? this.provenance,
+    sourceMessageId: sourceMessageId.present
+        ? sourceMessageId.value
+        : this.sourceMessageId,
+    rulePackId: rulePackId.present ? rulePackId.value : this.rulePackId,
+    rulePackVersion: rulePackVersion.present
+        ? rulePackVersion.value
+        : this.rulePackVersion,
+    ruleId: ruleId.present ? ruleId.value : this.ruleId,
+    needsReview: needsReview ?? this.needsReview,
+    reviewReason: reviewReason.present ? reviewReason.value : this.reviewReason,
+    possibleDuplicateOfId: possibleDuplicateOfId.present
+        ? possibleDuplicateOfId.value
+        : this.possibleDuplicateOfId,
     isDeleted: isDeleted ?? this.isDeleted,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
@@ -1749,6 +2792,69 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       categoryId: data.categoryId.present
           ? data.categoryId.value
           : this.categoryId,
+      convertedAmountAmount: data.convertedAmountAmount.present
+          ? data.convertedAmountAmount.value
+          : this.convertedAmountAmount,
+      convertedAmountCurrency: data.convertedAmountCurrency.present
+          ? data.convertedAmountCurrency.value
+          : this.convertedAmountCurrency,
+      convertedAmountMinor: data.convertedAmountMinor.present
+          ? data.convertedAmountMinor.value
+          : this.convertedAmountMinor,
+      feeAmountAmount: data.feeAmountAmount.present
+          ? data.feeAmountAmount.value
+          : this.feeAmountAmount,
+      feeAmountCurrency: data.feeAmountCurrency.present
+          ? data.feeAmountCurrency.value
+          : this.feeAmountCurrency,
+      feeAmountMinor: data.feeAmountMinor.present
+          ? data.feeAmountMinor.value
+          : this.feeAmountMinor,
+      fxRate: data.fxRate.present ? data.fxRate.value : this.fxRate,
+      occurredAt: data.occurredAt.present
+          ? data.occurredAt.value
+          : this.occurredAt,
+      timeSource: data.timeSource.present
+          ? data.timeSource.value
+          : this.timeSource,
+      direction: data.direction.present ? data.direction.value : this.direction,
+      transactionType: data.transactionType.present
+          ? data.transactionType.value
+          : this.transactionType,
+      affectsSpend: data.affectsSpend.present
+          ? data.affectsSpend.value
+          : this.affectsSpend,
+      referenceNumber: data.referenceNumber.present
+          ? data.referenceNumber.value
+          : this.referenceNumber,
+      instrumentKind: data.instrumentKind.present
+          ? data.instrumentKind.value
+          : this.instrumentKind,
+      instrumentMaskedRef: data.instrumentMaskedRef.present
+          ? data.instrumentMaskedRef.value
+          : this.instrumentMaskedRef,
+      provenance: data.provenance.present
+          ? data.provenance.value
+          : this.provenance,
+      sourceMessageId: data.sourceMessageId.present
+          ? data.sourceMessageId.value
+          : this.sourceMessageId,
+      rulePackId: data.rulePackId.present
+          ? data.rulePackId.value
+          : this.rulePackId,
+      rulePackVersion: data.rulePackVersion.present
+          ? data.rulePackVersion.value
+          : this.rulePackVersion,
+      ruleId: data.ruleId.present ? data.ruleId.value : this.ruleId,
+      needsReview: data.needsReview.present
+          ? data.needsReview.value
+          : this.needsReview,
+      reviewReason: data.reviewReason.present
+          ? data.reviewReason.value
+          : this.reviewReason,
+      possibleDuplicateOfId: data.possibleDuplicateOfId.present
+          ? data.possibleDuplicateOfId.value
+          : this.possibleDuplicateOfId,
       isDeleted: data.isDeleted.present ? data.isDeleted.value : this.isDeleted,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
@@ -1764,6 +2870,29 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           ..write('amountCurrency: $amountCurrency, ')
           ..write('amountMinor: $amountMinor, ')
           ..write('categoryId: $categoryId, ')
+          ..write('convertedAmountAmount: $convertedAmountAmount, ')
+          ..write('convertedAmountCurrency: $convertedAmountCurrency, ')
+          ..write('convertedAmountMinor: $convertedAmountMinor, ')
+          ..write('feeAmountAmount: $feeAmountAmount, ')
+          ..write('feeAmountCurrency: $feeAmountCurrency, ')
+          ..write('feeAmountMinor: $feeAmountMinor, ')
+          ..write('fxRate: $fxRate, ')
+          ..write('occurredAt: $occurredAt, ')
+          ..write('timeSource: $timeSource, ')
+          ..write('direction: $direction, ')
+          ..write('transactionType: $transactionType, ')
+          ..write('affectsSpend: $affectsSpend, ')
+          ..write('referenceNumber: $referenceNumber, ')
+          ..write('instrumentKind: $instrumentKind, ')
+          ..write('instrumentMaskedRef: $instrumentMaskedRef, ')
+          ..write('provenance: $provenance, ')
+          ..write('sourceMessageId: $sourceMessageId, ')
+          ..write('rulePackId: $rulePackId, ')
+          ..write('rulePackVersion: $rulePackVersion, ')
+          ..write('ruleId: $ruleId, ')
+          ..write('needsReview: $needsReview, ')
+          ..write('reviewReason: $reviewReason, ')
+          ..write('possibleDuplicateOfId: $possibleDuplicateOfId, ')
           ..write('isDeleted: $isDeleted, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -1772,17 +2901,40 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     id,
     merchantRawText,
     amountAmount,
     amountCurrency,
     amountMinor,
     categoryId,
+    convertedAmountAmount,
+    convertedAmountCurrency,
+    convertedAmountMinor,
+    feeAmountAmount,
+    feeAmountCurrency,
+    feeAmountMinor,
+    fxRate,
+    occurredAt,
+    timeSource,
+    direction,
+    transactionType,
+    affectsSpend,
+    referenceNumber,
+    instrumentKind,
+    instrumentMaskedRef,
+    provenance,
+    sourceMessageId,
+    rulePackId,
+    rulePackVersion,
+    ruleId,
+    needsReview,
+    reviewReason,
+    possibleDuplicateOfId,
     isDeleted,
     createdAt,
     updatedAt,
-  );
+  ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1793,6 +2945,29 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           other.amountCurrency == this.amountCurrency &&
           other.amountMinor == this.amountMinor &&
           other.categoryId == this.categoryId &&
+          other.convertedAmountAmount == this.convertedAmountAmount &&
+          other.convertedAmountCurrency == this.convertedAmountCurrency &&
+          other.convertedAmountMinor == this.convertedAmountMinor &&
+          other.feeAmountAmount == this.feeAmountAmount &&
+          other.feeAmountCurrency == this.feeAmountCurrency &&
+          other.feeAmountMinor == this.feeAmountMinor &&
+          other.fxRate == this.fxRate &&
+          other.occurredAt == this.occurredAt &&
+          other.timeSource == this.timeSource &&
+          other.direction == this.direction &&
+          other.transactionType == this.transactionType &&
+          other.affectsSpend == this.affectsSpend &&
+          other.referenceNumber == this.referenceNumber &&
+          other.instrumentKind == this.instrumentKind &&
+          other.instrumentMaskedRef == this.instrumentMaskedRef &&
+          other.provenance == this.provenance &&
+          other.sourceMessageId == this.sourceMessageId &&
+          other.rulePackId == this.rulePackId &&
+          other.rulePackVersion == this.rulePackVersion &&
+          other.ruleId == this.ruleId &&
+          other.needsReview == this.needsReview &&
+          other.reviewReason == this.reviewReason &&
+          other.possibleDuplicateOfId == this.possibleDuplicateOfId &&
           other.isDeleted == this.isDeleted &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
@@ -1805,6 +2980,29 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
   final Value<String> amountCurrency;
   final Value<int> amountMinor;
   final Value<String?> categoryId;
+  final Value<String?> convertedAmountAmount;
+  final Value<String?> convertedAmountCurrency;
+  final Value<int?> convertedAmountMinor;
+  final Value<String?> feeAmountAmount;
+  final Value<String?> feeAmountCurrency;
+  final Value<int?> feeAmountMinor;
+  final Value<String?> fxRate;
+  final Value<DateTime?> occurredAt;
+  final Value<String?> timeSource;
+  final Value<String> direction;
+  final Value<String> transactionType;
+  final Value<bool> affectsSpend;
+  final Value<String?> referenceNumber;
+  final Value<String?> instrumentKind;
+  final Value<String?> instrumentMaskedRef;
+  final Value<String> provenance;
+  final Value<int?> sourceMessageId;
+  final Value<String?> rulePackId;
+  final Value<String?> rulePackVersion;
+  final Value<String?> ruleId;
+  final Value<bool> needsReview;
+  final Value<String?> reviewReason;
+  final Value<int?> possibleDuplicateOfId;
   final Value<bool> isDeleted;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
@@ -1815,6 +3013,29 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     this.amountCurrency = const Value.absent(),
     this.amountMinor = const Value.absent(),
     this.categoryId = const Value.absent(),
+    this.convertedAmountAmount = const Value.absent(),
+    this.convertedAmountCurrency = const Value.absent(),
+    this.convertedAmountMinor = const Value.absent(),
+    this.feeAmountAmount = const Value.absent(),
+    this.feeAmountCurrency = const Value.absent(),
+    this.feeAmountMinor = const Value.absent(),
+    this.fxRate = const Value.absent(),
+    this.occurredAt = const Value.absent(),
+    this.timeSource = const Value.absent(),
+    this.direction = const Value.absent(),
+    this.transactionType = const Value.absent(),
+    this.affectsSpend = const Value.absent(),
+    this.referenceNumber = const Value.absent(),
+    this.instrumentKind = const Value.absent(),
+    this.instrumentMaskedRef = const Value.absent(),
+    this.provenance = const Value.absent(),
+    this.sourceMessageId = const Value.absent(),
+    this.rulePackId = const Value.absent(),
+    this.rulePackVersion = const Value.absent(),
+    this.ruleId = const Value.absent(),
+    this.needsReview = const Value.absent(),
+    this.reviewReason = const Value.absent(),
+    this.possibleDuplicateOfId = const Value.absent(),
     this.isDeleted = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -1826,6 +3047,29 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     required String amountCurrency,
     required int amountMinor,
     this.categoryId = const Value.absent(),
+    this.convertedAmountAmount = const Value.absent(),
+    this.convertedAmountCurrency = const Value.absent(),
+    this.convertedAmountMinor = const Value.absent(),
+    this.feeAmountAmount = const Value.absent(),
+    this.feeAmountCurrency = const Value.absent(),
+    this.feeAmountMinor = const Value.absent(),
+    this.fxRate = const Value.absent(),
+    this.occurredAt = const Value.absent(),
+    this.timeSource = const Value.absent(),
+    this.direction = const Value.absent(),
+    this.transactionType = const Value.absent(),
+    this.affectsSpend = const Value.absent(),
+    this.referenceNumber = const Value.absent(),
+    this.instrumentKind = const Value.absent(),
+    this.instrumentMaskedRef = const Value.absent(),
+    this.provenance = const Value.absent(),
+    this.sourceMessageId = const Value.absent(),
+    this.rulePackId = const Value.absent(),
+    this.rulePackVersion = const Value.absent(),
+    this.ruleId = const Value.absent(),
+    this.needsReview = const Value.absent(),
+    this.reviewReason = const Value.absent(),
+    this.possibleDuplicateOfId = const Value.absent(),
     this.isDeleted = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -1839,6 +3083,29 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     Expression<String>? amountCurrency,
     Expression<int>? amountMinor,
     Expression<String>? categoryId,
+    Expression<String>? convertedAmountAmount,
+    Expression<String>? convertedAmountCurrency,
+    Expression<int>? convertedAmountMinor,
+    Expression<String>? feeAmountAmount,
+    Expression<String>? feeAmountCurrency,
+    Expression<int>? feeAmountMinor,
+    Expression<String>? fxRate,
+    Expression<DateTime>? occurredAt,
+    Expression<String>? timeSource,
+    Expression<String>? direction,
+    Expression<String>? transactionType,
+    Expression<bool>? affectsSpend,
+    Expression<String>? referenceNumber,
+    Expression<String>? instrumentKind,
+    Expression<String>? instrumentMaskedRef,
+    Expression<String>? provenance,
+    Expression<int>? sourceMessageId,
+    Expression<String>? rulePackId,
+    Expression<String>? rulePackVersion,
+    Expression<String>? ruleId,
+    Expression<bool>? needsReview,
+    Expression<String>? reviewReason,
+    Expression<int>? possibleDuplicateOfId,
     Expression<bool>? isDeleted,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
@@ -1850,6 +3117,34 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
       if (amountCurrency != null) 'amount_currency': amountCurrency,
       if (amountMinor != null) 'amount_minor': amountMinor,
       if (categoryId != null) 'category_id': categoryId,
+      if (convertedAmountAmount != null)
+        'converted_amount_amount': convertedAmountAmount,
+      if (convertedAmountCurrency != null)
+        'converted_amount_currency': convertedAmountCurrency,
+      if (convertedAmountMinor != null)
+        'converted_amount_minor': convertedAmountMinor,
+      if (feeAmountAmount != null) 'fee_amount_amount': feeAmountAmount,
+      if (feeAmountCurrency != null) 'fee_amount_currency': feeAmountCurrency,
+      if (feeAmountMinor != null) 'fee_amount_minor': feeAmountMinor,
+      if (fxRate != null) 'fx_rate': fxRate,
+      if (occurredAt != null) 'occurred_at': occurredAt,
+      if (timeSource != null) 'time_source': timeSource,
+      if (direction != null) 'direction': direction,
+      if (transactionType != null) 'transaction_type': transactionType,
+      if (affectsSpend != null) 'affects_spend': affectsSpend,
+      if (referenceNumber != null) 'reference_number': referenceNumber,
+      if (instrumentKind != null) 'instrument_kind': instrumentKind,
+      if (instrumentMaskedRef != null)
+        'instrument_masked_ref': instrumentMaskedRef,
+      if (provenance != null) 'provenance': provenance,
+      if (sourceMessageId != null) 'source_message_id': sourceMessageId,
+      if (rulePackId != null) 'rule_pack_id': rulePackId,
+      if (rulePackVersion != null) 'rule_pack_version': rulePackVersion,
+      if (ruleId != null) 'rule_id': ruleId,
+      if (needsReview != null) 'needs_review': needsReview,
+      if (reviewReason != null) 'review_reason': reviewReason,
+      if (possibleDuplicateOfId != null)
+        'possible_duplicate_of_id': possibleDuplicateOfId,
       if (isDeleted != null) 'is_deleted': isDeleted,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
@@ -1863,6 +3158,29 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     Value<String>? amountCurrency,
     Value<int>? amountMinor,
     Value<String?>? categoryId,
+    Value<String?>? convertedAmountAmount,
+    Value<String?>? convertedAmountCurrency,
+    Value<int?>? convertedAmountMinor,
+    Value<String?>? feeAmountAmount,
+    Value<String?>? feeAmountCurrency,
+    Value<int?>? feeAmountMinor,
+    Value<String?>? fxRate,
+    Value<DateTime?>? occurredAt,
+    Value<String?>? timeSource,
+    Value<String>? direction,
+    Value<String>? transactionType,
+    Value<bool>? affectsSpend,
+    Value<String?>? referenceNumber,
+    Value<String?>? instrumentKind,
+    Value<String?>? instrumentMaskedRef,
+    Value<String>? provenance,
+    Value<int?>? sourceMessageId,
+    Value<String?>? rulePackId,
+    Value<String?>? rulePackVersion,
+    Value<String?>? ruleId,
+    Value<bool>? needsReview,
+    Value<String?>? reviewReason,
+    Value<int?>? possibleDuplicateOfId,
     Value<bool>? isDeleted,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
@@ -1874,6 +3192,32 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
       amountCurrency: amountCurrency ?? this.amountCurrency,
       amountMinor: amountMinor ?? this.amountMinor,
       categoryId: categoryId ?? this.categoryId,
+      convertedAmountAmount:
+          convertedAmountAmount ?? this.convertedAmountAmount,
+      convertedAmountCurrency:
+          convertedAmountCurrency ?? this.convertedAmountCurrency,
+      convertedAmountMinor: convertedAmountMinor ?? this.convertedAmountMinor,
+      feeAmountAmount: feeAmountAmount ?? this.feeAmountAmount,
+      feeAmountCurrency: feeAmountCurrency ?? this.feeAmountCurrency,
+      feeAmountMinor: feeAmountMinor ?? this.feeAmountMinor,
+      fxRate: fxRate ?? this.fxRate,
+      occurredAt: occurredAt ?? this.occurredAt,
+      timeSource: timeSource ?? this.timeSource,
+      direction: direction ?? this.direction,
+      transactionType: transactionType ?? this.transactionType,
+      affectsSpend: affectsSpend ?? this.affectsSpend,
+      referenceNumber: referenceNumber ?? this.referenceNumber,
+      instrumentKind: instrumentKind ?? this.instrumentKind,
+      instrumentMaskedRef: instrumentMaskedRef ?? this.instrumentMaskedRef,
+      provenance: provenance ?? this.provenance,
+      sourceMessageId: sourceMessageId ?? this.sourceMessageId,
+      rulePackId: rulePackId ?? this.rulePackId,
+      rulePackVersion: rulePackVersion ?? this.rulePackVersion,
+      ruleId: ruleId ?? this.ruleId,
+      needsReview: needsReview ?? this.needsReview,
+      reviewReason: reviewReason ?? this.reviewReason,
+      possibleDuplicateOfId:
+          possibleDuplicateOfId ?? this.possibleDuplicateOfId,
       isDeleted: isDeleted ?? this.isDeleted,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -1901,6 +3245,83 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     if (categoryId.present) {
       map['category_id'] = Variable<String>(categoryId.value);
     }
+    if (convertedAmountAmount.present) {
+      map['converted_amount_amount'] = Variable<String>(
+        convertedAmountAmount.value,
+      );
+    }
+    if (convertedAmountCurrency.present) {
+      map['converted_amount_currency'] = Variable<String>(
+        convertedAmountCurrency.value,
+      );
+    }
+    if (convertedAmountMinor.present) {
+      map['converted_amount_minor'] = Variable<int>(convertedAmountMinor.value);
+    }
+    if (feeAmountAmount.present) {
+      map['fee_amount_amount'] = Variable<String>(feeAmountAmount.value);
+    }
+    if (feeAmountCurrency.present) {
+      map['fee_amount_currency'] = Variable<String>(feeAmountCurrency.value);
+    }
+    if (feeAmountMinor.present) {
+      map['fee_amount_minor'] = Variable<int>(feeAmountMinor.value);
+    }
+    if (fxRate.present) {
+      map['fx_rate'] = Variable<String>(fxRate.value);
+    }
+    if (occurredAt.present) {
+      map['occurred_at'] = Variable<DateTime>(occurredAt.value);
+    }
+    if (timeSource.present) {
+      map['time_source'] = Variable<String>(timeSource.value);
+    }
+    if (direction.present) {
+      map['direction'] = Variable<String>(direction.value);
+    }
+    if (transactionType.present) {
+      map['transaction_type'] = Variable<String>(transactionType.value);
+    }
+    if (affectsSpend.present) {
+      map['affects_spend'] = Variable<bool>(affectsSpend.value);
+    }
+    if (referenceNumber.present) {
+      map['reference_number'] = Variable<String>(referenceNumber.value);
+    }
+    if (instrumentKind.present) {
+      map['instrument_kind'] = Variable<String>(instrumentKind.value);
+    }
+    if (instrumentMaskedRef.present) {
+      map['instrument_masked_ref'] = Variable<String>(
+        instrumentMaskedRef.value,
+      );
+    }
+    if (provenance.present) {
+      map['provenance'] = Variable<String>(provenance.value);
+    }
+    if (sourceMessageId.present) {
+      map['source_message_id'] = Variable<int>(sourceMessageId.value);
+    }
+    if (rulePackId.present) {
+      map['rule_pack_id'] = Variable<String>(rulePackId.value);
+    }
+    if (rulePackVersion.present) {
+      map['rule_pack_version'] = Variable<String>(rulePackVersion.value);
+    }
+    if (ruleId.present) {
+      map['rule_id'] = Variable<String>(ruleId.value);
+    }
+    if (needsReview.present) {
+      map['needs_review'] = Variable<bool>(needsReview.value);
+    }
+    if (reviewReason.present) {
+      map['review_reason'] = Variable<String>(reviewReason.value);
+    }
+    if (possibleDuplicateOfId.present) {
+      map['possible_duplicate_of_id'] = Variable<int>(
+        possibleDuplicateOfId.value,
+      );
+    }
     if (isDeleted.present) {
       map['is_deleted'] = Variable<bool>(isDeleted.value);
     }
@@ -1922,6 +3343,29 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
           ..write('amountCurrency: $amountCurrency, ')
           ..write('amountMinor: $amountMinor, ')
           ..write('categoryId: $categoryId, ')
+          ..write('convertedAmountAmount: $convertedAmountAmount, ')
+          ..write('convertedAmountCurrency: $convertedAmountCurrency, ')
+          ..write('convertedAmountMinor: $convertedAmountMinor, ')
+          ..write('feeAmountAmount: $feeAmountAmount, ')
+          ..write('feeAmountCurrency: $feeAmountCurrency, ')
+          ..write('feeAmountMinor: $feeAmountMinor, ')
+          ..write('fxRate: $fxRate, ')
+          ..write('occurredAt: $occurredAt, ')
+          ..write('timeSource: $timeSource, ')
+          ..write('direction: $direction, ')
+          ..write('transactionType: $transactionType, ')
+          ..write('affectsSpend: $affectsSpend, ')
+          ..write('referenceNumber: $referenceNumber, ')
+          ..write('instrumentKind: $instrumentKind, ')
+          ..write('instrumentMaskedRef: $instrumentMaskedRef, ')
+          ..write('provenance: $provenance, ')
+          ..write('sourceMessageId: $sourceMessageId, ')
+          ..write('rulePackId: $rulePackId, ')
+          ..write('rulePackVersion: $rulePackVersion, ')
+          ..write('ruleId: $ruleId, ')
+          ..write('needsReview: $needsReview, ')
+          ..write('reviewReason: $reviewReason, ')
+          ..write('possibleDuplicateOfId: $possibleDuplicateOfId, ')
           ..write('isDeleted: $isDeleted, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -2296,6 +3740,608 @@ class AppSettingsTableCompanion extends UpdateCompanion<AppSettingsRow> {
   }
 }
 
+class $IngestWatermarksTable extends IngestWatermarks
+    with TableInfo<$IngestWatermarksTable, IngestWatermarkRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $IngestWatermarksTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(ingestWatermarkSingletonId),
+  );
+  static const VerificationMeta _lastProcessedSmsProviderIdMeta =
+      const VerificationMeta('lastProcessedSmsProviderId');
+  @override
+  late final GeneratedColumn<int> lastProcessedSmsProviderId =
+      GeneratedColumn<int>(
+        'last_processed_sms_provider_id',
+        aliasedName,
+        false,
+        type: DriftSqlType.int,
+        requiredDuringInsert: false,
+        defaultValue: const Constant(0),
+      );
+  static const VerificationMeta _lastProcessedSmsDateMeta =
+      const VerificationMeta('lastProcessedSmsDate');
+  @override
+  late final GeneratedColumn<DateTime> lastProcessedSmsDate =
+      GeneratedColumn<DateTime>(
+        'last_processed_sms_date',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _importStateMeta = const VerificationMeta(
+    'importState',
+  );
+  @override
+  late final GeneratedColumn<String> importState = GeneratedColumn<String>(
+    'import_state',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('idle'),
+  );
+  static const VerificationMeta _importCursorMeta = const VerificationMeta(
+    'importCursor',
+  );
+  @override
+  late final GeneratedColumn<int> importCursor = GeneratedColumn<int>(
+    'import_cursor',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _importFromDateMeta = const VerificationMeta(
+    'importFromDate',
+  );
+  @override
+  late final GeneratedColumn<DateTime> importFromDate =
+      GeneratedColumn<DateTime>(
+        'import_from_date',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _importTotalCandidatesMeta =
+      const VerificationMeta('importTotalCandidates');
+  @override
+  late final GeneratedColumn<int> importTotalCandidates = GeneratedColumn<int>(
+    'import_total_candidates',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _importProcessedCountMeta =
+      const VerificationMeta('importProcessedCount');
+  @override
+  late final GeneratedColumn<int> importProcessedCount = GeneratedColumn<int>(
+    'import_processed_count',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    lastProcessedSmsProviderId,
+    lastProcessedSmsDate,
+    importState,
+    importCursor,
+    importFromDate,
+    importTotalCandidates,
+    importProcessedCount,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'ingest_watermark';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<IngestWatermarkRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('last_processed_sms_provider_id')) {
+      context.handle(
+        _lastProcessedSmsProviderIdMeta,
+        lastProcessedSmsProviderId.isAcceptableOrUnknown(
+          data['last_processed_sms_provider_id']!,
+          _lastProcessedSmsProviderIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('last_processed_sms_date')) {
+      context.handle(
+        _lastProcessedSmsDateMeta,
+        lastProcessedSmsDate.isAcceptableOrUnknown(
+          data['last_processed_sms_date']!,
+          _lastProcessedSmsDateMeta,
+        ),
+      );
+    }
+    if (data.containsKey('import_state')) {
+      context.handle(
+        _importStateMeta,
+        importState.isAcceptableOrUnknown(
+          data['import_state']!,
+          _importStateMeta,
+        ),
+      );
+    }
+    if (data.containsKey('import_cursor')) {
+      context.handle(
+        _importCursorMeta,
+        importCursor.isAcceptableOrUnknown(
+          data['import_cursor']!,
+          _importCursorMeta,
+        ),
+      );
+    }
+    if (data.containsKey('import_from_date')) {
+      context.handle(
+        _importFromDateMeta,
+        importFromDate.isAcceptableOrUnknown(
+          data['import_from_date']!,
+          _importFromDateMeta,
+        ),
+      );
+    }
+    if (data.containsKey('import_total_candidates')) {
+      context.handle(
+        _importTotalCandidatesMeta,
+        importTotalCandidates.isAcceptableOrUnknown(
+          data['import_total_candidates']!,
+          _importTotalCandidatesMeta,
+        ),
+      );
+    }
+    if (data.containsKey('import_processed_count')) {
+      context.handle(
+        _importProcessedCountMeta,
+        importProcessedCount.isAcceptableOrUnknown(
+          data['import_processed_count']!,
+          _importProcessedCountMeta,
+        ),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  IngestWatermarkRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return IngestWatermarkRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      lastProcessedSmsProviderId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}last_processed_sms_provider_id'],
+      )!,
+      lastProcessedSmsDate: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}last_processed_sms_date'],
+      ),
+      importState: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}import_state'],
+      )!,
+      importCursor: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}import_cursor'],
+      ),
+      importFromDate: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}import_from_date'],
+      ),
+      importTotalCandidates: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}import_total_candidates'],
+      ),
+      importProcessedCount: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}import_processed_count'],
+      )!,
+    );
+  }
+
+  @override
+  $IngestWatermarksTable createAlias(String alias) {
+    return $IngestWatermarksTable(attachedDatabase, alias);
+  }
+}
+
+class IngestWatermarkRow extends DataClass
+    implements Insertable<IngestWatermarkRow> {
+  /// Fixed at [ingestWatermarkSingletonId] and enforced by the CHECK
+  /// constraint in [customConstraints] — two watermark rows would mean two
+  /// answers to "where did we get to", and whichever one a given code path
+  /// read first would silently win.
+  final int id;
+
+  /// The `_id` of the newest SMS provider row processed. Used together with
+  /// [lastProcessedSmsDate] because neither alone is sufficient: two messages
+  /// can share a `date` to the millisecond (a multi-part SMS, or a carrier
+  /// burst), and `_id` is monotonic but is reset when the user's SMS database
+  /// is restored from a backup.
+  final int lastProcessedSmsProviderId;
+
+  /// The `date` of the newest processed message. Stored, like every instant
+  /// in this schema, in UTC.
+  final DateTime? lastProcessedSmsDate;
+
+  /// `idle` | `running` | `paused` — the historical import's state machine
+  /// (architecture §4.2 `IngestWatermark`).
+  ///
+  /// Persisted rather than held in memory precisely because AC-A3.3 requires
+  /// the import to survive the app being closed or the device restarting. An
+  /// in-memory flag would report `idle` after a crash and silently restart
+  /// the whole import from scratch.
+  final String importState;
+
+  /// How far the historical import has walked **backwards** through the
+  /// inbox: the oldest provider `_id` it has already handled. Resuming means
+  /// continuing from here rather than from the top.
+  final int? importCursor;
+
+  /// The lower bound of the historical import — **the start of the current
+  /// calendar month in `Asia/Riyadh`** (AC-A3.1, OQ-11 resolved: not full
+  /// history).
+  ///
+  /// Frozen at the moment the import starts rather than recomputed on each
+  /// resume, so an import that spans midnight on the 1st does not silently
+  /// change its own goalposts halfway through.
+  final DateTime? importFromDate;
+
+  /// Progress reporting for the S-05 onboarding screen (AC-A3.2). Counts, not
+  /// content — nothing here is sensitive.
+  final int? importTotalCandidates;
+  final int importProcessedCount;
+  const IngestWatermarkRow({
+    required this.id,
+    required this.lastProcessedSmsProviderId,
+    this.lastProcessedSmsDate,
+    required this.importState,
+    this.importCursor,
+    this.importFromDate,
+    this.importTotalCandidates,
+    required this.importProcessedCount,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['last_processed_sms_provider_id'] = Variable<int>(
+      lastProcessedSmsProviderId,
+    );
+    if (!nullToAbsent || lastProcessedSmsDate != null) {
+      map['last_processed_sms_date'] = Variable<DateTime>(lastProcessedSmsDate);
+    }
+    map['import_state'] = Variable<String>(importState);
+    if (!nullToAbsent || importCursor != null) {
+      map['import_cursor'] = Variable<int>(importCursor);
+    }
+    if (!nullToAbsent || importFromDate != null) {
+      map['import_from_date'] = Variable<DateTime>(importFromDate);
+    }
+    if (!nullToAbsent || importTotalCandidates != null) {
+      map['import_total_candidates'] = Variable<int>(importTotalCandidates);
+    }
+    map['import_processed_count'] = Variable<int>(importProcessedCount);
+    return map;
+  }
+
+  IngestWatermarksCompanion toCompanion(bool nullToAbsent) {
+    return IngestWatermarksCompanion(
+      id: Value(id),
+      lastProcessedSmsProviderId: Value(lastProcessedSmsProviderId),
+      lastProcessedSmsDate: lastProcessedSmsDate == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastProcessedSmsDate),
+      importState: Value(importState),
+      importCursor: importCursor == null && nullToAbsent
+          ? const Value.absent()
+          : Value(importCursor),
+      importFromDate: importFromDate == null && nullToAbsent
+          ? const Value.absent()
+          : Value(importFromDate),
+      importTotalCandidates: importTotalCandidates == null && nullToAbsent
+          ? const Value.absent()
+          : Value(importTotalCandidates),
+      importProcessedCount: Value(importProcessedCount),
+    );
+  }
+
+  factory IngestWatermarkRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return IngestWatermarkRow(
+      id: serializer.fromJson<int>(json['id']),
+      lastProcessedSmsProviderId: serializer.fromJson<int>(
+        json['lastProcessedSmsProviderId'],
+      ),
+      lastProcessedSmsDate: serializer.fromJson<DateTime?>(
+        json['lastProcessedSmsDate'],
+      ),
+      importState: serializer.fromJson<String>(json['importState']),
+      importCursor: serializer.fromJson<int?>(json['importCursor']),
+      importFromDate: serializer.fromJson<DateTime?>(json['importFromDate']),
+      importTotalCandidates: serializer.fromJson<int?>(
+        json['importTotalCandidates'],
+      ),
+      importProcessedCount: serializer.fromJson<int>(
+        json['importProcessedCount'],
+      ),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'lastProcessedSmsProviderId': serializer.toJson<int>(
+        lastProcessedSmsProviderId,
+      ),
+      'lastProcessedSmsDate': serializer.toJson<DateTime?>(
+        lastProcessedSmsDate,
+      ),
+      'importState': serializer.toJson<String>(importState),
+      'importCursor': serializer.toJson<int?>(importCursor),
+      'importFromDate': serializer.toJson<DateTime?>(importFromDate),
+      'importTotalCandidates': serializer.toJson<int?>(importTotalCandidates),
+      'importProcessedCount': serializer.toJson<int>(importProcessedCount),
+    };
+  }
+
+  IngestWatermarkRow copyWith({
+    int? id,
+    int? lastProcessedSmsProviderId,
+    Value<DateTime?> lastProcessedSmsDate = const Value.absent(),
+    String? importState,
+    Value<int?> importCursor = const Value.absent(),
+    Value<DateTime?> importFromDate = const Value.absent(),
+    Value<int?> importTotalCandidates = const Value.absent(),
+    int? importProcessedCount,
+  }) => IngestWatermarkRow(
+    id: id ?? this.id,
+    lastProcessedSmsProviderId:
+        lastProcessedSmsProviderId ?? this.lastProcessedSmsProviderId,
+    lastProcessedSmsDate: lastProcessedSmsDate.present
+        ? lastProcessedSmsDate.value
+        : this.lastProcessedSmsDate,
+    importState: importState ?? this.importState,
+    importCursor: importCursor.present ? importCursor.value : this.importCursor,
+    importFromDate: importFromDate.present
+        ? importFromDate.value
+        : this.importFromDate,
+    importTotalCandidates: importTotalCandidates.present
+        ? importTotalCandidates.value
+        : this.importTotalCandidates,
+    importProcessedCount: importProcessedCount ?? this.importProcessedCount,
+  );
+  IngestWatermarkRow copyWithCompanion(IngestWatermarksCompanion data) {
+    return IngestWatermarkRow(
+      id: data.id.present ? data.id.value : this.id,
+      lastProcessedSmsProviderId: data.lastProcessedSmsProviderId.present
+          ? data.lastProcessedSmsProviderId.value
+          : this.lastProcessedSmsProviderId,
+      lastProcessedSmsDate: data.lastProcessedSmsDate.present
+          ? data.lastProcessedSmsDate.value
+          : this.lastProcessedSmsDate,
+      importState: data.importState.present
+          ? data.importState.value
+          : this.importState,
+      importCursor: data.importCursor.present
+          ? data.importCursor.value
+          : this.importCursor,
+      importFromDate: data.importFromDate.present
+          ? data.importFromDate.value
+          : this.importFromDate,
+      importTotalCandidates: data.importTotalCandidates.present
+          ? data.importTotalCandidates.value
+          : this.importTotalCandidates,
+      importProcessedCount: data.importProcessedCount.present
+          ? data.importProcessedCount.value
+          : this.importProcessedCount,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('IngestWatermarkRow(')
+          ..write('id: $id, ')
+          ..write('lastProcessedSmsProviderId: $lastProcessedSmsProviderId, ')
+          ..write('lastProcessedSmsDate: $lastProcessedSmsDate, ')
+          ..write('importState: $importState, ')
+          ..write('importCursor: $importCursor, ')
+          ..write('importFromDate: $importFromDate, ')
+          ..write('importTotalCandidates: $importTotalCandidates, ')
+          ..write('importProcessedCount: $importProcessedCount')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    lastProcessedSmsProviderId,
+    lastProcessedSmsDate,
+    importState,
+    importCursor,
+    importFromDate,
+    importTotalCandidates,
+    importProcessedCount,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is IngestWatermarkRow &&
+          other.id == this.id &&
+          other.lastProcessedSmsProviderId == this.lastProcessedSmsProviderId &&
+          other.lastProcessedSmsDate == this.lastProcessedSmsDate &&
+          other.importState == this.importState &&
+          other.importCursor == this.importCursor &&
+          other.importFromDate == this.importFromDate &&
+          other.importTotalCandidates == this.importTotalCandidates &&
+          other.importProcessedCount == this.importProcessedCount);
+}
+
+class IngestWatermarksCompanion extends UpdateCompanion<IngestWatermarkRow> {
+  final Value<int> id;
+  final Value<int> lastProcessedSmsProviderId;
+  final Value<DateTime?> lastProcessedSmsDate;
+  final Value<String> importState;
+  final Value<int?> importCursor;
+  final Value<DateTime?> importFromDate;
+  final Value<int?> importTotalCandidates;
+  final Value<int> importProcessedCount;
+  const IngestWatermarksCompanion({
+    this.id = const Value.absent(),
+    this.lastProcessedSmsProviderId = const Value.absent(),
+    this.lastProcessedSmsDate = const Value.absent(),
+    this.importState = const Value.absent(),
+    this.importCursor = const Value.absent(),
+    this.importFromDate = const Value.absent(),
+    this.importTotalCandidates = const Value.absent(),
+    this.importProcessedCount = const Value.absent(),
+  });
+  IngestWatermarksCompanion.insert({
+    this.id = const Value.absent(),
+    this.lastProcessedSmsProviderId = const Value.absent(),
+    this.lastProcessedSmsDate = const Value.absent(),
+    this.importState = const Value.absent(),
+    this.importCursor = const Value.absent(),
+    this.importFromDate = const Value.absent(),
+    this.importTotalCandidates = const Value.absent(),
+    this.importProcessedCount = const Value.absent(),
+  });
+  static Insertable<IngestWatermarkRow> custom({
+    Expression<int>? id,
+    Expression<int>? lastProcessedSmsProviderId,
+    Expression<DateTime>? lastProcessedSmsDate,
+    Expression<String>? importState,
+    Expression<int>? importCursor,
+    Expression<DateTime>? importFromDate,
+    Expression<int>? importTotalCandidates,
+    Expression<int>? importProcessedCount,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (lastProcessedSmsProviderId != null)
+        'last_processed_sms_provider_id': lastProcessedSmsProviderId,
+      if (lastProcessedSmsDate != null)
+        'last_processed_sms_date': lastProcessedSmsDate,
+      if (importState != null) 'import_state': importState,
+      if (importCursor != null) 'import_cursor': importCursor,
+      if (importFromDate != null) 'import_from_date': importFromDate,
+      if (importTotalCandidates != null)
+        'import_total_candidates': importTotalCandidates,
+      if (importProcessedCount != null)
+        'import_processed_count': importProcessedCount,
+    });
+  }
+
+  IngestWatermarksCompanion copyWith({
+    Value<int>? id,
+    Value<int>? lastProcessedSmsProviderId,
+    Value<DateTime?>? lastProcessedSmsDate,
+    Value<String>? importState,
+    Value<int?>? importCursor,
+    Value<DateTime?>? importFromDate,
+    Value<int?>? importTotalCandidates,
+    Value<int>? importProcessedCount,
+  }) {
+    return IngestWatermarksCompanion(
+      id: id ?? this.id,
+      lastProcessedSmsProviderId:
+          lastProcessedSmsProviderId ?? this.lastProcessedSmsProviderId,
+      lastProcessedSmsDate: lastProcessedSmsDate ?? this.lastProcessedSmsDate,
+      importState: importState ?? this.importState,
+      importCursor: importCursor ?? this.importCursor,
+      importFromDate: importFromDate ?? this.importFromDate,
+      importTotalCandidates:
+          importTotalCandidates ?? this.importTotalCandidates,
+      importProcessedCount: importProcessedCount ?? this.importProcessedCount,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (lastProcessedSmsProviderId.present) {
+      map['last_processed_sms_provider_id'] = Variable<int>(
+        lastProcessedSmsProviderId.value,
+      );
+    }
+    if (lastProcessedSmsDate.present) {
+      map['last_processed_sms_date'] = Variable<DateTime>(
+        lastProcessedSmsDate.value,
+      );
+    }
+    if (importState.present) {
+      map['import_state'] = Variable<String>(importState.value);
+    }
+    if (importCursor.present) {
+      map['import_cursor'] = Variable<int>(importCursor.value);
+    }
+    if (importFromDate.present) {
+      map['import_from_date'] = Variable<DateTime>(importFromDate.value);
+    }
+    if (importTotalCandidates.present) {
+      map['import_total_candidates'] = Variable<int>(
+        importTotalCandidates.value,
+      );
+    }
+    if (importProcessedCount.present) {
+      map['import_processed_count'] = Variable<int>(importProcessedCount.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('IngestWatermarksCompanion(')
+          ..write('id: $id, ')
+          ..write('lastProcessedSmsProviderId: $lastProcessedSmsProviderId, ')
+          ..write('lastProcessedSmsDate: $lastProcessedSmsDate, ')
+          ..write('importState: $importState, ')
+          ..write('importCursor: $importCursor, ')
+          ..write('importFromDate: $importFromDate, ')
+          ..write('importTotalCandidates: $importTotalCandidates, ')
+          ..write('importProcessedCount: $importProcessedCount')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2303,6 +4349,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $RawMessagesTable rawMessages = $RawMessagesTable(this);
   late final $TransactionsTable transactions = $TransactionsTable(this);
   late final $AppSettingsTableTable appSettingsTable = $AppSettingsTableTable(
+    this,
+  );
+  late final $IngestWatermarksTable ingestWatermarks = $IngestWatermarksTable(
     this,
   );
   @override
@@ -2314,6 +4363,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     rawMessages,
     transactions,
     appSettingsTable,
+    ingestWatermarks,
   ];
 }
 
@@ -2624,6 +4674,8 @@ typedef $$RawMessagesTableCreateCompanionBuilder =
       required String classification,
       Value<bool> panRedacted,
       Value<bool> dismissedAsNotTransaction,
+      Value<String?> unparsedReason,
+      Value<String?> unparsedRuleId,
       Value<DateTime> createdAt,
     });
 typedef $$RawMessagesTableUpdateCompanionBuilder =
@@ -2638,6 +4690,8 @@ typedef $$RawMessagesTableUpdateCompanionBuilder =
       Value<String> classification,
       Value<bool> panRedacted,
       Value<bool> dismissedAsNotTransaction,
+      Value<String?> unparsedReason,
+      Value<String?> unparsedRuleId,
       Value<DateTime> createdAt,
     });
 
@@ -2697,6 +4751,16 @@ class $$RawMessagesTableFilterComposer
 
   ColumnFilters<bool> get dismissedAsNotTransaction => $composableBuilder(
     column: $table.dismissedAsNotTransaction,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get unparsedReason => $composableBuilder(
+    column: $table.unparsedReason,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get unparsedRuleId => $composableBuilder(
+    column: $table.unparsedRuleId,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2765,6 +4829,16 @@ class $$RawMessagesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get unparsedReason => $composableBuilder(
+    column: $table.unparsedReason,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get unparsedRuleId => $composableBuilder(
+    column: $table.unparsedRuleId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -2824,6 +4898,16 @@ class $$RawMessagesTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get unparsedReason => $composableBuilder(
+    column: $table.unparsedReason,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get unparsedRuleId => $composableBuilder(
+    column: $table.unparsedRuleId,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 }
@@ -2869,6 +4953,8 @@ class $$RawMessagesTableTableManager
                 Value<String> classification = const Value.absent(),
                 Value<bool> panRedacted = const Value.absent(),
                 Value<bool> dismissedAsNotTransaction = const Value.absent(),
+                Value<String?> unparsedReason = const Value.absent(),
+                Value<String?> unparsedRuleId = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
               }) => RawMessagesCompanion(
                 id: id,
@@ -2881,6 +4967,8 @@ class $$RawMessagesTableTableManager
                 classification: classification,
                 panRedacted: panRedacted,
                 dismissedAsNotTransaction: dismissedAsNotTransaction,
+                unparsedReason: unparsedReason,
+                unparsedRuleId: unparsedRuleId,
                 createdAt: createdAt,
               ),
           createCompanionCallback:
@@ -2895,6 +4983,8 @@ class $$RawMessagesTableTableManager
                 required String classification,
                 Value<bool> panRedacted = const Value.absent(),
                 Value<bool> dismissedAsNotTransaction = const Value.absent(),
+                Value<String?> unparsedReason = const Value.absent(),
+                Value<String?> unparsedRuleId = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
               }) => RawMessagesCompanion.insert(
                 id: id,
@@ -2907,6 +4997,8 @@ class $$RawMessagesTableTableManager
                 classification: classification,
                 panRedacted: panRedacted,
                 dismissedAsNotTransaction: dismissedAsNotTransaction,
+                unparsedReason: unparsedReason,
+                unparsedRuleId: unparsedRuleId,
                 createdAt: createdAt,
               ),
           withReferenceMapper: (p0) => p0
@@ -2942,6 +5034,29 @@ typedef $$TransactionsTableCreateCompanionBuilder =
       required String amountCurrency,
       required int amountMinor,
       Value<String?> categoryId,
+      Value<String?> convertedAmountAmount,
+      Value<String?> convertedAmountCurrency,
+      Value<int?> convertedAmountMinor,
+      Value<String?> feeAmountAmount,
+      Value<String?> feeAmountCurrency,
+      Value<int?> feeAmountMinor,
+      Value<String?> fxRate,
+      Value<DateTime?> occurredAt,
+      Value<String?> timeSource,
+      Value<String> direction,
+      Value<String> transactionType,
+      Value<bool> affectsSpend,
+      Value<String?> referenceNumber,
+      Value<String?> instrumentKind,
+      Value<String?> instrumentMaskedRef,
+      Value<String> provenance,
+      Value<int?> sourceMessageId,
+      Value<String?> rulePackId,
+      Value<String?> rulePackVersion,
+      Value<String?> ruleId,
+      Value<bool> needsReview,
+      Value<String?> reviewReason,
+      Value<int?> possibleDuplicateOfId,
       Value<bool> isDeleted,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
@@ -2954,6 +5069,29 @@ typedef $$TransactionsTableUpdateCompanionBuilder =
       Value<String> amountCurrency,
       Value<int> amountMinor,
       Value<String?> categoryId,
+      Value<String?> convertedAmountAmount,
+      Value<String?> convertedAmountCurrency,
+      Value<int?> convertedAmountMinor,
+      Value<String?> feeAmountAmount,
+      Value<String?> feeAmountCurrency,
+      Value<int?> feeAmountMinor,
+      Value<String?> fxRate,
+      Value<DateTime?> occurredAt,
+      Value<String?> timeSource,
+      Value<String> direction,
+      Value<String> transactionType,
+      Value<bool> affectsSpend,
+      Value<String?> referenceNumber,
+      Value<String?> instrumentKind,
+      Value<String?> instrumentMaskedRef,
+      Value<String> provenance,
+      Value<int?> sourceMessageId,
+      Value<String?> rulePackId,
+      Value<String?> rulePackVersion,
+      Value<String?> ruleId,
+      Value<bool> needsReview,
+      Value<String?> reviewReason,
+      Value<int?> possibleDuplicateOfId,
       Value<bool> isDeleted,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
@@ -2995,6 +5133,121 @@ class $$TransactionsTableFilterComposer
 
   ColumnFilters<String> get categoryId => $composableBuilder(
     column: $table.categoryId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get convertedAmountAmount => $composableBuilder(
+    column: $table.convertedAmountAmount,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get convertedAmountCurrency => $composableBuilder(
+    column: $table.convertedAmountCurrency,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get convertedAmountMinor => $composableBuilder(
+    column: $table.convertedAmountMinor,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get feeAmountAmount => $composableBuilder(
+    column: $table.feeAmountAmount,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get feeAmountCurrency => $composableBuilder(
+    column: $table.feeAmountCurrency,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get feeAmountMinor => $composableBuilder(
+    column: $table.feeAmountMinor,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get fxRate => $composableBuilder(
+    column: $table.fxRate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get occurredAt => $composableBuilder(
+    column: $table.occurredAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get timeSource => $composableBuilder(
+    column: $table.timeSource,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get direction => $composableBuilder(
+    column: $table.direction,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get transactionType => $composableBuilder(
+    column: $table.transactionType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get affectsSpend => $composableBuilder(
+    column: $table.affectsSpend,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get referenceNumber => $composableBuilder(
+    column: $table.referenceNumber,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get instrumentKind => $composableBuilder(
+    column: $table.instrumentKind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get instrumentMaskedRef => $composableBuilder(
+    column: $table.instrumentMaskedRef,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get provenance => $composableBuilder(
+    column: $table.provenance,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sourceMessageId => $composableBuilder(
+    column: $table.sourceMessageId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get rulePackId => $composableBuilder(
+    column: $table.rulePackId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get rulePackVersion => $composableBuilder(
+    column: $table.rulePackVersion,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get ruleId => $composableBuilder(
+    column: $table.ruleId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get needsReview => $composableBuilder(
+    column: $table.needsReview,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get reviewReason => $composableBuilder(
+    column: $table.reviewReason,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get possibleDuplicateOfId => $composableBuilder(
+    column: $table.possibleDuplicateOfId,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -3053,6 +5306,121 @@ class $$TransactionsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get convertedAmountAmount => $composableBuilder(
+    column: $table.convertedAmountAmount,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get convertedAmountCurrency => $composableBuilder(
+    column: $table.convertedAmountCurrency,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get convertedAmountMinor => $composableBuilder(
+    column: $table.convertedAmountMinor,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get feeAmountAmount => $composableBuilder(
+    column: $table.feeAmountAmount,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get feeAmountCurrency => $composableBuilder(
+    column: $table.feeAmountCurrency,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get feeAmountMinor => $composableBuilder(
+    column: $table.feeAmountMinor,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get fxRate => $composableBuilder(
+    column: $table.fxRate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get occurredAt => $composableBuilder(
+    column: $table.occurredAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get timeSource => $composableBuilder(
+    column: $table.timeSource,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get direction => $composableBuilder(
+    column: $table.direction,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get transactionType => $composableBuilder(
+    column: $table.transactionType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get affectsSpend => $composableBuilder(
+    column: $table.affectsSpend,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get referenceNumber => $composableBuilder(
+    column: $table.referenceNumber,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get instrumentKind => $composableBuilder(
+    column: $table.instrumentKind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get instrumentMaskedRef => $composableBuilder(
+    column: $table.instrumentMaskedRef,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get provenance => $composableBuilder(
+    column: $table.provenance,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get sourceMessageId => $composableBuilder(
+    column: $table.sourceMessageId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get rulePackId => $composableBuilder(
+    column: $table.rulePackId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get rulePackVersion => $composableBuilder(
+    column: $table.rulePackVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get ruleId => $composableBuilder(
+    column: $table.ruleId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get needsReview => $composableBuilder(
+    column: $table.needsReview,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get reviewReason => $composableBuilder(
+    column: $table.reviewReason,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get possibleDuplicateOfId => $composableBuilder(
+    column: $table.possibleDuplicateOfId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<bool> get isDeleted => $composableBuilder(
     column: $table.isDeleted,
     builder: (column) => ColumnOrderings(column),
@@ -3106,6 +5474,115 @@ class $$TransactionsTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get convertedAmountAmount => $composableBuilder(
+    column: $table.convertedAmountAmount,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get convertedAmountCurrency => $composableBuilder(
+    column: $table.convertedAmountCurrency,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get convertedAmountMinor => $composableBuilder(
+    column: $table.convertedAmountMinor,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get feeAmountAmount => $composableBuilder(
+    column: $table.feeAmountAmount,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get feeAmountCurrency => $composableBuilder(
+    column: $table.feeAmountCurrency,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get feeAmountMinor => $composableBuilder(
+    column: $table.feeAmountMinor,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get fxRate =>
+      $composableBuilder(column: $table.fxRate, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get occurredAt => $composableBuilder(
+    column: $table.occurredAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get timeSource => $composableBuilder(
+    column: $table.timeSource,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get direction =>
+      $composableBuilder(column: $table.direction, builder: (column) => column);
+
+  GeneratedColumn<String> get transactionType => $composableBuilder(
+    column: $table.transactionType,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get affectsSpend => $composableBuilder(
+    column: $table.affectsSpend,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get referenceNumber => $composableBuilder(
+    column: $table.referenceNumber,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get instrumentKind => $composableBuilder(
+    column: $table.instrumentKind,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get instrumentMaskedRef => $composableBuilder(
+    column: $table.instrumentMaskedRef,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get provenance => $composableBuilder(
+    column: $table.provenance,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get sourceMessageId => $composableBuilder(
+    column: $table.sourceMessageId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get rulePackId => $composableBuilder(
+    column: $table.rulePackId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get rulePackVersion => $composableBuilder(
+    column: $table.rulePackVersion,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get ruleId =>
+      $composableBuilder(column: $table.ruleId, builder: (column) => column);
+
+  GeneratedColumn<bool> get needsReview => $composableBuilder(
+    column: $table.needsReview,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get reviewReason => $composableBuilder(
+    column: $table.reviewReason,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get possibleDuplicateOfId => $composableBuilder(
+    column: $table.possibleDuplicateOfId,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<bool> get isDeleted =>
       $composableBuilder(column: $table.isDeleted, builder: (column) => column);
 
@@ -3153,6 +5630,29 @@ class $$TransactionsTableTableManager
                 Value<String> amountCurrency = const Value.absent(),
                 Value<int> amountMinor = const Value.absent(),
                 Value<String?> categoryId = const Value.absent(),
+                Value<String?> convertedAmountAmount = const Value.absent(),
+                Value<String?> convertedAmountCurrency = const Value.absent(),
+                Value<int?> convertedAmountMinor = const Value.absent(),
+                Value<String?> feeAmountAmount = const Value.absent(),
+                Value<String?> feeAmountCurrency = const Value.absent(),
+                Value<int?> feeAmountMinor = const Value.absent(),
+                Value<String?> fxRate = const Value.absent(),
+                Value<DateTime?> occurredAt = const Value.absent(),
+                Value<String?> timeSource = const Value.absent(),
+                Value<String> direction = const Value.absent(),
+                Value<String> transactionType = const Value.absent(),
+                Value<bool> affectsSpend = const Value.absent(),
+                Value<String?> referenceNumber = const Value.absent(),
+                Value<String?> instrumentKind = const Value.absent(),
+                Value<String?> instrumentMaskedRef = const Value.absent(),
+                Value<String> provenance = const Value.absent(),
+                Value<int?> sourceMessageId = const Value.absent(),
+                Value<String?> rulePackId = const Value.absent(),
+                Value<String?> rulePackVersion = const Value.absent(),
+                Value<String?> ruleId = const Value.absent(),
+                Value<bool> needsReview = const Value.absent(),
+                Value<String?> reviewReason = const Value.absent(),
+                Value<int?> possibleDuplicateOfId = const Value.absent(),
                 Value<bool> isDeleted = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -3163,6 +5663,29 @@ class $$TransactionsTableTableManager
                 amountCurrency: amountCurrency,
                 amountMinor: amountMinor,
                 categoryId: categoryId,
+                convertedAmountAmount: convertedAmountAmount,
+                convertedAmountCurrency: convertedAmountCurrency,
+                convertedAmountMinor: convertedAmountMinor,
+                feeAmountAmount: feeAmountAmount,
+                feeAmountCurrency: feeAmountCurrency,
+                feeAmountMinor: feeAmountMinor,
+                fxRate: fxRate,
+                occurredAt: occurredAt,
+                timeSource: timeSource,
+                direction: direction,
+                transactionType: transactionType,
+                affectsSpend: affectsSpend,
+                referenceNumber: referenceNumber,
+                instrumentKind: instrumentKind,
+                instrumentMaskedRef: instrumentMaskedRef,
+                provenance: provenance,
+                sourceMessageId: sourceMessageId,
+                rulePackId: rulePackId,
+                rulePackVersion: rulePackVersion,
+                ruleId: ruleId,
+                needsReview: needsReview,
+                reviewReason: reviewReason,
+                possibleDuplicateOfId: possibleDuplicateOfId,
                 isDeleted: isDeleted,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
@@ -3175,6 +5698,29 @@ class $$TransactionsTableTableManager
                 required String amountCurrency,
                 required int amountMinor,
                 Value<String?> categoryId = const Value.absent(),
+                Value<String?> convertedAmountAmount = const Value.absent(),
+                Value<String?> convertedAmountCurrency = const Value.absent(),
+                Value<int?> convertedAmountMinor = const Value.absent(),
+                Value<String?> feeAmountAmount = const Value.absent(),
+                Value<String?> feeAmountCurrency = const Value.absent(),
+                Value<int?> feeAmountMinor = const Value.absent(),
+                Value<String?> fxRate = const Value.absent(),
+                Value<DateTime?> occurredAt = const Value.absent(),
+                Value<String?> timeSource = const Value.absent(),
+                Value<String> direction = const Value.absent(),
+                Value<String> transactionType = const Value.absent(),
+                Value<bool> affectsSpend = const Value.absent(),
+                Value<String?> referenceNumber = const Value.absent(),
+                Value<String?> instrumentKind = const Value.absent(),
+                Value<String?> instrumentMaskedRef = const Value.absent(),
+                Value<String> provenance = const Value.absent(),
+                Value<int?> sourceMessageId = const Value.absent(),
+                Value<String?> rulePackId = const Value.absent(),
+                Value<String?> rulePackVersion = const Value.absent(),
+                Value<String?> ruleId = const Value.absent(),
+                Value<bool> needsReview = const Value.absent(),
+                Value<String?> reviewReason = const Value.absent(),
+                Value<int?> possibleDuplicateOfId = const Value.absent(),
                 Value<bool> isDeleted = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -3185,6 +5731,29 @@ class $$TransactionsTableTableManager
                 amountCurrency: amountCurrency,
                 amountMinor: amountMinor,
                 categoryId: categoryId,
+                convertedAmountAmount: convertedAmountAmount,
+                convertedAmountCurrency: convertedAmountCurrency,
+                convertedAmountMinor: convertedAmountMinor,
+                feeAmountAmount: feeAmountAmount,
+                feeAmountCurrency: feeAmountCurrency,
+                feeAmountMinor: feeAmountMinor,
+                fxRate: fxRate,
+                occurredAt: occurredAt,
+                timeSource: timeSource,
+                direction: direction,
+                transactionType: transactionType,
+                affectsSpend: affectsSpend,
+                referenceNumber: referenceNumber,
+                instrumentKind: instrumentKind,
+                instrumentMaskedRef: instrumentMaskedRef,
+                provenance: provenance,
+                sourceMessageId: sourceMessageId,
+                rulePackId: rulePackId,
+                rulePackVersion: rulePackVersion,
+                ruleId: ruleId,
+                needsReview: needsReview,
+                reviewReason: reviewReason,
+                possibleDuplicateOfId: possibleDuplicateOfId,
                 isDeleted: isDeleted,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
@@ -3420,6 +5989,281 @@ typedef $$AppSettingsTableTableProcessedTableManager =
       AppSettingsRow,
       PrefetchHooks Function()
     >;
+typedef $$IngestWatermarksTableCreateCompanionBuilder =
+    IngestWatermarksCompanion Function({
+      Value<int> id,
+      Value<int> lastProcessedSmsProviderId,
+      Value<DateTime?> lastProcessedSmsDate,
+      Value<String> importState,
+      Value<int?> importCursor,
+      Value<DateTime?> importFromDate,
+      Value<int?> importTotalCandidates,
+      Value<int> importProcessedCount,
+    });
+typedef $$IngestWatermarksTableUpdateCompanionBuilder =
+    IngestWatermarksCompanion Function({
+      Value<int> id,
+      Value<int> lastProcessedSmsProviderId,
+      Value<DateTime?> lastProcessedSmsDate,
+      Value<String> importState,
+      Value<int?> importCursor,
+      Value<DateTime?> importFromDate,
+      Value<int?> importTotalCandidates,
+      Value<int> importProcessedCount,
+    });
+
+class $$IngestWatermarksTableFilterComposer
+    extends Composer<_$AppDatabase, $IngestWatermarksTable> {
+  $$IngestWatermarksTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get lastProcessedSmsProviderId => $composableBuilder(
+    column: $table.lastProcessedSmsProviderId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get lastProcessedSmsDate => $composableBuilder(
+    column: $table.lastProcessedSmsDate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get importState => $composableBuilder(
+    column: $table.importState,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get importCursor => $composableBuilder(
+    column: $table.importCursor,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get importFromDate => $composableBuilder(
+    column: $table.importFromDate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get importTotalCandidates => $composableBuilder(
+    column: $table.importTotalCandidates,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get importProcessedCount => $composableBuilder(
+    column: $table.importProcessedCount,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$IngestWatermarksTableOrderingComposer
+    extends Composer<_$AppDatabase, $IngestWatermarksTable> {
+  $$IngestWatermarksTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get lastProcessedSmsProviderId => $composableBuilder(
+    column: $table.lastProcessedSmsProviderId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get lastProcessedSmsDate => $composableBuilder(
+    column: $table.lastProcessedSmsDate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get importState => $composableBuilder(
+    column: $table.importState,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get importCursor => $composableBuilder(
+    column: $table.importCursor,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get importFromDate => $composableBuilder(
+    column: $table.importFromDate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get importTotalCandidates => $composableBuilder(
+    column: $table.importTotalCandidates,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get importProcessedCount => $composableBuilder(
+    column: $table.importProcessedCount,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$IngestWatermarksTableAnnotationComposer
+    extends Composer<_$AppDatabase, $IngestWatermarksTable> {
+  $$IngestWatermarksTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<int> get lastProcessedSmsProviderId => $composableBuilder(
+    column: $table.lastProcessedSmsProviderId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get lastProcessedSmsDate => $composableBuilder(
+    column: $table.lastProcessedSmsDate,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get importState => $composableBuilder(
+    column: $table.importState,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get importCursor => $composableBuilder(
+    column: $table.importCursor,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get importFromDate => $composableBuilder(
+    column: $table.importFromDate,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get importTotalCandidates => $composableBuilder(
+    column: $table.importTotalCandidates,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get importProcessedCount => $composableBuilder(
+    column: $table.importProcessedCount,
+    builder: (column) => column,
+  );
+}
+
+class $$IngestWatermarksTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $IngestWatermarksTable,
+          IngestWatermarkRow,
+          $$IngestWatermarksTableFilterComposer,
+          $$IngestWatermarksTableOrderingComposer,
+          $$IngestWatermarksTableAnnotationComposer,
+          $$IngestWatermarksTableCreateCompanionBuilder,
+          $$IngestWatermarksTableUpdateCompanionBuilder,
+          (
+            IngestWatermarkRow,
+            BaseReferences<
+              _$AppDatabase,
+              $IngestWatermarksTable,
+              IngestWatermarkRow
+            >,
+          ),
+          IngestWatermarkRow,
+          PrefetchHooks Function()
+        > {
+  $$IngestWatermarksTableTableManager(
+    _$AppDatabase db,
+    $IngestWatermarksTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$IngestWatermarksTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$IngestWatermarksTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$IngestWatermarksTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<int> lastProcessedSmsProviderId = const Value.absent(),
+                Value<DateTime?> lastProcessedSmsDate = const Value.absent(),
+                Value<String> importState = const Value.absent(),
+                Value<int?> importCursor = const Value.absent(),
+                Value<DateTime?> importFromDate = const Value.absent(),
+                Value<int?> importTotalCandidates = const Value.absent(),
+                Value<int> importProcessedCount = const Value.absent(),
+              }) => IngestWatermarksCompanion(
+                id: id,
+                lastProcessedSmsProviderId: lastProcessedSmsProviderId,
+                lastProcessedSmsDate: lastProcessedSmsDate,
+                importState: importState,
+                importCursor: importCursor,
+                importFromDate: importFromDate,
+                importTotalCandidates: importTotalCandidates,
+                importProcessedCount: importProcessedCount,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<int> lastProcessedSmsProviderId = const Value.absent(),
+                Value<DateTime?> lastProcessedSmsDate = const Value.absent(),
+                Value<String> importState = const Value.absent(),
+                Value<int?> importCursor = const Value.absent(),
+                Value<DateTime?> importFromDate = const Value.absent(),
+                Value<int?> importTotalCandidates = const Value.absent(),
+                Value<int> importProcessedCount = const Value.absent(),
+              }) => IngestWatermarksCompanion.insert(
+                id: id,
+                lastProcessedSmsProviderId: lastProcessedSmsProviderId,
+                lastProcessedSmsDate: lastProcessedSmsDate,
+                importState: importState,
+                importCursor: importCursor,
+                importFromDate: importFromDate,
+                importTotalCandidates: importTotalCandidates,
+                importProcessedCount: importProcessedCount,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$IngestWatermarksTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $IngestWatermarksTable,
+      IngestWatermarkRow,
+      $$IngestWatermarksTableFilterComposer,
+      $$IngestWatermarksTableOrderingComposer,
+      $$IngestWatermarksTableAnnotationComposer,
+      $$IngestWatermarksTableCreateCompanionBuilder,
+      $$IngestWatermarksTableUpdateCompanionBuilder,
+      (
+        IngestWatermarkRow,
+        BaseReferences<
+          _$AppDatabase,
+          $IngestWatermarksTable,
+          IngestWatermarkRow
+        >,
+      ),
+      IngestWatermarkRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -3432,4 +6276,6 @@ class $AppDatabaseManager {
       $$TransactionsTableTableManager(_db, _db.transactions);
   $$AppSettingsTableTableTableManager get appSettingsTable =>
       $$AppSettingsTableTableTableManager(_db, _db.appSettingsTable);
+  $$IngestWatermarksTableTableManager get ingestWatermarks =>
+      $$IngestWatermarksTableTableManager(_db, _db.ingestWatermarks);
 }

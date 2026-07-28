@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 
 import 'tables/app_settings_table.dart';
 import 'tables/audit_entry_table.dart';
+import 'tables/ingest_watermark_table.dart';
 import 'tables/raw_message_table.dart';
 import 'tables/transaction_table.dart';
 
@@ -26,7 +27,13 @@ part 'app_database.g.dart';
 /// production, directly in tests) instead of relying on a generated
 /// getter that couldn't supply those extra arguments anyway.
 @DriftDatabase(
-  tables: [AuditEntries, RawMessages, Transactions, AppSettingsTable],
+  tables: [
+    AuditEntries,
+    RawMessages,
+    Transactions,
+    AppSettingsTable,
+    IngestWatermarks,
+  ],
 )
 class AppDatabase extends _$AppDatabase {
   /// [executor] is opened by `lib/data/db/db_connection.dart` in production
@@ -39,14 +46,60 @@ class AppDatabase extends _$AppDatabase {
   /// Bump this and add a branch in [migration] whenever a table changes.
   /// ADR-003 requires a forward-migration test from an empty install for
   /// every version — see `test/data/db/app_database_encryption_test.dart`.
+  ///
+  /// | Version | Phase | Change |
+  /// |---|---|---|
+  /// | 1 | P1 | audit, raw_message, minimal transactions, settings |
+  /// | 2 | P2 | ingest watermark; SMS provenance, FX and dedup columns on transactions; unparsed diagnostics on raw_message |
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (Migrator m) async {
       await m.createAll();
       await _installAuditTriggers();
+      await _seedIngestWatermark();
+    },
+    onUpgrade: (Migrator m, int from, int to) async {
+      // Stepwise, never a single "if from < to" catch-all. A user who skips
+      // several app versions (entirely normal on a side-loaded build with no
+      // update channel — risk R-11) must walk every step in order.
+      if (from < 2) {
+        await m.createTable(ingestWatermarks);
+        await _seedIngestWatermark();
+
+        for (final GeneratedColumn<Object> column in <GeneratedColumn<Object>>[
+          transactions.convertedAmountAmount,
+          transactions.convertedAmountCurrency,
+          transactions.convertedAmountMinor,
+          transactions.feeAmountAmount,
+          transactions.feeAmountCurrency,
+          transactions.feeAmountMinor,
+          transactions.fxRate,
+          transactions.occurredAt,
+          transactions.timeSource,
+          transactions.direction,
+          transactions.transactionType,
+          transactions.affectsSpend,
+          transactions.referenceNumber,
+          transactions.instrumentKind,
+          transactions.instrumentMaskedRef,
+          transactions.provenance,
+          transactions.sourceMessageId,
+          transactions.rulePackId,
+          transactions.rulePackVersion,
+          transactions.ruleId,
+          transactions.needsReview,
+          transactions.reviewReason,
+          transactions.possibleDuplicateOfId,
+        ]) {
+          await m.addColumn(transactions, column);
+        }
+
+        await m.addColumn(rawMessages, rawMessages.unparsedReason);
+        await m.addColumn(rawMessages, rawMessages.unparsedRuleId);
+      }
     },
     beforeOpen: (OpeningDetails details) async {
       // ADR-003: enforce referential integrity on every connection, not
@@ -55,6 +108,20 @@ class AppDatabase extends _$AppDatabase {
       await customStatement('PRAGMA foreign_keys = ON;');
     },
   );
+
+  /// Guarantees the singleton watermark row exists.
+  ///
+  /// Written as an INSERT OR IGNORE rather than a read-then-write so it is
+  /// safe to call from both `onCreate` and `onUpgrade`, and so two concurrent
+  /// openings (the UI isolate and the background ingestion isolate can both
+  /// open the database — ADR-006) cannot race into two rows. The table's own
+  /// CHECK constraint is the second line of defence.
+  Future<void> _seedIngestWatermark() async {
+    await customStatement(
+      'INSERT OR IGNORE INTO ingest_watermark (id) VALUES '
+      '($ingestWatermarkSingletonId);',
+    );
+  }
 
   /// ADR-010 layer 2: SQL triggers that make `audit_entry` append-only
   /// against *any* code path — present or future, including a bug in

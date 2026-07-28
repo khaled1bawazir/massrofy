@@ -14,6 +14,48 @@
     <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
 
+    <!-- ADR-006 (docs/architecture.md) declares the complete permission list
+         for the release build. These two are the whole of SMS ingestion, and
+         they are the reason this app is architecturally foreclosed from
+         Google Play (H-12): Play restricts RECEIVE_SMS/READ_SMS to default
+         SMS handlers, which a spending tracker is not. NFR-C3 is satisfied
+         *by* the side-load distribution decision (OQ-3/OQ-4/X16), not by
+         asking for less.
+
+         RECEIVE_SMS  — the wake-only broadcast (Layer 1).
+         READ_SMS     — the content-provider read that does the actual work,
+                        and the historical import (US-A3).
+         Both are needed: one without the other is either a wake with nothing
+         to read, or a read that never wakes.
+
+         Deliberately ABSENT: SEND_SMS and WRITE_SMS. Massrofy observes the
+         user's messages; it never writes one. That is the SMS analogue of
+         CON-2 ("read-only with respect to money"). -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.READ_SMS" />
+
+    <!-- Re-arms the 15-minute self-healing sweep after a reboot (Layer 2).
+         Without it, ingestion silently degrades to "whenever you open the
+         app" after the first restart — the worst kind of bug, because
+         nothing appears broken. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- ADR-006 Layer 3 — the OPT-IN escalation for hostile OEMs (risk R-1).
+         Declared here, used only if the user turns it on in Settings; it is
+         OFF BY DEFAULT because it costs battery and NFR-R7 requires a
+         reasonable footprint.
+
+         `specialUse` rather than `dataSync`: Android 15 imposes runtime caps
+         on dataSync foreground services that make them unsuitable for a
+         continuous monitor. `specialUse` would normally invite Play policy
+         review, which does not apply to a side-loaded build (H-12).
+
+         POST_NOTIFICATIONS (API 33+) is required for the service's own
+         mandatory notification. Budget alerts (Epic G, P6) will reuse it. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:label="massrofy"
         android:name="${applicationName}"
@@ -40,6 +82,58 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- ADR-006 Layer 1 — the wake-only receiver.
+
+             android:exported="true" is REQUIRED here and is not a mistake:
+             the sender is the Android system, which is by definition an
+             external process. SMS_RECEIVED is on the implicit-broadcast
+             exemption list, which is what makes a manifest-registered
+             receiver work while our process is not running at all — the
+             property that makes single-digit-second latency possible.
+
+             The BROADCAST_SMS permission on the receiver means only a caller
+             holding that signature-level system permission can deliver to it,
+             so another app cannot forge a fake SMS_RECEIVED into this app.
+             It carries no content anyway (see SmsReceiver.kt), so a forged
+             broadcast could at worst trigger a redundant re-read of our own
+             inbox — but defence in depth is cheap here. -->
+        <receiver
+            android:name=".SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- ADR-006 Layer 2 — re-arm the periodic sweep after reboot or after
+             the APK is replaced (the only update path a side-loaded build
+             has, risk R-11). -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- ADR-006 Layer 3. `exported="false"` — nothing outside this app
+             may start it. The `specialUse` justification is required from
+             Android 14 (API 34) and is deliberately literal about what the
+             service does. -->
+        <service
+            android:name=".ForegroundIngestService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the app resident so bank transaction SMS are captured within seconds on devices whose battery manager suppresses background broadcast delivery. User-enabled, off by default." />
+        </service>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

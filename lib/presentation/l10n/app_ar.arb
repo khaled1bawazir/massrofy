@@ -14,5 +14,38 @@
   "lockGateContinueUnlock": "افتح القفل للمتابعة",
   "lockGateUnlockButtonSemanticLabel": "افتح القفل ببصمتك",
   "homePlaceholderTitle": "الرئيسية",
-  "homePlaceholderBody": "هذه نسخة الأساس (Foundation) من مصروفي. رصد الرسائل والتصنيف والتقارير تُبنى في مراحل لاحقة — هذه الشاشة تثبت فقط أن التطبيق يعمل، ويُفتح قفله، ويقرأ ويكتب في مخزنه المشفّر بشكل صحيح."
+  "homePlaceholderBody": "هذه نسخة الأساس (Foundation) من مصروفي. رصد الرسائل والتصنيف والتقارير تُبنى في مراحل لاحقة — هذه الشاشة تثبت فقط أن التطبيق يعمل، ويُفتح قفله، ويقرأ ويكتب في مخزنه المشفّر بشكل صحيح.",
+
+  "smsRationaleTitle": "لماذا يحتاج مصروفي إلى إذن الرسائل",
+  "smsRationaleLead": "يرسل بنكك تنبيهات المعاملات عبر الرسائل النصية. يقرأ مصروفي هذه الرسائل فقط، على جهازك، لبناء صورة إنفاقك.",
+  "smsRationalePointOnDevice": "تتم المعالجة بالكامل على هاتفك",
+  "smsRationalePointNoSharing": "لا تُرسل أي بيانات إلينا أو لأي جهة أخرى",
+  "smsRationalePointRevocable": "يمكنك إلغاء الإذن في أي وقت",
+  "smsRationalePointNoiseIgnored": "الرسائل غير المالية تُتجاهل ولا تُخزَّن أبداً",
+  "smsRationaleGrant": "منح إذن الرسائل",
+  "smsRationaleNotNow": "ليس الآن",
+
+  "smsLimitedModeTitle": "الوضع المحدود مفعّل",
+  "smsLimitedModeBody": "بدون إذن الرسائل، لن تُضاف المعاملات تلقائياً. لا تزال بياناتك السابقة (إن وُجدت) سليمة، ويمكنك إضافة المعاملات يدوياً في أي وقت.",
+  "smsLimitedModeOpenSettings": "فتح إعدادات النظام",
+  "smsLimitedModeTryAgain": "منح إذن الرسائل",
+  "smsLimitedModeAddManually": "إضافة معاملة يدوياً",
+  "smsRevokedBannerTitle": "تم إيقاف إذن الرسائل",
+
+  "importProgressTitle": "جارٍ استيراد رسائلك",
+  "importProgressFound": "تم العثور على {count} معاملة حتى الآن…",
+  "importProgressContinueInBackground": "المتابعة في الخلفية",
+  "importProgressScopeNote": "يستورد مصروفي الرسائل من بداية هذا الشهر.",
+
+  "needsReviewTitle": "بحاجة إلى مراجعة",
+  "needsReviewTabUnparsed": "غير مفهومة ({count})",
+  "needsReviewTabLowConfidence": "منخفضة الثقة ({count})",
+  "needsReviewEmpty": "لا شيء يحتاج مراجعة الآن",
+  "needsReviewEmptyBody": "كل الرسائل والمعاملات مصنَّفة وواضحة.",
+  "needsReviewFillInDetails": "أكمل التفاصيل",
+  "needsReviewNotATransaction": "ليست معاملة",
+  "needsReviewReceivedFrom": "استُلمت {time} · المرسل: {sender}",
+  "needsReviewPossibleDuplicate": "تكرار محتمل",
+  "needsReviewReasonNoRule": "لم تطابق هذه الرسالة أي صيغة معروفة",
+  "needsReviewReasonMissingField": "بعض التفاصيل كانت ناقصة في هذه الرسالة"
 }

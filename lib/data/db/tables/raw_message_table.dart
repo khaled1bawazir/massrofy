@@ -48,8 +48,31 @@ class RawMessages extends Table {
 
   BoolColumn get panRedacted => boolean().withDefault(const Constant(false))();
 
+  /// US-A4's "not a transaction" dismissal. A dismissed row leaves the review
+  /// queue but is **kept**, so the same message re-read from the provider on
+  /// a later sweep is not resurrected as a new review item.
   BoolColumn get dismissedAsNotTransaction =>
       boolean().withDefault(const Constant(false))();
+
+  // --- P2 additions (ADR-007 step 4 diagnostics) ---------------------------
+  //
+  // Architecture §4.2 lists `RawMessage` without these two. They are a small,
+  // deliberate extension rather than a divergence: without them the review
+  // queue can show the user *that* a message was not understood but not
+  // *why*, and the parser-health panel (ADR-015) cannot tell "the bank
+  // changed a template" apart from "the amount was missing" — which are very
+  // different maintenance signals (risk R-4).
+  //
+  // Both are diagnostics about the parse, not content: they hold rule ids and
+  // enum values, never message text or figures (NFR-S4).
+
+  /// One of `UnparsedReason`'s constants, or `NULL` when the message parsed
+  /// or was ignored.
+  TextColumn get unparsedReason => text().nullable()();
+
+  /// The `ruleId` that matched but could not complete, when there was one.
+  /// `NULL` when no rule matched at all.
+  TextColumn get unparsedRuleId => text().nullable()();
 
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
 }
