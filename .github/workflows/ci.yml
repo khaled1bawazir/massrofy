@@ -377,12 +377,49 @@ jobs:
     #     cannot stop the step (this is exactly the 55 -> 60 gap on job
     #     90343139912). Never read a `timeout-minutes` here as a wall clock.
     #
-    # If BOTH attempts blow past their internal ceilings and run to their
-    # 30-minute step backstops, the sum would be 67 and this job timeout
-    # fires first. That is deliberate: this is the outermost backstop, and it
-    # is meant to be the thing that stops a genuinely wedged runner.
+    # Two questions worth answering here rather than leaving to be
+    # re-derived by the next person:
+    #
+    #   - Why count BOTH the boot cap and the script cap in one attempt, when
+    #     a boot that times out means the script never runs? Because the
+    #     expensive case is not a boot that FAILS — it is a boot that is slow
+    #     and then SUCCEEDS (4m59s is legal), followed by a script that
+    #     overruns. Those two do compose, so 27 is genuinely reachable and
+    #     not a stack of mutually exclusive failures.
+    #
+    #   - Why is 27 so much larger than a healthy attempt? Because a healthy
+    #     attempt is ~13-14 min (measured: 12m48s on job 90359857337,
+    #     13m16s on job 90365606440, 13m34s on job 90369329440) and nearly
+    #     all of it is the script. SDK install + AVD create + boot together
+    #     take ~2 min in practice (job 90369329440: step start 18:07:22Z,
+    #     "Emulator booted." 18:09:19Z). The SDK/boot terms above are
+    #     ceilings, not expectations.
+    #
+    # If BOTH attempts skip past their internal ceilings and run all the way
+    # to their 30-minute step BACKSTOPS, the step budgets alone would sum to
+    # 3 + 30 + 2 + 30 + 1 + 1 = 67, which is over this job's 62 — so this job
+    # timeout fires first and is what stops it. Deliberate: this is the
+    # outermost backstop. (That 67 and the 67-minute worst-case wall clock
+    # above are two different quantities that happen to coincide. Neither is
+    # derived from the other.)
     #
     # A healthy run is unaffected and still finishes in ~15-20 minutes.
+    #
+    # HONEST LIMIT — what none of these budgets can catch. Job 90365056113
+    # (this file's own validation run) failed at 11 min with:
+    #     18:16:50Z ERROR | detected a hanging thread 'QEMU2 main loop'.
+    #                       No response for 16311 ms
+    #     18:17:26Z ##[error]The runner has received a shutdown signal.
+    # i.e. the KHA-62 QEMU hang, and then the RUNNER VM ITSELF died 36
+    # seconds later — the same pairing that ended job 90326515099. When that
+    # happens the job ends immediately, `Post` steps are skipped, and neither
+    # the `timeout` wrapper nor any `timeout-minutes` gets a chance to act;
+    # the retry below cannot help either, because there is no longer a runner
+    # to retry on. The one mercy is that it fails FAST (11 min) and RED, which
+    # is the behaviour we want anyway. Do not read a quick red on this job as
+    # evidence that the budgets here are broken — check for that pair of log
+    # lines first. Surviving this properly needs a retry at the JOB level
+    # (re-running the workflow), which GitHub has no native primitive for.
     timeout-minutes: 62
     steps:
       - uses: actions/checkout@v4

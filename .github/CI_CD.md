@@ -208,6 +208,24 @@ ADR-003 assertion as passed at 15:55:58Z and was cut one second later at
 job starts timing out again as the app grows, the honest fixes are a Gradle
 build cache on that job or a larger runner — not another slack increase.
 
+**What no timeout in this file can catch.** Twice now — jobs `90326515099`
+and `90365056113` — the emulator job has ended with this pair of log lines
+about half a minute apart:
+
+```
+ERROR | detected a hanging thread 'QEMU2 main loop'. No response for 16311 ms
+##[error]The runner has received a shutdown signal.
+```
+
+The KHA-62 QEMU hang appears to take the **runner VM itself** down with it.
+When that happens the job ends on the spot, `Post` steps are skipped, and no
+`timeout-minutes`, `timeout` wrapper or in-job retry gets a chance to act —
+there is no longer a runner to act on. It fails **fast (~11 min) and red**,
+which is the behaviour we want, so the practical response is simply to re-run
+the job. **Do not read a quick red on this job as a broken budget** — check
+for those two lines first. Surviving it properly would need a retry at the
+*job* level, which GitHub has no native primitive for.
+
 All four jobs are written to no-op cleanly (not fail) on this repo *right
 now*, before `pubspec.yaml`/`lib/`/`android/` exist. Each one starts doing real
 enforcement automatically the moment mobile-engineer's P1 scaffold adds those
