@@ -205,6 +205,13 @@ jobs:
   android-sqlcipher-integration-test:
     name: "ADR-003: SQLCipher integration test (Android emulator)"
     runs-on: ubuntu-latest
+    # Without an explicit timeout this job inherits GitHub's 360-minute
+    # default. It has hung (not failed — genuinely never completed) for 2+
+    # hours on emulator-boot flakiness unrelated to the diff being tested
+    # (KHA-62), which silently blocks every merge behind it since a required
+    # check stuck `pending` is indistinguishable from "still running fine."
+    # 20 minutes is roughly double this job's normal ~10-15 minute duration.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
