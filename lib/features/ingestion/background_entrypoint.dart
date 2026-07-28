@@ -140,8 +140,9 @@ Future<bool> runBackgroundIngestion() async {
   //
   // **Not yet implemented from ADR-018:** decision 2's `ingest.skipped.locked`
   // diagnostic event (counts only, ADR-015) for the parser-health panel. It
-  // is the evidence the human would need if H-13 is ever revisited. Flagged
-  // here rather than silently omitted; it belongs with the diagnostics screen
-  // phase, not this file.
+  // is the evidence the human would need if H-13 is ever revisited. Tracked
+  // as **KHA-58**, scoped to the diagnostics screen phase rather than to this
+  // file — noted here so the obligation is visible from the code it belongs
+  // to, and not only from the issue tracker.
   return true;
 }
