@@ -506,7 +506,7 @@ Even as a personal app, this system holds a complete record of one individual's 
 
 | ID | Requirement |
 |---|---|
-| NFR-R1 | A newly arrived transaction SMS must be reflected in the app within seconds (user's stated target), not merely "by the time the app is next opened" — the app is expected to process SMS in the background. |
+| NFR-R1 | A newly arrived transaction SMS must be reflected in the app within seconds (user's stated target), not merely "by the time the app is next opened" — the app is expected to process SMS in the background. **Amended (human-approved 2026-07-28) per ADR-018:** a background isolate cannot open the cryptographically-locked database (ADR-005), so the actual, shipped promise is single-digit seconds while the app is unlocked, and "visible at next unlock" while locked — nothing is ever lost, only delayed. See `docs/architecture.md` ADR-018 for the full reasoning and rejected alternatives. |
 | NFR-R2 | The main screen (current month total) must render without a perceptible wait on a typical dataset; the app must remain responsive during background processing. |
 | NFR-R3 | Initial historical import must not block the UI and must be resumable after interruption (AC-A3.2, AC-A3.3). |
 | NFR-R4 | The app must function fully offline. No feature required for viewing or categorizing existing transactions may depend on network availability. |
