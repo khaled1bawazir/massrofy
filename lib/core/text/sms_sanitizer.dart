@@ -25,6 +25,21 @@ library;
 /// convention — that it went through [SmsSanitizer.sanitize] first. This is
 /// the type the raw-message DAO's `insert` method requires (see
 /// `lib/data/dao/raw_message_dao.dart`): it cannot accept a plain `String`.
+/// One redaction to apply: destroy `[start, end)` and put `replacement`
+/// there.
+///
+/// A **record type** (Dart 3), which is a lightweight anonymous tuple with
+/// named fields — no class declaration, no constructor, and structural
+/// equality for free. Declared at library level because Dart does not allow
+/// a `typedef` inside a class body.
+///
+/// Every generic redaction rule in [SmsSanitizer] produces a list of these
+/// rather than rewriting the string itself. That is what lets three
+/// independent rules agree on one consistent view of the text: each reports
+/// *what it found and where*, and a single function applies them all in one
+/// pass with the offsets still valid.
+typedef _Redaction = ({int start, int end, String replacement});
+
 class SanitizedSmsText {
   /// The redacted text. Safe to store, log (via [SafeLogger]-style redaction
   /// rules elsewhere), and display for user verification of a parse
@@ -83,46 +98,104 @@ abstract final class SmsSanitizer {
       r'\u0660-\u0669' // Arabic-Indic ٠١٢٣٤٥٦٧٨٩
       r'\u06F0-\u06F9'; // Extended/Persian Arabic-Indic ۰۱۲۳۴۵۶۷۸۹
 
-  // Matches a Saudi IBAN: "SA" followed by exactly 22 digits (2 check
-  // digits + 20 BBAN digits, per the Saudi IBAN standard). Case-insensitive
-  // so a lower-case "sa" prefix (unlikely, but cheap to cover) is caught too.
-  static final RegExp _saudiIbanPattern = RegExp(
-    'SA[$_digitChars]{22}',
-    caseSensitive: false,
-  );
+  // --- §13.3 — the group separator set -----------------------------------
+  //
+  // Exactly five characters, ratified in ADR-013 §13.3. Written as escapes
+  // for the same reason as [_digitChars]: three of the five are invisible
+  // whitespace variants that no reviewer can tell apart by eye.
+  //
+  // What is **excluded** matters as much as what is included, and §13.3
+  // records the reasons so nobody re-adds them on a hunch:
+  //
+  //  - **the full stop `.`** is the decimal separator in amounts. Including
+  //    it would trade a real risk of destroying a transaction amount for
+  //    coverage of a PAN format issuers do not use.
+  //  - **newline** separates *fields* in a bank SMS. Joining across one
+  //    fuses two unrelated numbers, and Luhn only filters 9 of those 10.
+  //  - **runs of two or more separators**, for the same fusing reason. Note
+  //    the patterns below therefore allow exactly *one* separator between
+  //    groups, never `+`.
+  // Three of the five are invisible whitespace variants that no reviewer
+  // can tell apart by eye, and a literal `-` inside a character class would
+  // start a *range*. So every one is written as a `\uXXXX` escape, in a raw
+  // string so the backslash reaches the regex engine intact â€” the same
+  // reasoning, and the same defence against a re-encoded source file, as
+  // [_digitChars] above.
+  static const String _separatorChars =
+      r'\u0020' // SPACE
+      r'\u00A0' // NO-BREAK SPACE
+      r'\u202F' // NARROW NO-BREAK SPACE
+      r'\u002D' // HYPHEN-MINUS (escaped: a literal - would open a range)
+      r'\u2013'; // EN DASH
 
-  // Any maximal run of digits. We later filter to the 13-19 length window
-  // ADR-013 specifies for PAN candidates and Luhn-check each candidate,
-  // rather than trying to write one clever-but-fragile regex that both
-  // finds digit runs *and* validates Luhn in one step.
+  /// True for the five §13.3 separators. Kept as a predicate as well as a
+  /// character class so the hand-written IBAN scan and the regex-driven PAN
+  /// scan cannot drift apart on what a separator is.
+  static bool _isSeparator(int codeUnit) =>
+      codeUnit == 0x0020 ||
+      codeUnit == 0x00A0 ||
+      codeUnit == 0x202F ||
+      codeUnit == 0x002D ||
+      codeUnit == 0x2013;
+
+  /// §13.2 — characters removed from the **matching view** of the text.
+  ///
+  /// ## Why this is load-bearing and not tidiness
+  ///
+  /// Sanitisation runs on the **raw** SMS body, before `SmsTextNormalizer`
+  /// (ADR-013 requires redaction at the ingestion boundary, and the
+  /// normaliser runs afterwards on the already-safe text). So this file
+  /// cannot assume bidi controls have been stripped — it has to strip them
+  /// itself.
+  ///
+  /// An Arabic RTL bank template routinely wraps a Latin-script number in
+  /// directional marks. A single `U+200F` sitting between two groups of a
+  /// card number splits the digit-group sequence in two, and every rule
+  /// below that reasons about "groups joined by a separator" then sees two
+  /// short numbers instead of one PAN — and lets the PAN through in full.
+  ///
+  /// These characters are removed from the *matching view* only. The
+  /// returned text keeps its original formatting everywhere outside a
+  /// replaced span, because AC-B1.2 asks the user to verify a parse against
+  /// something that looks like what their bank actually sent.
+  static bool _isIgnorable(int codeUnit) =>
+      codeUnit == 0x200E || // LEFT-TO-RIGHT MARK
+      codeUnit == 0x200F || // RIGHT-TO-LEFT MARK
+      codeUnit == 0x061C || // ARABIC LETTER MARK
+      (codeUnit >= 0x202A && codeUnit <= 0x202E) || // LRE/RLE/PDF/LRO/RLO
+      (codeUnit >= 0x2066 && codeUnit <= 0x2069) || // LRI/RLI/FSI/PDI
+      codeUnit == 0x00AD; // SOFT HYPHEN
+
+  // Any maximal run of digits, used to split a digit-group sequence back
+  // into its groups. Length filtering and the Luhn check happen in Dart
+  // rather than in the pattern — one clever regex that both found runs and
+  // validated Luhn would be unreviewable and, per §13.4, wrong.
   static final RegExp _digitRunPattern = RegExp('[$_digitChars]+');
 
-  // A PAN candidate that may be **group-separated**: two or more digit
-  // groups joined by a single space or hyphen, e.g. "4111 1111 1111 1111"
-  // or "4111-1111-1111-1111", as well as the plain contiguous run.
-  //
-  // ## Why this exists (Linear KHA-54, gap 3 — the highest-severity one)
-  //
-  // [_digitRunPattern] only ever matches a *maximal contiguous* run, so the
-  // single most common real-world way of writing a card number — in groups
-  // of four — never even reached the 13-19 length window, let alone the
-  // Luhn check. A grouped PAN therefore survived `sanitize` completely
-  // intact **and** `panRedacted` reported `false`, so the schema flag
-  // actively recorded the absence of a PAN that was sitting in the row in
-  // cleartext. That is precisely the outcome NFR-S2/NFR-C2 exist to make
-  // structurally impossible.
-  //
-  // Note this is a **widening of ADR-013's literal wording** ("Luhn-valid
-  // 13-19 digit runs"). It is recorded as an ADR amendment request rather
-  // than a silent divergence — see the PR description for this phase.
-  //
-  // Group size is `{2,}` rather than exactly 4 so that non-standard
-  // groupings (4-6-5 Amex-style, or 4-4-4-4-3 for a 19-digit PAN) are
-  // covered too. The separator class is deliberately *single* space/hyphen
-  // only: allowing runs of separators would let the pattern swallow two
-  // unrelated numbers that merely sit near each other in the sentence.
-  static final RegExp _groupedDigitRunPattern = RegExp(
-    '[$_digitChars]{2,}(?:[ -][$_digitChars]{2,})+',
+  /// §13.4's **digit-group sequence**: `g1 sep g2 sep … sep gn`, where each
+  /// `gi` is a maximal run of two or more digits and each `sep` is a single
+  /// separator. The trailing `*` (not `+`) is what makes `n = 1` — the
+  /// ordinary contiguous run — the same case as every other, handled by the
+  /// same code.
+  ///
+  /// Groups are `{2,}` rather than exactly 4 so that non-standard groupings
+  /// (Amex 4-6-5, or 4-4-4-4-3 for a 19-digit PAN) are covered.
+  ///
+  /// This pattern only *locates* candidates. Deciding which slice of a
+  /// sequence is a PAN is [_findPanSpans]' job, and that distinction is the
+  /// whole of §13.4 — see the comment there.
+  static final RegExp _digitGroupSequencePattern = RegExp(
+    '[$_digitChars]{2,}(?:[$_separatorChars][$_digitChars]{2,})*',
+  );
+
+  /// The `SA` prefix of a Saudi IBAN. Case-insensitive so a lower-case
+  /// prefix is caught too. Everything after it is scanned by hand in
+  /// [_findIbanSpans], because "22 digits, tolerating single separators
+  /// between groups, counted across group boundaries" is not something a
+  /// regex expresses without becoming unreadable.
+  static final RegExp _saudiIbanPrefixPattern = RegExp(
+    'SA',
+    caseSensitive: false,
   );
 
   // A run of digits long enough to plausibly be a secret. Used by the
@@ -199,78 +272,383 @@ abstract final class SmsSanitizer {
     String text = rawBody;
     bool panRedacted = false;
 
-    // 1) IBANs first. A Saudi IBAN's 22-digit run is always longer than the
-    // 13-19 digit PAN window below, so the two patterns never actually
-    // compete for the same characters — this ordering is for readability,
-    // not correctness.
-    text = text.replaceAllMapped(_saudiIbanPattern, (Match match) {
-      final String digits = match.group(0)!;
-      final String last4 = digits.substring(digits.length - 4);
-      return 'SA**…$last4'; // "SA**…<last4>" per ADR-013
-    });
+    // Every generic pass runs over the §13.2 **matching view** — the text
+    // with bidi controls and soft hyphens removed — and writes its results
+    // back into the original string by mapped offsets. See
+    // [_redactOnMatchingView].
 
-    // 2) PAN candidates, **including group-separated ones**.
+    // 1) IBANs first (§13.5).
     //
-    // Two passes, longest-form first: the grouped pattern is tried before
-    // the contiguous one so that "4111 1111 1111 1111" is consumed as a
-    // single 16-digit candidate rather than as four unrelated 4-digit runs
-    // that individually fail the length window. (KHA-54 gap 3.)
+    // Ordering is not arbitrary any more. A Saudi IBAN is 22 digits, and a
+    // 13-19 digit window *inside* those 22 can be Luhn-valid by coincidence
+    // — Luhn passes one in ten strings at random. Running the PAN pass first
+    // would then rewrite part of an IBAN as `****nnnn` and leave the rest of
+    // the account number sitting in the text. Longest, most specific rule
+    // first.
+    text = _redactOnMatchingView(text, _findIbanSpans);
+
+    // 2) PAN candidates (§13.4), contiguous and group-separated alike.
     //
-    // Luhn is what makes this specific rather than a blunt "redact every
-    // long number" rule — the latter would eat transaction reference
-    // numbers and defeat duplicate detection (ADR-017 D2), which is a
-    // correctness regression traded for no security gain.
-    text = text.replaceAllMapped(_groupedDigitRunPattern, (Match match) {
-      final String candidate = match.group(0)!;
-      final String digits = _stripGroupSeparators(candidate);
-      if (!_isPanShaped(digits)) {
-        return candidate; // leave untouched — not PAN-shaped
-      }
+    // Luhn is what makes this precise rather than a blunt "redact every long
+    // number" rule — the latter would eat transaction reference numbers and
+    // defeat duplicate detection (ADR-017 D2), a correctness regression
+    // bought for no security gain.
+    final List<_Redaction> panSpans = _redactionsOnMatchingView(
+      text,
+      _findPanSpans,
+    );
+    if (panSpans.isNotEmpty) {
       panRedacted = true;
-      return '****${digits.substring(digits.length - 4)}';
-    });
+      text = _applyRedactions(text, panSpans);
+    }
 
-    text = text.replaceAllMapped(_digitRunPattern, (Match match) {
-      final String digits = match.group(0)!;
-      if (!_isPanShaped(digits)) {
-        return digits;
-      }
-      panRedacted = true;
-      return '****${digits.substring(digits.length - 4)}';
-    });
-
-    // 3) CVV / PIN / OTP / password-shaped secrets.
+    // 3) CVV / PIN / OTP / password-shaped secrets (§13.6).
     //
-    // See [_redactSecretsNearKeywords] for why this is a proximity sweep
-    // over *every* nearby digit run rather than the two single-shot
-    // "keyword then digits" / "digits then keyword" regexes it replaced
-    // (Linear KHA-54, gaps 1 and 2).
-    text = _redactSecretsNearKeywords(text);
+    // See [_findSecretSpans] for why this is a proximity sweep over *every*
+    // nearby digit run rather than the two single-shot "keyword then digits"
+    // / "digits then keyword" regexes it replaced (Linear KHA-54, gaps 1
+    // and 2).
+    text = _redactOnMatchingView(text, _findSecretSpans);
 
-    // 4) Per-bank additional patterns from a rule pack (ADR-007), if any.
-    // Each is expected to have exactly one capture group naming the secret,
-    // matching the rule-pack schema's `redact[]` convention
-    // (`(?<secret>\d{3,8})`); we redact the whole match conservatively if no
-    // named group is present, since over-redacting is always the safer
-    // failure mode for a banking app (ADR-017's "bias hard toward the safe
-    // side" principle applies here too).
+    // 4) Per-bank patterns from a rule pack (ADR-007), applied **last**
+    //    (§13.7).
+    //
+    // Per §13.7: replace the named `(?<secret>…)` group if the pattern
+    // declares one, otherwise the whole match.
+    //
+    // ## Why honouring a group from an untrusted pack is safe here
+    //
+    // This deserves stating, because "let untrusted input tell the sanitiser
+    // to redact *less*" is normally exactly the wrong shape. It is safe for
+    // one specific structural reason: the generic passes above have already
+    // run, independently, and a rule pack cannot switch them off. §13.7 says
+    // it outright — a per-bank pattern is *never a substitute* for the
+    // generic path. So the narrowest thing a hostile pack can achieve is to
+    // under-redact **the extra coverage it invented itself**, which is the
+    // coverage that would not exist at all if the pack had said nothing. It
+    // cannot reach a PAN, an IBAN or a keyword-adjacent code; those are
+    // already gone.
+    //
+    // What the group buys is precision where the bank knows its own
+    // template: "in this message the code is the third field" lets the pack
+    // redact the code without also destroying the amount next to it, and a
+    // destroyed amount is a real transaction pushed into the review queue.
+    //
+    // Two conservative details, both deliberate:
+    //  - a group that is absent, empty, or ambiguous (its text occurs more
+    //    than once inside the match, so we cannot tell which occurrence the
+    //    engine captured) falls back to redacting the **whole** match;
+    //  - the replacement is `[REDACTED]` with no last-4 retained. Unlike a
+    //    PAN, no part of a secret has downstream value.
     for (final RegExp pattern in extraRedactPatterns) {
-      text = text.replaceAll(pattern, '[REDACTED]');
+      text = text.replaceAllMapped(pattern, _replaceSecretGroupOrWholeMatch);
     }
 
     return SanitizedSmsText._(text, panRedacted);
   }
 
-  /// Removes the single space/hyphen separators inside a grouped digit
-  /// candidate so the length window and Luhn check see the number the way
-  /// the issuer wrote it, not the way the bank's template printed it.
-  static String _stripGroupSeparators(String candidate) =>
-      candidate.replaceAll(' ', '').replaceAll('-', '');
+  /// The rule-pack convention for naming the secret inside a `redact[]`
+  /// pattern (§13.7): `(?<secret>\d{3,8})`.
+  static const String _rulePackSecretGroup = 'secret';
 
-  /// ADR-013's PAN test, in one place so the contiguous and grouped passes
-  /// can never disagree about what "PAN-shaped" means.
+  /// §13.7's replacement: the named group if it is present and unambiguous,
+  /// the whole match otherwise.
+  static String _replaceSecretGroupOrWholeMatch(Match match) {
+    const String redacted = '[REDACTED]';
+    final String whole = match.group(0)!;
+    if (match is! RegExpMatch ||
+        !match.groupNames.contains(_rulePackSecretGroup)) {
+      return redacted;
+    }
+
+    final String? secret = match.namedGroup(_rulePackSecretGroup);
+    if (secret == null || secret.isEmpty) {
+      return redacted;
+    }
+
+    // Dart exposes a named group's *text* but not its offsets, so locate it
+    // inside the match. If the same text appears more than once we cannot
+    // know which occurrence was captured — redacting the wrong one would
+    // leave the real secret in place, so fall back to the whole match. This
+    // is the one branch where guessing would cost a live secret.
+    final int index = whole.indexOf(secret);
+    if (index < 0 || index != whole.lastIndexOf(secret)) {
+      return redacted;
+    }
+    return whole.replaceRange(index, index + secret.length, redacted);
+  }
+
+  /// All the digit characters of [text], with separators and anything else
+  /// discarded — so the length window and the Luhn check see the number the
+  /// way the issuer wrote it, not the way the bank's template printed it.
+  static String _digitsOnly(String text) {
+    final StringBuffer digits = StringBuffer();
+    for (int i = 0; i < text.length; i++) {
+      final int unit = text.codeUnitAt(i);
+      if (_digitValue(unit) != null) {
+        digits.writeCharCode(unit);
+      }
+    }
+    return digits.toString();
+  }
+
+  /// §13.4's PAN test, in one place so no two callers can disagree about
+  /// what "PAN-shaped" means.
+  ///
+  /// The 13-19 window is kept and 12-digit Maestro is **out of scope,
+  /// explicitly** (§13.4). Lowering the floor to 12 materially increases
+  /// collisions with reference numbers and account suffixes, and the wider
+  /// context is that by CON-3/NFR-S2 a full PAN in a bank's own SMS is
+  /// already anomalous — the messages we expect carry a masked last-4. This
+  /// whole rule is a **backstop**, and a backstop should be calibrated for
+  /// precision against the numbers that legitimately appear.
   static bool _isPanShaped(String digits) =>
       digits.length >= 13 && digits.length <= 19 && _isLuhnValid(digits);
+
+  // --- §13.2's matching view, and how spans get back to the real text -----
+
+  /// The text with §13.2's ignorable characters removed, plus a map from
+  /// each view offset back to its offset in the original string.
+  ///
+  /// This is the mechanism that lets a bidi mark sit in the middle of a card
+  /// number without defeating the rules, while still returning text that
+  /// looks like what the bank sent everywhere a redaction did not happen.
+  static ({String text, List<int> sourceIndex}) _matchingView(String original) {
+    final StringBuffer buffer = StringBuffer();
+    final List<int> sourceIndex = <int>[];
+    for (int i = 0; i < original.length; i++) {
+      final int unit = original.codeUnitAt(i);
+      if (_isIgnorable(unit)) {
+        continue;
+      }
+      buffer.writeCharCode(unit);
+      sourceIndex.add(i);
+    }
+    return (text: buffer.toString(), sourceIndex: sourceIndex);
+  }
+
+  /// Runs [find] over the matching view of [text] and translates the spans it
+  /// returns back into original-string offsets.
+  static List<_Redaction> _redactionsOnMatchingView(
+    String text,
+    List<_Redaction> Function(String view) find,
+  ) {
+    final ({String text, List<int> sourceIndex}) view = _matchingView(text);
+    final List<_Redaction> found = find(view.text);
+    return <_Redaction>[
+      for (final _Redaction span in found)
+        (
+          start: view.sourceIndex[span.start],
+          // The end maps from the *last* character in the span rather than
+          // from the exclusive end, so ignorable characters sitting just
+          // after the span survive in the output instead of being swallowed
+          // by it.
+          end: view.sourceIndex[span.end - 1] + 1,
+          replacement: span.replacement,
+        ),
+    ];
+  }
+
+  static String _redactOnMatchingView(
+    String text,
+    List<_Redaction> Function(String view) find,
+  ) => _applyRedactions(text, _redactionsOnMatchingView(text, find));
+
+  /// Rebuilds [text] with every span in [redactions] replaced.
+  ///
+  /// [redactions] must be sorted by `start`. Iterating forwards with a
+  /// cursor keeps every offset valid — mutating in place while indices shift
+  /// underneath is the classic way this kind of code starts leaving stray
+  /// digits behind.
+  static String _applyRedactions(String text, List<_Redaction> redactions) {
+    if (redactions.isEmpty) {
+      return text;
+    }
+    final StringBuffer out = StringBuffer();
+    int cursor = 0;
+    for (final _Redaction span in redactions) {
+      if (span.start < cursor) {
+        continue; // overlaps an earlier redaction; that one already won
+      }
+      out.write(text.substring(cursor, span.start));
+      out.write(span.replacement);
+      cursor = span.end;
+    }
+    out.write(text.substring(cursor));
+    return out.toString();
+  }
+
+  // --- §13.4 — PAN detection ---------------------------------------------
+
+  /// Finds every PAN in the matching view, using §13.4's **longest window
+  /// first, then backtrack** scan.
+  ///
+  /// ## Why the naive version is a full-cleartext-PAN bug
+  ///
+  /// The obvious implementation — and the one that shipped in the first cut
+  /// of this file — tests only the *maximal* separator-joined sequence:
+  /// concatenate all of it, check 13-19 and Luhn, give up if it fails. That
+  /// leaves a real PAN in cleartext whenever a bank template puts another
+  /// grouped number immediately after the card number:
+  ///
+  /// ```text
+  /// purchase 4111 1111 1111 1111 45
+  ///   → one 18-digit sequence → fails Luhn → returned untouched,
+  ///     PAN and all, with panRedacted = false
+  /// ```
+  ///
+  /// That is byte-for-byte the KHA-54 gap-3 failure mode, and the KHA-54
+  /// corpus missed it only because every fixture happened to put a non-digit
+  /// token (`SAR`) immediately after the PAN. One trailing number is all it
+  /// took.
+  ///
+  /// So instead: enumerate the contiguous windows `gi..gj` of each sequence,
+  /// **longest first, then leftmost**. Take the first window that is 13-19
+  /// digits and Luhn-valid, redact the whole span *including its internal
+  /// separators*, and resume after it. Longest-first matters — a 16-digit
+  /// PAN must be found as a PAN, not as some shorter Luhn-valid slice of
+  /// itself.
+  static List<_Redaction> _findPanSpans(String view) {
+    final List<_Redaction> spans = <_Redaction>[];
+
+    for (final Match sequence in _digitGroupSequencePattern.allMatches(view)) {
+      final String text = sequence.group(0)!;
+      final List<Match> groups = _digitRunPattern.allMatches(text).toList();
+
+      // Cumulative digit counts, so "how many digits are in window gi..gj?"
+      // is one subtraction instead of a substring plus a scan.
+      //
+      // This is not premature optimisation — it is a bound on adversarial
+      // input. The window enumeration is O(groups²), and a 1600-character
+      // SMS of nothing but two-digit groups produces ~530 groups, so ~140k
+      // windows. Building and scanning a string for each took **675 ms for
+      // one message** when measured; a batch of a hundred would blow through
+      // ADR-006's ~10-second background budget on its own. With the prefix
+      // sums, all but the handful of windows that are actually 13-19 digits
+      // long are rejected by integer arithmetic, and the same message
+      // sanitises in single-digit milliseconds.
+      final List<int> digitsBefore = List<int>.filled(groups.length + 1, 0);
+      for (int g = 0; g < groups.length; g++) {
+        digitsBefore[g + 1] =
+            digitsBefore[g] + (groups[g].end - groups[g].start);
+      }
+
+      int from = 0; // first group still available to match
+      while (from < groups.length) {
+        _Redaction? hit;
+        int nextFrom = from;
+
+        // Longest window first, then leftmost — §13.4 step 1.
+        for (
+          int length = groups.length - from;
+          length >= 1 && hit == null;
+          length--
+        ) {
+          for (int i = from; i + length <= groups.length; i++) {
+            final int j = i + length - 1;
+
+            // The cheap test first. Note this counts *characters* in the
+            // digit runs, which equals the digit count exactly because
+            // `_digitRunPattern` matches nothing else.
+            final int digitCount = digitsBefore[j + 1] - digitsBefore[i];
+            if (digitCount < 13 || digitCount > 19) {
+              continue;
+            }
+
+            final String candidate = text.substring(
+              groups[i].start,
+              groups[j].end,
+            );
+            final String digits = _digitsOnly(candidate);
+            if (!_isPanShaped(digits)) {
+              continue;
+            }
+            hit = (
+              start: sequence.start + groups[i].start,
+              end: sequence.start + groups[j].end,
+              replacement: '****${digits.substring(digits.length - 4)}',
+            );
+            nextFrom = j + 1; // §13.4 step 3: resume after the window
+            break;
+          }
+        }
+
+        if (hit == null) {
+          break;
+        }
+        spans.add(hit);
+        from = nextFrom;
+      }
+    }
+
+    return spans;
+  }
+
+  // --- §13.5 — Saudi IBAN detection --------------------------------------
+
+  /// Finds `SA` + 22 digits, **tolerating a single separator between
+  /// groups**, and replaces it with `SA**…<last4>`.
+  ///
+  /// The conventional print form of a Saudi IBAN is
+  /// `SA03 8000 0000 6080 1016 7519`. The contiguous-only `SA[digits]{22}`
+  /// pattern this replaces did not match that at all, so the grouped form —
+  /// which is the form a human actually types and a bank actually prints —
+  /// survived in full. Same defect class as the grouped PAN above.
+  ///
+  /// Written as a hand scan rather than a regex because the rule counts
+  /// digits *across* group boundaries (22 in total, however they are
+  /// grouped), and a regex that expresses that is unreadable enough to be a
+  /// liability in a file like this one.
+  static List<_Redaction> _findIbanSpans(String view) {
+    const int ibanDigits = 22; // 2 check digits + 20 BBAN digits
+    final List<_Redaction> spans = <_Redaction>[];
+
+    for (final Match prefix in _saudiIbanPrefixPattern.allMatches(view)) {
+      final StringBuffer digits = StringBuffer();
+      int count = 0;
+      int cursor = prefix.end;
+      int end = -1;
+
+      while (cursor < view.length && count < ibanDigits) {
+        final int unit = view.codeUnitAt(cursor);
+
+        if (_digitValue(unit) != null) {
+          digits.writeCharCode(unit);
+          count++;
+          cursor++;
+          if (count == ibanDigits) {
+            end = cursor;
+          }
+          continue;
+        }
+
+        // A single separator is allowed, but only *between* digits — a
+        // trailing one is just the space after the number. This is also what
+        // stops "SAR 45.00" being read as an IBAN prefix: the character
+        // after `SA` is `R`, which is neither.
+        if (_isSeparator(unit) &&
+            cursor + 1 < view.length &&
+            _digitValue(view.codeUnitAt(cursor + 1)) != null) {
+          cursor++;
+          continue;
+        }
+
+        break;
+      }
+
+      if (count == ibanDigits) {
+        final String all = digits.toString();
+        spans.add((
+          start: prefix.start,
+          end: end,
+          // "SA**…<last4>" per ADR-013 §13.5 and §4.2's `Instrument`.
+          replacement: 'SA**…${all.substring(all.length - 4)}',
+        ));
+      }
+    }
+
+    return spans;
+  }
 
   /// Destroys **every** digit run of 3+ digits that sits within
   /// [_secretProximityWords] words of a secret-bearing keyword, in either
@@ -308,23 +686,26 @@ abstract final class SmsSanitizer {
   /// product nothing. The messages this could over-redact are transaction
   /// messages that happen to contain a secret keyword — and those are
   /// precisely the ones where a secret would otherwise be persisted.
-  static String _redactSecretsNearKeywords(String text) {
+  /// There is deliberately **no upper bound** on the run length (§13.6
+  /// withdrew v1.0's "3-8 digits"). A 9-digit code is still a secret; an
+  /// upper bound is an under-redaction bug wearing a specificity costume.
+  static List<_Redaction> _findSecretSpans(String view) {
     final List<Match> keywords = _secretKeywordPattern
-        .allMatches(text)
+        .allMatches(view)
         .toList();
     if (keywords.isEmpty) {
-      return text;
+      return const <_Redaction>[];
     }
 
-    // Collect the [start, end) span of every digit run to destroy. A Set
-    // keyed by start offset would be enough, but a list of spans reads more
-    // obviously and the counts here are tiny (an SMS is <= 1600 chars).
-    final List<({int start, int end})> spans = <({int start, int end})>[];
+    // Collect the [start, end) span of every digit run to destroy. The
+    // counts here are tiny (an SMS is <= 1600 chars), so the nested scan
+    // costs nothing worth optimising away.
+    final List<_Redaction> spans = <_Redaction>[];
 
-    for (final Match digitRun in _secretDigitRunPattern.allMatches(text)) {
+    for (final Match digitRun in _secretDigitRunPattern.allMatches(view)) {
       final bool nearAnyKeyword = keywords.any(
         (Match keyword) => _isWithinProximity(
-          text,
+          view,
           keywordStart: keyword.start,
           keywordEnd: keyword.end,
           runStart: digitRun.start,
@@ -332,27 +713,17 @@ abstract final class SmsSanitizer {
         ),
       );
       if (nearAnyKeyword) {
-        spans.add((start: digitRun.start, end: digitRun.end));
+        // The whole run, and no last-4 retained: unlike a PAN, no part of a
+        // secret has any downstream value (§13.6).
+        spans.add((
+          start: digitRun.start,
+          end: digitRun.end,
+          replacement: '[REDACTED]',
+        ));
       }
     }
 
-    if (spans.isEmpty) {
-      return text;
-    }
-
-    // Rebuild the string, replacing each span wholesale. Iterating forwards
-    // and tracking a cursor keeps every offset valid — mutating in place
-    // while indices shift underneath is the classic way this kind of code
-    // starts leaving stray digits behind.
-    final StringBuffer out = StringBuffer();
-    int cursor = 0;
-    for (final ({int start, int end}) span in spans) {
-      out.write(text.substring(cursor, span.start));
-      out.write('[REDACTED]');
-      cursor = span.end;
-    }
-    out.write(text.substring(cursor));
-    return out.toString();
+    return spans;
   }
 
   /// True when the digit run at `[runStart, runEnd)` is close enough to the

@@ -83,8 +83,15 @@ class IngestWatermarks extends Table {
   /// in this schema, in UTC.
   DateTimeColumn get lastProcessedSmsDate => dateTime().nullable()();
 
-  /// `idle` | `running` | `paused` — the historical import's state machine
-  /// (architecture §4.2 `IngestWatermark`).
+  /// `idle` | `running` | `paused` | `completed` — the historical import's
+  /// state machine (architecture §4.2 `IngestWatermark`). The constants live
+  /// in `IngestWatermarkDao`; the transition diagram is there too.
+  ///
+  /// `completed` is a **terminal** state and is deliberately not the same
+  /// value as the initial `idle`. Reusing `idle` to mean "finished" made a
+  /// completed import indistinguishable from one that had never started, so
+  /// every app foreground re-ran the whole month's backfill. See
+  /// `IngestWatermarkDao.completeImport`.
   ///
   /// Persisted rather than held in memory precisely because AC-A3.3 requires
   /// the import to survive the app being closed or the device restarting. An

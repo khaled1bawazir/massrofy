@@ -25,14 +25,12 @@ import 'package:massrofy/data/db/app_database.dart';
 import 'package:massrofy/features/ingestion/ingestion_pipeline.dart';
 import 'package:massrofy/features/ingestion/sms_source.dart';
 import 'package:massrofy/features/parsing/rule_pack.dart';
-import 'package:massrofy/core/text/sms_sanitizer.dart';
-import 'package:massrofy/features/parsing/message_parser.dart';
-import 'package:massrofy/features/parsing/parse_outcome.dart';
 import 'package:massrofy/features/parsing/rule_pack_message_parser.dart';
 
 import '../../fixtures/synthetic_sms_corpus.dart';
 import '../../support/fake_sms_source.dart';
 import '../../support/plain_test_database.dart';
+import '../../support/throwing_parser.dart';
 import 'support/load_bundled_pack.dart';
 
 final List<int> _testChainKey = List<int>.generate(32, (int i) => i);
@@ -198,6 +196,71 @@ void main() {
         );
       },
     );
+  });
+
+  group('ADR-006 — one message is one database transaction', () {
+    test('a write that fails midway leaves NO trace, so D1 cannot suppress '
+        'the retry', () async {
+      // ## The crash window this pins down
+      //
+      // `_writeTransaction` writes the raw-message row first and the
+      // transaction row second. The raw-message row carries the
+      // `content_hmac` that ADR-017 D1 dedups on. So if the first write
+      // committed and the second did not, the next sweep would look up the
+      // HMAC, find it, conclude "already processed", and suppress the message
+      // — permanently. The transaction row would never be written and nothing
+      // anywhere would say so: a financial message lost *through* the
+      // mechanism that exists to protect it (NFR-A7).
+      //
+      // The fix is that each message is processed inside
+      // `database.transaction(...)`, so both rows commit together or neither
+      // does. This test simulates the failure by making the audit-chain write
+      // — which happens inside `insertFromParsedSms`, i.e. after the
+      // raw-message row — throw.
+      final SmsFixture purchase = d360Fixtures.first;
+      final IngestionPipeline failing = IngestionPipeline(
+        database: db,
+        smsSource: FakeSmsSource(<RawSmsRecord>[]),
+        parser: parser,
+        rawMessageDao: rawMessageDao,
+        transactionDao: TransactionDao(
+          db,
+          _FailingAuditLogDao(db, auditChainKey: _testChainKey),
+        ),
+        watermarkDao: watermarkDao,
+        logger: logger,
+        contentHmacKey: _testChainKey,
+      );
+
+      final IngestionRunResult result = await failing.processAll(<RawSmsRecord>[
+        asRecord(purchase, 1),
+      ], advanceWatermark: true);
+
+      expect(result.failedWithError, 1);
+      expect(
+        await rawMessageDao.all(),
+        isEmpty,
+        reason:
+            'the raw-message row must have been rolled back. If it survives, '
+            'its content_hmac makes the message look already-processed and '
+            'the transaction is never written — silently, forever.',
+      );
+      expect(
+        (await watermarkDao.current()).lastProcessedSmsProviderId,
+        0,
+        reason:
+            'nothing was successfully processed, so nothing to advance past',
+      );
+
+      // The other half: with the failure gone, the message is picked up
+      // normally. "Rolled back" is only useful if the retry then works.
+      await buildPipeline(
+        FakeSmsSource(<RawSmsRecord>[asRecord(purchase, 1)]),
+      ).runIncremental();
+
+      expect(await transactionDao.all(), hasLength(1));
+      expect((await watermarkDao.current()).lastProcessedSmsProviderId, 1);
+    });
   });
 
   group('ADR-017 D1 — exact duplicates', () {
@@ -453,7 +516,7 @@ void main() {
         final IngestionPipeline pipeline = IngestionPipeline(
           database: db,
           smsSource: FakeSmsSource(<RawSmsRecord>[]),
-          parser: _ThrowingParser(parser, throwForSender: 'BAJ'),
+          parser: ThrowingParser(parser, throwForSender: 'BAJ'),
           rawMessageDao: rawMessageDao,
           transactionDao: transactionDao,
           watermarkDao: watermarkDao,
@@ -491,7 +554,7 @@ void main() {
         final IngestionPipeline pipeline = IngestionPipeline(
           database: db,
           smsSource: FakeSmsSource(<RawSmsRecord>[]),
-          parser: _ThrowingParser(parser, throwForSender: 'BAJ'),
+          parser: ThrowingParser(parser, throwForSender: 'BAJ'),
           rawMessageDao: rawMessageDao,
           transactionDao: transactionDao,
           watermarkDao: watermarkDao,
@@ -580,38 +643,26 @@ void main() {
   });
 }
 
-/// Wraps the real parser and throws for one sender, so NFR-R5's "isolate the
-/// failure" behaviour can be exercised without inventing a malformed rule
-/// pack (which would test the loader, not the pipeline).
+/// An [AuditLogDao] whose `append` always throws.
 ///
-/// Note it implements the **port** (`MessageParser`), not the concrete engine
-/// — which is only possible because the pipeline depends on the port. That is
-/// architecture §3's dependency rule paying for itself: a pipeline coupled to
-/// `RulePackMessageParser` could not be tested this way at all, since that
-/// class is `final` and cannot be implemented from outside its library.
-final class _ThrowingParser implements MessageParser {
-  final MessageParser _inner;
-  final String throwForSender;
-
-  const _ThrowingParser(this._inner, {required this.throwForSender});
+/// Used to fail a write **after** the raw-message row is inserted but before
+/// the transaction row is committed — the audit entry is written inside
+/// `TransactionDao.insertFromParsedSms`, which is exactly the middle of the
+/// unit of work. That is the one crash window in the pipeline that could lose
+/// a message permanently, so it is the one worth simulating.
+final class _FailingAuditLogDao extends AuditLogDao {
+  _FailingAuditLogDao(super.attachedDatabase, {required super.auditChainKey});
 
   @override
-  List<RegExp> redactionPatternsForSender(String sender) =>
-      _inner.redactionPatternsForSender(sender);
-
-  @override
-  ParseOutcome parse({
-    required SanitizedSmsText sanitized,
-    required String normalizedBody,
-    required String sender,
-  }) {
-    if (sender == throwForSender) {
-      throw StateError('simulated parser failure');
-    }
-    return _inner.parse(
-      sanitized: sanitized,
-      normalizedBody: normalizedBody,
-      sender: sender,
-    );
+  Future<int> append({
+    required String entityType,
+    required String entityId,
+    required String action,
+    required String actor,
+    String? actorDetail,
+    required DateTime changedAt,
+    required List<AuditFieldChange> fieldChanges,
+  }) async {
+    throw StateError('simulated failure partway through the write');
   }
 }

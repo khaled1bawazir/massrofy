@@ -30,9 +30,13 @@
 /// is no `default:` branch, deliberately.
 ///
 /// **2. The watermark advances in the same transaction as the writes
-/// (ADR-006).** Not "shortly after". If the watermark advanced first and the
-/// process died, the messages in between would be skipped *forever* and the
-/// user would never know. One transaction makes the ordering question moot.
+/// (ADR-006).** Not "shortly after". Each message is one unit of work:
+/// `database.transaction(...)` wraps its raw-message row, its transaction row,
+/// its audit entry and the watermark advance, so all four commit together or
+/// none of them do. See [IngestionPipeline.processAll] for the two distinct
+/// crash windows this closes — one of which loses a financial message
+/// permanently, because D1 dedup keys off the raw-message row that a
+/// half-finished write leaves behind.
 ///
 /// **3. One bad message never stops the batch (NFR-R5).** Every message is
 /// processed inside its own try/catch. A malformed message from one bank must
@@ -276,10 +280,38 @@ final class IngestionPipeline {
 
     for (final RawSmsRecord record in records) {
       try {
-        result = await _processOne(
-          record,
-          result,
-          advanceWatermark: advancingIsSafe,
+        // ## One message = one database transaction
+        //
+        // ADR-006 requires the watermark to advance "in the same database
+        // transaction as the writes it produced". This is where that is made
+        // literally true, and it is worth understanding *why* it is not merely
+        // tidiness — there are two crash windows here and they are not equally
+        // harmless:
+        //
+        //  1. Crash between the last write and the watermark advance. Benign:
+        //     the message is re-read next sweep and ADR-017 D1 suppresses it.
+        //     This is the window everyone thinks of, and it is the safe one.
+        //  2. Crash between `rawMessageDao.insert` and
+        //     `transactionDao.insertFromParsedSms`. **Not benign.** The
+        //     raw-message row — and therefore the `content_hmac` D1 dedups
+        //     on — is already committed, so the next sweep sees "already
+        //     processed" and suppresses the message. The transaction row is
+        //     never written, and never will be. A financial message is lost
+        //     silently: the NFR-A7 failure, arriving through the dedup
+        //     mechanism that is supposed to protect us.
+        //
+        // Wrapping the unit of work closes window 2 and makes window 1 moot.
+        // Drift rolls the transaction back on a throw and rethrows, so the
+        // `catch` below still sees the error and still counts it — a failed
+        // message now leaves *no* partial trace at all, which is what makes
+        // retrying it on the next run correct rather than merely hopeful.
+        //
+        // The parse happens inside the transaction too. That is deliberate:
+        // the unit of work is "everything this app concluded about this
+        // message", and a local single-writer SQLite transaction held across a
+        // few milliseconds of regex costs nothing.
+        result = await database.transaction(
+          () => _processOne(record, result, advanceWatermark: advancingIsSafe),
         );
       } catch (_) {
         // The caught error is deliberately discarded rather than logged: an
@@ -617,12 +649,15 @@ final class IngestionPipeline {
 
   /// Advances the watermark past [record].
   ///
-  /// See the class doc comment for why this must be in the same transaction
-  /// as the writes. In this implementation the writes above and this call are
-  /// both issued on the same `AppDatabase`; callers that need strict
-  /// all-or-nothing across a batch wrap `processAll` in
-  /// `database.transaction(...)`. The `advanceTo` update is itself monotonic,
-  /// so a concurrent sweep can never rewind it.
+  /// Always reached from inside the per-message `database.transaction(...)`
+  /// opened in [processAll], so this update and the writes that preceded it
+  /// commit as one — see that method for the crash window this closes. Drift
+  /// routes a DAO call made inside a `transaction()` block on the same
+  /// `AppDatabase` to the transaction's executor, which is why the DAOs need
+  /// no explicit handle passed to them.
+  ///
+  /// The `advanceTo` update is *also* monotonic in SQL, so two overlapping
+  /// sweeps cannot rewind each other regardless.
   Future<IngestionRunResult> _finish(
     RawSmsRecord record,
     IngestionRunResult result, {

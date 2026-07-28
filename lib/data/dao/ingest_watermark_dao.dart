@@ -124,15 +124,34 @@ class IngestWatermarkDao extends DatabaseAccessor<AppDatabase>
         );
   }
 
-  /// Marks the import finished. The cursor is cleared so a later re-run
-  /// starts fresh rather than resuming a completed walk.
+  /// Marks the import **finished, for good**.
+  ///
+  /// ## Why this writes `completed` and not `idle`
+  ///
+  /// It used to write `idle` + a null cursor — which is byte-for-byte the
+  /// state a brand-new database is in. `HistoricalImporter.runOrResume()` reads
+  /// exactly that pair to decide "nothing has ever run here, start a fresh
+  /// import", so a finished import was indistinguishable from one that had
+  /// never started. Since the foreground sweep calls `runOrResume()` on every
+  /// app open, the entire calendar-month backfill was re-read, re-sanitised,
+  /// re-HMACed and re-queried every single time the user opened the app. It
+  /// produced no duplicate rows — ADR-017 D1 saw to that — so it was invisible
+  /// except as battery, latency and a diagnostic log full of self-inflicted
+  /// `duplicate_suppressed` events.
+  ///
+  /// The lesson is general enough to be worth stating: **a state machine needs
+  /// a terminal state that is distinct from its initial state.** Encoding
+  /// "done" as "back to the beginning" is a loop, not a completion.
+  ///
+  /// The cursor is still cleared, because it is meaningless once the walk is
+  /// over; [importStateCompleted] is now the thing that carries the meaning.
   Future<void> completeImport() async {
     await (update(ingestWatermarks)..where(
           (IngestWatermarks t) => t.id.equals(ingestWatermarkSingletonId),
         ))
         .write(
           const IngestWatermarksCompanion(
-            importState: Value<String>(importStateIdle),
+            importState: Value<String>(importStateCompleted),
             importCursor: Value<int?>(null),
           ),
         );
@@ -156,6 +175,34 @@ class IngestWatermarkDao extends DatabaseAccessor<AppDatabase>
 /// The `importState` vocabulary (architecture §4.2 `IngestWatermark`), as
 /// constants rather than a Dart enum because the value is persisted as text
 /// and must survive a schema round-trip unchanged.
+///
+/// The historical import is a **one-shot backfill**, so its state machine is:
+///
+/// ```
+///   idle ──beginImport──► running ──completeImport──► completed  (terminal)
+///     ▲                      │  ▲                          │
+///     │                      │  └──────runOrResume─────────┘  (no-op)
+///  (fresh DB)          pauseImport
+///                            ▼
+///                         paused ──runOrResume──► running …
+/// ```
+///
+/// `idle` means **never started**; `completed` means **finished, do not run
+/// again**. Those are two different things and conflating them is precisely
+/// the bug [IngestWatermarkDao.completeImport] documents. `paused` and
+/// `running` both mean "unfinished work, resume from the cursor" — the
+/// distinction between them is only for a progress UI, not for control flow.
 const String importStateIdle = 'idle';
 const String importStateRunning = 'running';
 const String importStatePaused = 'paused';
+
+/// The terminal state. Nothing transitions out of it: the backfill covers a
+/// fixed window (the current calendar month at first run) and ongoing messages
+/// are the incremental watermark's job, not the importer's.
+///
+/// Note for anyone reading a database created before this constant existed: a
+/// finished import was recorded there as `idle`, which this code now reads as
+/// "never started". Such a database re-runs the backfill exactly once more and
+/// then settles into `completed`. That costs one extra walk and cannot create
+/// duplicates (ADR-017 D1), so it is not worth a migration.
+const String importStateCompleted = 'completed';

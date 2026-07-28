@@ -29,6 +29,22 @@
 /// it finish in reasonable time. Relying on the cursor alone would be
 /// hoping — relying on dedup alone would work but be needlessly slow.
 ///
+/// ## …and one that makes it *stop*
+///
+/// A resumable process needs a terminal state, or "resume" degenerates into
+/// "restart". `completeImport()` writes `importState = completed`, which is a
+/// different value from the initial `idle` on purpose — see
+/// `IngestWatermarkDao.completeImport` for the bug that taught us this.
+/// [runOrResume] checks it first and returns without touching the inbox.
+///
+/// ## The cursor never advances past a failure
+///
+/// [_walk] stops rather than skipping a message that threw, exactly as
+/// `IngestionPipeline.runIncremental` does for the incremental watermark. The
+/// two paths run the same pipeline, so they must hold the same invariant, or
+/// the guarantee is only true on whichever path a given message happened to
+/// arrive on.
+///
 /// ## Forwards, not backwards
 ///
 /// The walk goes oldest-to-newest from the start of the month. That is what
@@ -81,9 +97,13 @@ final class HistoricalImporter {
 
   /// Runs, or resumes, the import.
   ///
-  /// Safe to call repeatedly — on every app launch, if you like. If an import
-  /// is already `running` this picks up where it left off; if it completed,
-  /// it does nothing.
+  /// Safe to call repeatedly — on every app launch, if you like. There are
+  /// exactly three things this can decide, and they are decided from the
+  /// persisted `importState`:
+  ///
+  ///  - `completed` → **do nothing at all**, not even a read;
+  ///  - `idle` with no cursor → never started, so start a fresh walk;
+  ///  - anything else (`running`, `paused`) → unfinished, resume from cursor.
   ///
   /// [shouldContinue] is polled between chunks so the caller can stop the
   /// import cleanly when the app is backgrounded, leaving the state `paused`
@@ -93,7 +113,27 @@ final class HistoricalImporter {
   }) async {
     final row = await watermarkDao.current();
 
-    // Already finished, and not left paused mid-walk. Nothing to do.
+    // ## The terminal state, and why it has to be its own value
+    //
+    // `foregroundSweepProvider` calls this on every app foreground. Before
+    // `importStateCompleted` existed, a finished import was stored as
+    // `idle` + null cursor — identical to a brand-new database — so this
+    // method took the fresh-start branch below on **every app open** and
+    // re-read, re-sanitised, re-normalised, re-HMACed and re-queried every
+    // message since the 1st of the month, forever. Dedup (ADR-017 D1) meant
+    // no wrong data was ever produced, which is exactly why nobody noticed:
+    // the only symptoms were battery, latency (NFR-R3/NFR-R7) and a
+    // diagnostic log full of `duplicate_suppressed` events the app inflicted
+    // on itself.
+    //
+    // Returning the empty result rather than `null` keeps the caller's
+    // arithmetic uniform: "this run examined nothing" is a real, countable
+    // outcome, not a special case to branch on.
+    if (row.importState == importStateCompleted) {
+      return const IngestionRunResult();
+    }
+
+    // Never started. (`idle` is the initial state, not the final one.)
     if (row.importState == importStateIdle && row.importCursor == null) {
       final DateTime from = RiyadhCalendar.startOfCurrentMonthUtc(
         clock.nowUtc(),
@@ -157,6 +197,36 @@ final class HistoricalImporter {
       );
 
       total = _merge(total, chunkResult);
+
+      // ## The cursor does NOT move past a message that threw
+      //
+      // This is the same invariant `IngestionPipeline.runIncremental` holds
+      // for the incremental watermark, and it has to hold here for the same
+      // reason — the import cursor is a watermark too, just a backwards-facing
+      // one.
+      //
+      // Messages are walked oldest-first. If message #3 of a five-message
+      // chunk throws and #4 and #5 then succeed, saving `chunk.last` (#5) as
+      // the cursor moves it **past** #3. Every later read asks for
+      // `providerId > cursor`, so #3 is never read again: a financial message
+      // lost permanently and silently, which is exactly what NFR-A7 forbids.
+      //
+      // `IngestionRunResult` carries counts, not identities, so we cannot tell
+      // *which* message failed — only that one did. So we stop the walk here
+      // without moving the cursor. The whole chunk is re-read on the next run;
+      // the messages after the failure that already succeeded are suppressed
+      // by ADR-017 D1's UNIQUE constraints, so re-reading costs a little work
+      // and changes nothing. Losing #3 is unrecoverable. Easy trade.
+      //
+      // The failure mode this leaves is a **visible stall**, not silent loss:
+      // a message that fails deterministically keeps the import `paused` and
+      // keeps showing up in the parser-health panel's error count (ADR-015).
+      // That is the direction to be wrong in.
+      if (chunkResult.failedWithError > 0) {
+        await watermarkDao.pauseImport();
+        return total;
+      }
+
       position = chunk.last.providerId;
       processed += chunk.length;
 
@@ -170,6 +240,10 @@ final class HistoricalImporter {
       );
     }
 
+    // The only path that reaches here is the `chunk.isEmpty` break — i.e. the
+    // walk genuinely ran out of messages, with no failure and no pause. That
+    // is the one condition under which the import is allowed to be marked
+    // terminal.
     await watermarkDao.completeImport();
     logger.info(LogEvent(category: _logImportCompleted, count: processed));
     return total;
