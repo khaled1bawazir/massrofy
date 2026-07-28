@@ -91,6 +91,32 @@ class RawMessageDao extends DatabaseAccessor<AppDatabase>
     );
   }
 
+  /// **AC-A4.2 / KHA-64** — the message has been turned into a real
+  /// transaction by hand, so it leaves the review queue.
+  ///
+  /// Like [dismissAsNotTransaction] this is an update, never a delete, and
+  /// for the same two reasons: the row holds the content HMAC that stops the
+  /// next provider sweep re-ingesting the message, and AC-B1.2 needs the
+  /// original text to stay readable from the transaction it produced.
+  ///
+  /// Reclassifying to `financial_parsed` is what removes it from the queue —
+  /// the queue is a view over `classification`, so there is one fact to
+  /// change and no second list to keep in step (see `review_queue.dart`).
+  ///
+  /// `unparsedReason` / `unparsedRuleId` are deliberately **left in place**.
+  /// The parser genuinely did fail on this message, and the parser-health
+  /// panel (ADR-015) should keep counting that failure — a human filling the
+  /// gap in by hand does not mean the rule pack no longer needs fixing.
+  Future<void> markCompletedIntoTransaction(int id) {
+    return (update(
+      rawMessages,
+    )..where((RawMessages t) => t.id.equals(id))).write(
+      const RawMessagesCompanion(
+        classification: Value<String>('financial_parsed'),
+      ),
+    );
+  }
+
   Future<RawMessageRow?> byId(int id) {
     return (select(
       rawMessages,

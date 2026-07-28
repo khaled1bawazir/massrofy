@@ -90,6 +90,27 @@ class AuditLogDao extends DatabaseAccessor<AppDatabase>
     // is called on its own or (as `TransactionDao` already does) from
     // inside a caller's own `transaction()` block alongside the ledger row
     // it accompanies.
+    // ## Why the timestamp is truncated to whole seconds before anything else
+    //
+    // **This is a correctness fix, not tidiness (found by P3a's tests).**
+    // Drift's sqlite3 backend stores a `DateTimeColumn` as a Unix timestamp
+    // in **whole seconds**, so any sub-second component is discarded on
+    // write. The hash chain, however, was computed over the *un*truncated
+    // value — which meant every entry written with a real `DateTime.now()`
+    // (i.e. every entry the running app has ever written, all of which carry
+    // milliseconds) hashed over a timestamp that could never be read back.
+    // [verifyChainIntegrity] then recomputed from the stored, truncated value
+    // and got a different hash.
+    //
+    // The user-visible effect was as bad as it sounds: ADR-010's "Settings →
+    // Verify history integrity" action would report **tampering** on a
+    // perfectly intact history. The existing tests never caught it because
+    // they all pass whole-second literals such as `DateTime.utc(2026, 1, 1)`.
+    //
+    // Truncating here — once, before both the hash and the insert — makes the
+    // hashed value and the stored value the same value by construction.
+    final DateTime storedChangedAt = _toWholeSecondsUtc(changedAt);
+
     return transaction<int>(() async {
       final String prevHash = await _latestHash();
       final String canonicalPayload = _canonicalize(
@@ -98,7 +119,7 @@ class AuditLogDao extends DatabaseAccessor<AppDatabase>
         action: action,
         actor: actor,
         actorDetail: actorDetail,
-        changedAt: changedAt,
+        changedAt: storedChangedAt,
         fieldChanges: fieldChanges,
       );
       final String entryHash = _computeHash(prevHash, canonicalPayload);
@@ -110,7 +131,7 @@ class AuditLogDao extends DatabaseAccessor<AppDatabase>
           action: action,
           actor: actor,
           actorDetail: Value<String?>(actorDetail),
-          changedAt: changedAt,
+          changedAt: storedChangedAt,
           fieldChangesJson: jsonEncode(
             fieldChanges.map((AuditFieldChange c) => c.toJson()).toList(),
           ),
@@ -170,6 +191,23 @@ class AuditLogDao extends DatabaseAccessor<AppDatabase>
       expectedPrevHash = row.entryHash;
     }
     return true;
+  }
+
+  /// Drops the sub-second component the storage layer cannot keep.
+  ///
+  /// Truncation, never rounding: rounding up would place an entry a fraction
+  /// of a second in the future relative to the change it records, and the
+  /// audit trail's ordering is the one thing it must not get wrong.
+  static DateTime _toWholeSecondsUtc(DateTime value) {
+    final DateTime utc = value.toUtc();
+    return DateTime.utc(
+      utc.year,
+      utc.month,
+      utc.day,
+      utc.hour,
+      utc.minute,
+      utc.second,
+    );
   }
 
   Future<String> _latestHash() async {

@@ -157,4 +157,284 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get needsReviewReasonMissingField =>
       'Some details were missing from this message';
+
+  @override
+  String get transactionDetailTitle => 'Transaction';
+
+  @override
+  String get fieldNotStatedInMessage => 'Not stated in message';
+
+  @override
+  String get txnFieldDateTime => 'Date & time';
+
+  @override
+  String get txnFieldInstrument => 'Account / card';
+
+  @override
+  String get txnFieldType => 'Type';
+
+  @override
+  String get txnFieldSource => 'Source';
+
+  @override
+  String get txnFieldMerchant => 'Merchant / payee';
+
+  @override
+  String get txnFieldCounterparty => 'Counterparty';
+
+  @override
+  String get txnFieldCounterpartyBank => 'Counterparty bank';
+
+  @override
+  String get txnFieldReference => 'Reference number';
+
+  @override
+  String get txnFieldConvertedAmount => 'Converted amount';
+
+  @override
+  String get txnFieldFxFee => 'Foreign transaction fee';
+
+  @override
+  String get txnFieldExchangeRate => 'Exchange rate';
+
+  @override
+  String get txnFieldRemainingBalance => 'Remaining balance';
+
+  @override
+  String txnSourceSms(String bank) {
+    return 'SMS · $bank';
+  }
+
+  @override
+  String txnSourceSmsCompletedByYou(String bank) {
+    return 'SMS · $bank · completed by you';
+  }
+
+  @override
+  String get txnSourceManual => 'Manual entry';
+
+  @override
+  String get txnSourceStatement => 'Statement import';
+
+  @override
+  String get txnShowOriginalSms => 'Show original message';
+
+  @override
+  String get txnHideOriginalSms => 'Hide original message';
+
+  @override
+  String get txnNoOriginalSms =>
+      'No original message — this transaction was added manually';
+
+  @override
+  String get txnBadgeManual => 'Manual';
+
+  @override
+  String get txnBadgeNeedsReview => 'Needs review';
+
+  @override
+  String get txnDebitLabel => 'Debit';
+
+  @override
+  String get txnCreditLabel => 'Credit';
+
+  @override
+  String get txnDeletedBanner =>
+      'This transaction is deleted and is in no total';
+
+  @override
+  String get txnUnknownBank => 'Unknown bank';
+
+  @override
+  String get txnTypePosPurchase => 'Card purchase';
+
+  @override
+  String get txnTypeOnlinePurchase => 'Online purchase';
+
+  @override
+  String get txnTypeTransferOut => 'Outgoing transfer';
+
+  @override
+  String get txnTypeTransferIn => 'Incoming transfer';
+
+  @override
+  String get txnTypeBillPayment => 'Bill payment';
+
+  @override
+  String get txnTypeCardRepayment => 'Credit-card repayment';
+
+  @override
+  String get txnTypeFee => 'Fee / VAT';
+
+  @override
+  String get txnTypeInstallment => 'Finance installment';
+
+  @override
+  String get txnTypeAccountDebit => 'Account debit';
+
+  @override
+  String get txnTypeRefund => 'Refund';
+
+  @override
+  String get txnTypeWithdrawal => 'Cash withdrawal';
+
+  @override
+  String get txnTypeUnknown => 'Not specified';
+
+  @override
+  String get banksTitle => 'Banks';
+
+  @override
+  String get banksEmptyTitle => 'No banks yet';
+
+  @override
+  String get banksEmptyBody =>
+      'A bank appears here automatically the first time a message arrives from it — there is nothing to set up.';
+
+  @override
+  String get bankTotalThisPeriod => 'Total this period';
+
+  @override
+  String bankAccountsSection(int count) {
+    return 'Accounts ($count)';
+  }
+
+  @override
+  String bankCardsSection(int count) {
+    return 'Cards ($count)';
+  }
+
+  @override
+  String get bankNoInstruments =>
+      'No accounts or cards mentioned for this bank yet';
+
+  @override
+  String bankAccountsCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count accounts',
+      one: '1 account',
+      zero: 'no accounts',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String bankCardsCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count cards',
+      one: '1 card',
+      zero: 'no cards',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String bankInstrumentsSummary(String accounts, String cards) {
+    return '$accounts · $cards';
+  }
+
+  @override
+  String get instrumentKindAccount => 'Account';
+
+  @override
+  String get instrumentKindCard => 'Card';
+
+  @override
+  String get instrumentUnnamed => 'Not named yet';
+
+  @override
+  String get instrumentNotLinked => 'Not linked to a settlement account yet';
+
+  @override
+  String instrumentLinkedTo(String account) {
+    return 'Settles from $account';
+  }
+
+  @override
+  String get instrumentRenameAction => 'Rename';
+
+  @override
+  String get instrumentRenameTitle => 'Rename';
+
+  @override
+  String get instrumentRenameFieldLabel => 'Friendly name';
+
+  @override
+  String get instrumentRenameSave => 'Save name';
+
+  @override
+  String get instrumentRecentTransactions => 'Recent transactions';
+
+  @override
+  String get instrumentNoTransactions => 'No transactions on this one yet';
+
+  @override
+  String get totalsNoneForPeriod => 'No transactions in this period';
+
+  @override
+  String get completeTitle => 'Complete the details';
+
+  @override
+  String get completeIntro =>
+      'Fill in what the message could not tell us. The original message stays linked to the transaction.';
+
+  @override
+  String get completeAmountLabel => 'Amount';
+
+  @override
+  String get completeAmountMissing =>
+      'Enter an amount to save this transaction';
+
+  @override
+  String get completeCurrencyLabel => 'Currency';
+
+  @override
+  String get completeCurrencyMissing =>
+      'Enter a 3-letter currency code, for example SAR';
+
+  @override
+  String get completeMerchantLabel => 'Merchant / payee';
+
+  @override
+  String get completeDateLabel => 'Date & time';
+
+  @override
+  String get completeDateMissing =>
+      'Choose the date and time of the transaction';
+
+  @override
+  String get completeTypeLabel => 'Type';
+
+  @override
+  String get completeTypeMissing => 'Choose what kind of transaction this is';
+
+  @override
+  String get completeInstrumentLabel => 'Account / card';
+
+  @override
+  String get completeInstrumentNotStated => 'Not stated';
+
+  @override
+  String get completeDirectionDebit => 'Money out';
+
+  @override
+  String get completeDirectionCredit => 'Money in';
+
+  @override
+  String get completeSave => 'Save as transaction';
+
+  @override
+  String get completeOriginalMessage => 'Original message';
+
+  @override
+  String get completeUnavailable =>
+      'This item is no longer in the review queue';
+
+  @override
+  String get completeCategoryDeferred =>
+      'Categorisation comes later — this will be saved as Uncategorised and you can categorise it from the list.';
 }
