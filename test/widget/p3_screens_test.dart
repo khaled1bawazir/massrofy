@@ -818,15 +818,29 @@ void main() {
 
 // --- fixtures ---------------------------------------------------------------
 
+/// A base-currency-only period figure — the ordinary case for these screens.
+///
+/// P3b-1 gave [PeriodTotals] a base-currency headline alongside the native
+/// per-currency breakdown (KHA-27), so a total now has to state both. These
+/// fixtures keep both in agreement, which is what a SAR-only ledger produces:
+/// nothing needed converting, so the base figure and the SAR figure are the
+/// same number and `unconverted` is empty.
+PeriodTotals _sarTotal(String amount, {required int count}) {
+  final Money money = Money.parse(amount, currency: 'SAR');
+  return PeriodTotals(
+    base: money,
+    baseCurrencyCode: 'SAR',
+    convertedCount: count,
+    byCurrency: <CurrencyTotal>[
+      CurrencyTotal(currencyCode: 'SAR', net: money, transactionCount: count),
+    ],
+    unconverted: const <UnconvertedGroup>[],
+  );
+}
+
 InstrumentSummary _blueVisaSummary() => InstrumentSummary(
   instrument: blueVisa,
-  totals: PeriodTotals(<CurrencyTotal>[
-    CurrencyTotal(
-      currencyCode: 'SAR',
-      net: Money.parse('1500.00', currency: 'SAR'),
-      transactionCount: 2,
-    ),
-  ]),
+  totals: _sarTotal('1500.00', count: 2),
   settlementAccountLabel: 'Salary Account',
 );
 
@@ -843,13 +857,7 @@ InstrumentSummary _salaryAccountSummary() => InstrumentSummary(
     maskedIdentifier: '****3388',
     friendlyName: 'Salary Account',
   ),
-  totals: PeriodTotals(<CurrencyTotal>[
-    CurrencyTotal(
-      currencyCode: 'SAR',
-      net: Money.parse('640.00', currency: 'SAR'),
-      transactionCount: 1,
-    ),
-  ]),
+  totals: _sarTotal('640.00', count: 1),
 );
 
 BankTreeNode _aljaziraNode() => BankTreeNode(
@@ -861,13 +869,7 @@ BankTreeNode _aljaziraNode() => BankTreeNode(
   ),
   accounts: <InstrumentSummary>[_salaryAccountSummary()],
   cards: <InstrumentSummary>[_blueVisaSummary(), _unnamedCardSummary()],
-  totals: PeriodTotals(<CurrencyTotal>[
-    CurrencyTotal(
-      currencyCode: 'SAR',
-      net: Money.parse('2140.00', currency: 'SAR'),
-      transactionCount: 3,
-    ),
-  ]),
+  totals: _sarTotal('2140.00', count: 3),
 );
 
 BankTreeNode _d360Node() => BankTreeNode(
@@ -885,21 +887,9 @@ BankTreeNode _d360Node() => BankTreeNode(
         kind: InstrumentKind.account,
         maskedIdentifier: '****9911',
       ),
-      totals: PeriodTotals(<CurrencyTotal>[
-        CurrencyTotal(
-          currencyCode: 'SAR',
-          net: Money.parse('1074.50', currency: 'SAR'),
-          transactionCount: 2,
-        ),
-      ]),
+      totals: _sarTotal('1074.50', count: 2),
     ),
   ],
   cards: const <InstrumentSummary>[],
-  totals: PeriodTotals(<CurrencyTotal>[
-    CurrencyTotal(
-      currencyCode: 'SAR',
-      net: Money.parse('1074.50', currency: 'SAR'),
-      transactionCount: 2,
-    ),
-  ]),
+  totals: _sarTotal('1074.50', count: 2),
 );

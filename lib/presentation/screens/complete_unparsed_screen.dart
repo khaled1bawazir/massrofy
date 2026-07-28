@@ -112,6 +112,7 @@ class _CompleteUnparsedScreenState extends State<CompleteUnparsedScreen> {
     'online_purchase',
     'transfer_out',
     'transfer_in',
+    'salary_income',
     'bill_payment',
     'card_repayment',
     'fee',
@@ -123,14 +124,23 @@ class _CompleteUnparsedScreenState extends State<CompleteUnparsedScreen> {
 
   /// Which types do **not** count toward spend (US-B10/B11).
   ///
-  /// Card repayment settles purchases already counted, and an internal
-  /// transfer moves the user's own money — counting either would inflate
-  /// every total. The form derives this from the chosen type rather than
-  /// asking the user, because it is a property of the type, not a judgement.
+  /// The form derives this from the chosen type rather than asking the user,
+  /// because it is a property of the type, not a judgement.
+  ///
+  /// **P3b-1 correction: `transfer_out` is no longer in this set.** It was,
+  /// on the reasoning that a transfer moves the user's own money — but that
+  /// is only true of an *internal* transfer, and whether a transfer is
+  /// internal is a property of the **pair**, which a form filling in one leg
+  /// cannot know (AC-B11.2, risk R-7). Keeping it here meant every
+  /// hand-completed outgoing transfer, including a genuine payment to a third
+  /// party, was silently dropped from spend. `internal_transfer.dart` decides
+  /// this now, from evidence, and flags what it cannot prove.
   static const Set<String> _nonSpendTypes = <String>{
     'card_repayment',
     'transfer_in',
-    'transfer_out',
+    'salary_income',
+    // AC-B10.2 — cash out is not spend until the user records what it bought.
+    'withdrawal',
   };
 
   @override
@@ -218,10 +228,18 @@ class _CompleteUnparsedScreenState extends State<CompleteUnparsedScreen> {
             ],
             onChanged: (String? value) => setState(() {
               _transactionType = value;
-              // A refund or an incoming transfer is money coming back
-              // (US-B7). Setting the direction with the type saves the user a
-              // decision they would otherwise get wrong silently.
-              _direction = (value == 'refund' || value == 'transfer_in')
+              // A refund, an incoming transfer or a salary is money coming
+              // back or in (US-B7, AC-B10.1). Setting the direction with the
+              // type saves the user a decision they would otherwise get wrong
+              // silently — and the direction is the ONLY place the sign
+              // lives, so getting it wrong is getting the total wrong
+              // (`lib/core/money/sign_convention.dart`).
+              _direction =
+                  const <String>{
+                    'refund',
+                    'transfer_in',
+                    'salary_income',
+                  }.contains(value)
                   ? 'credit'
                   : 'debit';
             }),

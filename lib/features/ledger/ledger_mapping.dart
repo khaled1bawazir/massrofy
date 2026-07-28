@@ -83,6 +83,14 @@ LedgerTransaction? toLedgerTransactionOrNull(
     ),
     feeAmount: _moneyOrNull(row.feeAmountAmount, row.feeAmountCurrency),
     fxRate: row.fxRate,
+    // Schema v4 (KHA-27, KHA-70, KHA-29). Passed straight through: every one
+    // of these is nullable in exactly the way the domain type expects, and a
+    // null here genuinely means "not recorded", not "not mapped".
+    fxRateDate: row.fxRateDate,
+    fxRateSource: row.fxRateSource,
+    conversionPending: row.conversionPending,
+    internalTransferGroupId: row.internalTransferGroupId,
+    internalTransferState: row.internalTransferState,
     remainingBalance: _moneyOrNull(
       row.remainingBalanceAmount,
       row.remainingBalanceCurrency,

@@ -34,6 +34,7 @@
 library;
 
 import '../../core/money/money.dart';
+import '../../core/money/sign_convention.dart';
 
 /// Where a transaction came from — NFR-A1's three sources.
 ///
@@ -144,6 +145,41 @@ final class LedgerTransaction {
   /// [Money]; it is emphatically not a float either (ADR-002).
   final String? fxRate;
 
+  /// The date [fxRate] applies to — **KHA-70 / AC-B9.3**.
+  ///
+  /// Null means the source stated no date, which the detail screen renders as
+  /// the words *"date unknown"*. It is never defaulted to the transaction
+  /// date at *display* time; where the parser can legitimately infer it from
+  /// the message it writes it at *ingestion* time and says so through
+  /// [fxRateSource]. Inferring silently in the UI would make an undated rate
+  /// look authoritative, which was the whole of defect D-QA-2.
+  final DateTime? fxRateDate;
+
+  /// `sms_implied` | `sms_stated` | `user` | `carried_forward` — see
+  /// `base_currency.dart`'s `FxRateSource`. Null when no rate is recorded.
+  final String? fxRateSource;
+
+  /// **ADR-009 case 4.** True when this transaction is in a foreign currency
+  /// and the message supplied neither a converted amount nor a rate, so no
+  /// base-currency figure can be produced without inventing one.
+  ///
+  /// Such a transaction is **excluded from base-currency totals** and counted
+  /// on an explicit "N transactions not converted" line, so a period figure is
+  /// visibly incomplete rather than silently wrong.
+  final bool conversionPending;
+
+  /// The internal-transfer pair this transaction belongs to, when a link has
+  /// been persisted (architecture §4.2 `InternalTransferLink.groupId`). Null
+  /// for everything else, including pairs that are only *derived* at read
+  /// time — see `internal_transfer.dart`.
+  final String? internalTransferGroupId;
+
+  /// `internal` | `candidate` | `external`, when a decision has been
+  /// persisted. Null means "nobody has ruled on this", and the detector
+  /// derives a state at read time instead. A persisted value always wins,
+  /// because it is a decision a **person** made (AC-B11.2).
+  final String? internalTransferState;
+
   /// Balance reported after the movement, where a message stated one.
   /// Informational; never summed, never treated as spend.
   final Money? remainingBalance;
@@ -187,6 +223,11 @@ final class LedgerTransaction {
     this.convertedAmount,
     this.feeAmount,
     this.fxRate,
+    this.fxRateDate,
+    this.fxRateSource,
+    this.conversionPending = false,
+    this.internalTransferGroupId,
+    this.internalTransferState,
     this.remainingBalance,
     this.instrument,
     this.instrumentMaskedRefFromMessage,
@@ -205,7 +246,13 @@ final class LedgerTransaction {
 
   /// True for a credit (refund, income, incoming transfer). A credit
   /// **reduces** period spend rather than increasing it (US-B7).
-  bool get isCredit => direction == 'credit';
+  ///
+  /// The sign of a movement lives here and in [direction] alone — the stored
+  /// [amount] is always a non-negative magnitude. That is the app's settled
+  /// sign convention; `sign_convention.dart` states it in full, including why
+  /// the alternatives were rejected and what it obliges a manual-entry form
+  /// to do.
+  bool get isCredit => direction == MovementDirection.credit;
 
   /// True when a person supplied the values, whether from scratch (US-B4) or
   /// by completing an unparsed message (AC-A4.2). Drives the "Manual" badge

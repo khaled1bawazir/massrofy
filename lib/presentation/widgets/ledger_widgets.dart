@@ -26,6 +26,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../../core/money/currency_exponents.dart';
+import '../../core/money/exchange_rate.dart';
 import '../../core/money/money.dart';
 import '../../core/text/masking.dart';
 import '../../features/ledger/instrument_identity.dart';
@@ -227,16 +228,43 @@ String formatAmountDigits(Money amount) {
   return canonical + '0' * (exponent - fractionLength);
 }
 
-/// A period figure, one line per currency.
+/// A period figure: the base-currency headline, and — when something could
+/// not be converted — an explicit line saying so.
 ///
-/// Multiple lines rather than one converted number, because ADR-009 forbids
-/// inventing a rate and KHA-27 owns conversion. "1,240.00 SAR and 45.00 USD"
-/// is honest; a single blended figure would not be.
+/// ## Why the incompleteness line is not optional
+///
+/// KHA-27 gives this widget a single base-currency number to show, which is
+/// what AC-B9.2 asks for. ADR-009 attaches a condition to that number: a
+/// transaction whose message stated no rate is **excluded** from it, and the
+/// user must be told, because *"reconciliation is visibly incomplete rather
+/// than silently wrong"*. A total that quietly omits a purchase is worse than
+/// one that admits it is incomplete — so the omission is rendered from
+/// [PeriodTotals.unconverted] rather than left to a caller to remember.
+///
+/// The unconverted currencies are also shown as exact figures in their own
+/// currency. The user's money did not stop existing because the app has no
+/// rate for it.
 class PeriodTotalsText extends StatelessWidget {
   final PeriodTotals totals;
   final TextStyle? style;
 
-  const PeriodTotalsText({required this.totals, this.style, super.key});
+  /// What the figure *means*, which decides its sign prefix.
+  ///
+  /// This is not decoration. The same `PeriodTotals` shape carries spend,
+  /// income, cash withdrawn and internal transfers ([PeriodReport]), and all
+  /// four hold a **positive** net. Rendering them all with the spend
+  /// convention would print a salary of 14,500 SAR as *"−14,500.00 SAR"* —
+  /// a figure that says the exact opposite of the truth. So the caller states
+  /// which it is, and there is no default that silently works for one kind
+  /// and lies about the others.
+  final TotalsSign sign;
+
+  const PeriodTotalsText({
+    required this.totals,
+    this.style,
+    this.sign = TotalsSign.spend,
+    super.key,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -252,19 +280,122 @@ class PeriodTotalsText extends StatelessWidget {
       );
     }
 
+    final TextStyle? headlineStyle =
+        style ?? text.titleMedium?.copyWith(fontWeight: FontWeight.w700);
+    final Money? base = totals.base;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        for (final CurrencyTotal total in totals.byCurrency)
+        if (base != null)
           Text(
-            formatSignedAmount(total.net.abs, isCredit: total.net.isNegative),
-            style:
-                style ??
-                text.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            _format(base),
+            style: headlineStyle,
             textDirection: TextDirection.ltr,
           ),
+        // Everything the base figure leaves out, in its own currency.
+        for (final UnconvertedGroup group in totals.unconverted)
+          Text(
+            _format(group.net),
+            style: base == null
+                ? headlineStyle
+                : text.bodySmall?.copyWith(color: AppColors.ink700),
+            textDirection: TextDirection.ltr,
+          ),
+        if (totals.isIncomplete)
+          Text(
+            l10n.totalsNotConverted(totals.unconvertedCount),
+            style: text.bodySmall?.copyWith(color: AppColors.ink500),
+          ),
       ],
+    );
+  }
+
+  /// `.abs` with the sign supplied separately keeps the `+`/`−` prefix rule
+  /// in one function (NFR-U4) instead of letting a minus sign leak out of
+  /// `Money`'s own formatting and bypass the icon/label pairing.
+  ///
+  /// A *net* that has gone negative flips the prefix — a month of more
+  /// refunds than purchases genuinely was money in, and printing it as "−"
+  /// would be wrong in the other direction.
+  String _format(Money value) => switch (sign) {
+    TotalsSign.none => '${formatAmountDigits(value.abs)} ${value.currencyCode}',
+    TotalsSign.spend => formatSignedAmount(
+      value.abs,
+      isCredit: value.isNegative,
+    ),
+    TotalsSign.credit => formatSignedAmount(
+      value.abs,
+      isCredit: !value.isNegative,
+    ),
+  };
+}
+
+/// How a [PeriodTotalsText] figure should be signed.
+enum TotalsSign {
+  /// Money out. A positive net renders as `−`.
+  spend,
+
+  /// Money in — income. A positive net renders as `+`.
+  credit,
+
+  /// Neither: an internal transfer or a cash withdrawal. **No prefix at
+  /// all**, exactly as design.md §3.3 specifies for the internal-transfer
+  /// row, because a sign would claim it belongs on one side of the ledger.
+  none,
+}
+
+/// design.md §3.3's non-colour indicator for a movement that is **neither
+/// spend nor income** — an internal transfer (AC-B11.1) or an unproven
+/// candidate for one (AC-B11.2).
+///
+/// The design spec is specific about this row: *"a bidirectional-arrow icon +
+/// label 'Internal transfer' / 'تحويل داخلي'; no +/− prefix at all"*. The
+/// icon and the words carry the meaning; colour only reinforces, so the
+/// distinction survives greyscale and a screen reader (NFR-U4).
+class InternalTransferBadge extends StatelessWidget {
+  /// True for a proven internal transfer, false for a candidate.
+  final bool isConfirmed;
+
+  const InternalTransferBadge({required this.isConfirmed, super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final String label = isConfirmed
+        ? l10n.txnBadgeInternalTransfer
+        : l10n.txnBadgeInternalTransferCandidate;
+    final Color foreground = isConfirmed
+        ? AppColors.ink700
+        : AppColors.warningText;
+
+    return Container(
+      padding: const EdgeInsetsDirectional.symmetric(
+        horizontal: 10,
+        vertical: 4,
+      ),
+      decoration: BoxDecoration(
+        color: isConfirmed ? AppColors.ink100 : AppColors.secondaryTint10,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(
+            isConfirmed ? Icons.swap_horiz : Icons.help_outline,
+            size: 14,
+            color: foreground,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: foreground),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -288,7 +419,18 @@ String transactionTypeLabel(AppLocalizations l10n, String type) =>
       'account_debit' => l10n.txnTypeAccountDebit,
       'refund' => l10n.txnTypeRefund,
       'withdrawal' => l10n.txnTypeWithdrawal,
+      'salary_income' => l10n.txnTypeSalaryIncome,
       _ => l10n.txnTypeUnknown,
+    };
+
+/// The words for an [ExchangeRateSource] — AC-B9.3's *"the user can inspect
+/// where this rate came from"*.
+String fxRateSourceLabel(AppLocalizations l10n, ExchangeRateSource source) =>
+    switch (source) {
+      ExchangeRateSource.smsImplied => l10n.txnFxSourceSmsImplied,
+      ExchangeRateSource.smsStated => l10n.txnFxSourceSmsStated,
+      ExchangeRateSource.user => l10n.txnFxSourceUser,
+      ExchangeRateSource.carriedForward => l10n.txnFxSourceCarriedForward,
     };
 
 /// Localised label for an instrument kind (AC-B13.1/2).

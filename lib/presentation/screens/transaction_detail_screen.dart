@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../features/ledger/base_currency.dart';
+import '../../features/ledger/internal_transfer.dart';
 import '../../features/ledger/ledger_transaction.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../theme/app_colors.dart';
@@ -45,6 +47,18 @@ class TransactionDetailScreen extends StatefulWidget {
   /// rendering an empty box.
   final String? originalMessageText;
 
+  /// **AC-B11.1/AC-B11.2** — `internal` | `candidate` | `external`, resolved
+  /// by the caller.
+  ///
+  /// Passed in rather than derived here for a reason worth stating: an
+  /// internal transfer is a property of a *pair*, and this screen only ever
+  /// holds one leg. A widget that tried to work it out for itself would
+  /// always answer "not internal", which is precisely the bug US-B11 warns
+  /// about. The caller runs `InternalTransferDetector` over the whole ledger
+  /// and hands the answer down; when it passes nothing, the transaction's own
+  /// persisted state is used.
+  final String? internalTransferState;
+
   /// **Not here, deliberately: Edit, Delete and Restore.** design.md's S-11
   /// carries all three, and KHA-26 (P3b) implements them. Rendering buttons
   /// now, wired to nothing, would be worse than their absence — a delete
@@ -55,6 +69,7 @@ class TransactionDetailScreen extends StatefulWidget {
     required this.transaction,
     this.bankDisplayName,
     this.originalMessageText,
+    this.internalTransferState,
     super.key,
   });
 
@@ -73,6 +88,8 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final LedgerTransaction txn = widget.transaction;
+    final String? transferState =
+        widget.internalTransferState ?? txn.internalTransferState;
 
     return Scaffold(
       backgroundColor: AppColors.surface,
@@ -81,7 +98,7 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
         padding: const EdgeInsetsDirectional.all(16),
         children: <Widget>[
           if (txn.isDeleted) const _DeletedBanner(),
-          _Header(transaction: txn),
+          _Header(transaction: txn, internalTransferState: transferState),
           const SizedBox(height: 16),
           _Fields(
             transaction: txn,
@@ -134,13 +151,18 @@ class _DeletedBanner extends StatelessWidget {
 /// Merchant/payee, the signed amount, and the state badges.
 class _Header extends StatelessWidget {
   final LedgerTransaction transaction;
+  final String? internalTransferState;
 
-  const _Header({required this.transaction});
+  const _Header({required this.transaction, this.internalTransferState});
 
   @override
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final TextTheme text = Theme.of(context).textTheme;
+    final bool isInternal =
+        internalTransferState == InternalTransferState.internal;
+    final bool isCandidate =
+        internalTransferState == InternalTransferState.candidate;
 
     // The headline is the merchant, or the counterparty on a transfer (PRD
     // §3.4 — a transfer has no merchant but does have a payee), or the
@@ -167,16 +189,42 @@ class _Header extends StatelessWidget {
             style: text.titleMedium?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 6),
-          SignedAmountText(
-            amount: transaction.amount,
-            isCredit: transaction.isCredit,
-            style: text.headlineSmall,
-          ),
+          // design.md §3.3: a confirmed internal transfer carries **no +/−
+          // prefix at all**, because it is neither spend nor income. Showing
+          // "−1,500.00 SAR" next to an "excluded from spend" badge would put
+          // two contradictory statements on one card.
+          if (isInternal)
+            Text(
+              '${formatAmountDigits(transaction.amount)} '
+              '${transaction.amount.currencyCode}',
+              style: text.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: AppColors.ink700,
+              ),
+              textDirection: TextDirection.ltr,
+            )
+          else
+            SignedAmountText(
+              amount: transaction.amount,
+              isCredit: transaction.isCredit,
+              style: text.headlineSmall,
+            ),
+          if (isInternal || isCandidate) ...<Widget>[
+            const SizedBox(height: 6),
+            Text(
+              isInternal
+                  ? l10n.txnInternalTransferExcludedNote
+                  : l10n.txnInternalTransferCandidateNote,
+              style: text.bodySmall?.copyWith(color: AppColors.ink500),
+            ),
+          ],
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: <Widget>[
+              if (isInternal || isCandidate)
+                InternalTransferBadge(isConfirmed: isInternal),
               // AC-B4.3 — a user-entered transaction is visually distinct
               // from an SMS-derived one, by icon and word (NFR-U4).
               if (transaction.isUserEntered)
@@ -308,28 +356,8 @@ class _Fields extends StatelessWidget {
             label: l10n.txnFieldReference,
             value: txn.referenceNumber,
           ),
-          // The FX block. Shown only for a transaction that actually carried
-          // any of it — on a plain SAR purchase these three rows would be
-          // three "not stated"s that tell the user nothing.
-          if (txn.convertedAmount != null ||
-              txn.feeAmount != null ||
-              txn.fxRate != null) ...<Widget>[
-            DetailFieldRow(
-              label: l10n.txnFieldConvertedAmount,
-              value: txn.convertedAmount == null
-                  ? null
-                  : '${formatAmountDigits(txn.convertedAmount!)} '
-                        '${txn.convertedAmount!.currencyCode}',
-            ),
-            DetailFieldRow(
-              label: l10n.txnFieldFxFee,
-              value: txn.feeAmount == null
-                  ? null
-                  : '${formatAmountDigits(txn.feeAmount!)} '
-                        '${txn.feeAmount!.currencyCode}',
-            ),
-            DetailFieldRow(label: l10n.txnFieldExchangeRate, value: txn.fxRate),
-          ],
+          // The FX block — AC-B9.1 and AC-B9.3, and the whole of KHA-70.
+          ..._fxRows(context, l10n, txn),
           if (txn.remainingBalance != null)
             DetailFieldRow(
               label: l10n.txnFieldRemainingBalance,
@@ -345,6 +373,94 @@ class _Fields extends StatelessWidget {
       ),
     );
   }
+
+  /// **The FX block — AC-B9.1, AC-B9.3, and the fix for KHA-70.**
+  ///
+  /// Three rules hold here, and the second is the defect that was raised:
+  ///
+  /// 1. **Nothing is rendered on a plain base-currency purchase.** Three
+  ///    "not stated in message" rows on a 152.75 SAR coffee tell the user
+  ///    nothing and train them to skip the block.
+  /// 2. **A rate is never shown alone.** Whenever [LedgerTransaction.fxRate]
+  ///    is displayed, a rate-date row is displayed beside it — carrying either
+  ///    the real date or the literal words *"date unknown"*. Rendering an
+  ///    undated rate makes it look authoritative, which is exactly what
+  ///    defect D-QA-2 / KHA-70 was raised for. There is a widget test that
+  ///    fails if a rate ever appears without one of the two.
+  /// 3. **A foreign purchase with no conversion says so.** ADR-009's case 4
+  ///    excludes it from the period total, and that exclusion is stated here
+  ///    rather than being something the user discovers by adding the list up
+  ///    themselves.
+  List<Widget> _fxRows(
+    BuildContext context,
+    AppLocalizations l10n,
+    LedgerTransaction txn,
+  ) {
+    final bool hasAnyFx =
+        txn.convertedAmount != null ||
+        txn.feeAmount != null ||
+        txn.fxRate != null ||
+        txn.conversionPending;
+    if (!hasAnyFx) {
+      return const <Widget>[];
+    }
+
+    return <Widget>[
+      DetailFieldRow(
+        label: l10n.txnFieldConvertedAmount,
+        value: txn.convertedAmount == null
+            ? null
+            : '${formatAmountDigits(txn.convertedAmount!)} '
+                  '${txn.convertedAmount!.currencyCode}',
+      ),
+      DetailFieldRow(
+        label: l10n.txnFieldFxFee,
+        value: txn.feeAmount == null
+            ? null
+            : '${formatAmountDigits(txn.feeAmount!)} '
+                  '${txn.feeAmount!.currencyCode}',
+      ),
+      if (txn.fxRate != null) ...<Widget>[
+        DetailFieldRow(label: l10n.txnFieldExchangeRate, value: txn.fxRate),
+        // Rule 2. `value` is deliberately never null on this row: a null
+        // would render "Not stated in message", which reads as a *field* we
+        // did not capture rather than as a statement about the rate's
+        // trustworthiness. The words "Date unknown" say the latter.
+        DetailFieldRow(
+          label: l10n.txnFieldFxRateDate,
+          value: txn.fxRateDate == null
+              ? l10n.txnFxRateDateUnknown
+              : formatShortDateTime(txn.fxRateDate!),
+        ),
+        DetailFieldRow(
+          label: l10n.txnFieldFxRateSource,
+          value: _fxSourceLabel(l10n, txn.fxRateSource),
+        ),
+      ],
+      if (txn.conversionPending)
+        Padding(
+          padding: const EdgeInsetsDirectional.symmetric(vertical: 8),
+          child: Text(
+            l10n.txnFxNotConverted(BaseCurrency.defaultCode),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: AppColors.warningText),
+          ),
+        ),
+    ];
+  }
+
+  /// Null (an unrecognised or absent source) falls through to
+  /// `DetailFieldRow`'s explicit-unknown rendering rather than to a guess —
+  /// §5.2's forward-compatibility rule applied to a stored vocabulary.
+  String? _fxSourceLabel(AppLocalizations l10n, String? stored) =>
+      switch (stored) {
+        FxRateSource.smsImplied => l10n.txnFxSourceSmsImplied,
+        FxRateSource.smsStated => l10n.txnFxSourceSmsStated,
+        FxRateSource.user => l10n.txnFxSourceUser,
+        FxRateSource.carriedForward => l10n.txnFxSourceCarriedForward,
+        _ => null,
+      };
 
   /// AC-B1.1's "card/account identifier".
   ///

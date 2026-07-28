@@ -105,12 +105,14 @@ library;
 import '../../core/logging/log_event.dart';
 import '../../core/logging/safe_logger.dart';
 import '../../core/money/money.dart';
+import '../../core/money/sign_convention.dart';
 import '../../core/text/sms_sanitizer.dart';
 import '../../core/text/sms_text_normalizer.dart';
 import '../../data/dao/ingest_watermark_dao.dart';
 import '../../data/dao/raw_message_dao.dart';
 import '../../data/dao/transaction_dao.dart';
 import '../../data/db/app_database.dart';
+import '../ledger/base_currency.dart';
 import '../ledger/ledger_entity_resolver.dart';
 import '../parsing/message_parser.dart';
 import '../parsing/parse_outcome.dart';
@@ -573,7 +575,14 @@ final class IngestionPipeline {
   }) async {
     final ParsedFields fields = parsed.fields;
     final Money? amount = fields.amount;
-    if (amount == null) {
+    // P3b-1: a negative or zero magnitude is as unusable as a missing one.
+    // The sign convention (`lib/core/money/sign_convention.dart`) makes the
+    // amount a magnitude and puts the sign in `direction`; an imported pack
+    // whose regex captured a leading minus would otherwise write a negative
+    // debit, which every total would then read as a refund. Routed to the
+    // review queue rather than dropped (NFR-A7) and rather than thrown
+    // (NFR-R5 — one bad message must not stop the batch).
+    if (amount == null || violationForAmount(amount) != null) {
       // Defensive: a ParsedMessage with no amount should be impossible,
       // because every transaction rule in the bundled pack lists `amount` in
       // `requiredFields`. An *imported* pack (ADR-007's answer to R-11) is
@@ -602,6 +611,18 @@ final class IngestionPipeline {
     final String timeSource = fields.occurredAtUtc == null
         ? 'received_at_fallback'
         : (fields.timeSource ?? 'sms_local_assumed');
+
+    // KHA-27 / KHA-70 — what to record in the FX columns. Note it is given
+    // `fields.occurredAtUtc`, **not** the `occurredAt` computed above: when
+    // the message stated no time, `occurredAt` is our phone's delivery
+    // timestamp, which says nothing about when the bank converted anything.
+    // In that case the rate date stays explicitly unknown.
+    final FxRecording fx = FxRecording.forParsedMessage(
+      amount: amount,
+      convertedAmount: fields.convertedAmount,
+      statedRate: fields.exchangeRate,
+      occurredAtFromMessage: fields.occurredAtUtc,
+    );
 
     final DuplicateDecision decision = await _evaluateDuplicates(
       fields: fields,
@@ -641,7 +662,13 @@ final class IngestionPipeline {
       amount: amount,
       convertedAmount: fields.convertedAmount,
       feeAmount: fields.feeAmount,
-      fxRate: fields.exchangeRate,
+      // The recorded rate, not the raw captured one: for the parenthesised
+      // "USD 120.00 (SAR 450.12)" form the message printed no rate at all,
+      // and the implied one is what makes AC-B9.3 answerable.
+      fxRate: fx.rate,
+      fxRateDate: fx.rateDate,
+      fxRateSource: fx.source,
+      conversionPending: fx.conversionPending,
       remainingBalance: fields.remainingBalance,
       merchantRawText: fields.merchantRawText,
       counterpartyName: fields.counterpartyName,

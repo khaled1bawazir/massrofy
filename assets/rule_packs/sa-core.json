@@ -69,6 +69,93 @@
         },
 
         {
+          "_note": [
+            "P3b-1 (KHA-28). A refund is a CREDIT and reduces spend (US-B7, AC-B7.1).",
+            "It sits above the purchase rules because a refund message names a card and",
+            "an amount just as a purchase does; if the purchase rule were tried first on",
+            "a bank that ever wrote 'شراء' in a reversal, a refund would be added to",
+            "spend instead of subtracted from it — an error of twice the amount.",
+            "affectsSpend is TRUE: a refund does affect the spend total, negatively."
+          ],
+          "ruleId": "baj-refund-ar",
+          "priority": 570,
+          "messageType": "refund",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["استرجاع"],
+            "noneOf": ["رمز التحقق", "عرض خاص"]
+          },
+          "regex": "بطاقة\\s*:\\s*(?<net>[^\\-]+?)\\s*-\\s*(?<card>[\\*x0-9]{3,})\\s*مبلغ\\s*:\\s*(?<amt>[0-9.,]+)\\s*(?<cur>[A-Za-z]{3})\\s*من\\s*:\\s*(?<mer>.+?)\\s*في\\s*:\\s*(?<dt>[0-9]{2}-[0-9]{2}-[0-9]{2}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "merchant": { "group": "mer", "transform": ["trim", "collapseWs"] },
+            "instrumentRef": { "group": "card", "kind": "card", "maskPolicy": "last4" },
+            "instrumentRefNetwork": { "group": "net", "transform": ["trim"] },
+            "occurredAt": { "group": "dt", "format": "dd-MM-yy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "credit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "_note": [
+            "P3b-1 (KHA-29, AC-B10.2). Cash out of an ATM is NOT spend: the money is",
+            "still the user's, it has merely stopped being traceable. Counting it as",
+            "spend would double-count every cash purchase the user later enters by hand",
+            "(US-B4). affectsSpend is false, and `spend_classification.dart` reports it",
+            "on its own line rather than folding it anywhere."
+          ],
+          "ruleId": "baj-atm-withdrawal-ar",
+          "priority": 545,
+          "messageType": "withdrawal",
+          "intent": "transaction",
+          "match": { "allOf": ["سحب نقدي"] },
+          "regex": "حساب\\s*:\\s*(?<acct>[\\*x0-9]{3,})\\s*مبلغ\\s*:\\s*(?<amt>[0-9.,]+)\\s*(?<cur>[A-Za-z]{3})\\s*الصراف\\s*:\\s*(?<atm>[^\\s]+)\\s*في\\s*:\\s*(?<dt>[0-9]{2}-[0-9]{2}-[0-9]{2}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "merchant": { "group": "atm", "transform": ["trim", "collapseWs"] },
+            "instrumentRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "occurredAt": { "group": "dt", "format": "dd-MM-yy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": false,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "_note": [
+            "P3b-1 (KHA-29, AC-B10.1). Salary is income, not spend, and it gets its own",
+            "messageType so the income view can name it — PRD §3.4 observed salary",
+            "arriving as an incoming transfer, so this rule sits ABOVE transfer_in and a",
+            "message that says neither 'راتب' nor 'حوالة واردة' still falls through to",
+            "the generic incoming-transfer rule rather than being lost."
+          ],
+          "ruleId": "baj-salary-ar",
+          "priority": 535,
+          "messageType": "salary_income",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["راتب"],
+            "noneOf": ["رمز التحقق", "عرض خاص"]
+          },
+          "regex": "حساب\\s*:\\s*(?<acct>[\\*x0-9]{3,})\\s*مبلغ\\s*:\\s*(?<amt>[0-9.,]+)\\s*(?<cur>[A-Za-z]{3})\\s*من\\s*:\\s*(?<cp>.+?)\\s*رقم العملية\\s*:\\s*(?<ref>[A-Za-z0-9\\-]+)\\s*في\\s*:\\s*(?<dt>[0-9]{2}-[0-9]{2}-[0-9]{2}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "instrumentRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "counterpartyName": { "group": "cp", "transform": ["trim", "collapseWs"] },
+            "referenceNumber": { "group": "ref", "transform": ["trim"] },
+            "occurredAt": { "group": "dt", "format": "dd-MM-yy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "credit",
+          "affectsSpend": false,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
           "ruleId": "baj-online-purchase-ar",
           "priority": 560,
           "messageType": "online_purchase",
@@ -299,6 +386,72 @@
           }
         },
 
+        {
+          "_note": "P3b-1 (KHA-28) — see the note on baj-refund-ar.",
+          "ruleId": "d360-refund-en",
+          "priority": 570,
+          "messageType": "refund",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["refund of"],
+            "noneOf": ["verification code"]
+          },
+          "regex": "refund of\\s+(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s*to\\s+(?<net>[A-Za-z]+)\\s+(?<ctype>Credit|Debit|Prepaid)\\s+Card ending\\s+(?<card>[0-9]{3,})\\s*from\\s+(?<mer>[^.]+?)\\.\\s*On\\s+(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "merchant": { "group": "mer", "transform": ["trim", "collapseWs"] },
+            "instrumentRef": { "group": "card", "kind": "card", "maskPolicy": "last4" },
+            "instrumentRefNetwork": { "group": "net", "transform": ["lower"] },
+            "instrumentRefType": { "group": "ctype", "transform": ["lower"] },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "credit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "_note": "P3b-1 (KHA-29, AC-B10.2) — see the note on baj-atm-withdrawal-ar.",
+          "ruleId": "d360-atm-withdrawal-en",
+          "priority": 545,
+          "messageType": "withdrawal",
+          "intent": "transaction",
+          "match": { "allOf": ["cash withdrawal of"] },
+          "regex": "cash withdrawal of\\s+(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s*from account ending\\s+(?<acct>[0-9]{3,})\\s*at\\s+(?<atm>[^.]+?)\\.\\s*On\\s+(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "merchant": { "group": "atm", "transform": ["trim", "collapseWs"] },
+            "instrumentRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": false,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "_note": "P3b-1 (KHA-29, AC-B10.1) — see the note on baj-salary-ar.",
+          "ruleId": "d360-salary-en",
+          "priority": 535,
+          "messageType": "salary_income",
+          "intent": "transaction",
+          "match": { "allOf": ["salary credit of"] },
+          "regex": "salary credit of\\s+(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s*to account ending\\s+(?<acct>[0-9]{3,})\\s*from\\s+(?<cp>[^.]+?)\\.\\s*Ref\\s+(?<ref>[A-Za-z0-9\\-]+)\\.\\s*On\\s+(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "instrumentRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "counterpartyName": { "group": "cp", "transform": ["trim", "collapseWs"] },
+            "referenceNumber": { "group": "ref", "transform": ["trim"] },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "credit",
+          "affectsSpend": false,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
         {
           "ruleId": "d360-online-purchase-en",
           "priority": 560,

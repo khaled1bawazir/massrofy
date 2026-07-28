@@ -36,7 +36,24 @@ class ExchangeRate {
 
   /// The date this rate applies to (not necessarily "today" — see
   /// [ExchangeRateSource.carriedForward]).
-  final DateTime rateDate;
+  ///
+  /// **Nullable, and `required` at the same time — that combination is
+  /// deliberate (KHA-70, AC-B9.3).** A rate whose date the message never
+  /// stated is a real and common case, and the two alternatives are both
+  /// worse:
+  ///
+  ///  - defaulting it to "today" fabricates a fact the user would then see
+  ///    rendered as authoritative, which is the exact failure KHA-70 was
+  ///    raised for;
+  ///  - refusing to build the rate at all would throw away a rate the bank
+  ///    genuinely printed.
+  ///
+  /// So the date may be `null`, meaning *"the source did not date this
+  /// rate"*, and every display of a rate must then say so in words — see
+  /// `AppLocalizations.txnFxRateDateUnknown`. Keeping the parameter
+  /// `required` forces each construction site to make that call consciously
+  /// rather than inheriting a default.
+  final DateTime? rateDate;
 
   final ExchangeRateSource source;
 

@@ -3159,6 +3159,65 @@ class $TransactionsTable extends Transactions
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _fxRateDateMeta = const VerificationMeta(
+    'fxRateDate',
+  );
+  @override
+  late final GeneratedColumn<DateTime> fxRateDate = GeneratedColumn<DateTime>(
+    'fx_rate_date',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _fxRateSourceMeta = const VerificationMeta(
+    'fxRateSource',
+  );
+  @override
+  late final GeneratedColumn<String> fxRateSource = GeneratedColumn<String>(
+    'fx_rate_source',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _conversionPendingMeta = const VerificationMeta(
+    'conversionPending',
+  );
+  @override
+  late final GeneratedColumn<bool> conversionPending = GeneratedColumn<bool>(
+    'conversion_pending',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("conversion_pending" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _internalTransferGroupIdMeta =
+      const VerificationMeta('internalTransferGroupId');
+  @override
+  late final GeneratedColumn<String> internalTransferGroupId =
+      GeneratedColumn<String>(
+        'internal_transfer_group_id',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _internalTransferStateMeta =
+      const VerificationMeta('internalTransferState');
+  @override
+  late final GeneratedColumn<String> internalTransferState =
+      GeneratedColumn<String>(
+        'internal_transfer_state',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _occurredAtMeta = const VerificationMeta(
     'occurredAt',
   );
@@ -3485,6 +3544,11 @@ class $TransactionsTable extends Transactions
     feeAmountCurrency,
     feeAmountMinor,
     fxRate,
+    fxRateDate,
+    fxRateSource,
+    conversionPending,
+    internalTransferGroupId,
+    internalTransferState,
     occurredAt,
     timeSource,
     direction,
@@ -3634,6 +3698,51 @@ class $TransactionsTable extends Transactions
       context.handle(
         _fxRateMeta,
         fxRate.isAcceptableOrUnknown(data['fx_rate']!, _fxRateMeta),
+      );
+    }
+    if (data.containsKey('fx_rate_date')) {
+      context.handle(
+        _fxRateDateMeta,
+        fxRateDate.isAcceptableOrUnknown(
+          data['fx_rate_date']!,
+          _fxRateDateMeta,
+        ),
+      );
+    }
+    if (data.containsKey('fx_rate_source')) {
+      context.handle(
+        _fxRateSourceMeta,
+        fxRateSource.isAcceptableOrUnknown(
+          data['fx_rate_source']!,
+          _fxRateSourceMeta,
+        ),
+      );
+    }
+    if (data.containsKey('conversion_pending')) {
+      context.handle(
+        _conversionPendingMeta,
+        conversionPending.isAcceptableOrUnknown(
+          data['conversion_pending']!,
+          _conversionPendingMeta,
+        ),
+      );
+    }
+    if (data.containsKey('internal_transfer_group_id')) {
+      context.handle(
+        _internalTransferGroupIdMeta,
+        internalTransferGroupId.isAcceptableOrUnknown(
+          data['internal_transfer_group_id']!,
+          _internalTransferGroupIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('internal_transfer_state')) {
+      context.handle(
+        _internalTransferStateMeta,
+        internalTransferState.isAcceptableOrUnknown(
+          data['internal_transfer_state']!,
+          _internalTransferStateMeta,
+        ),
       );
     }
     if (data.containsKey('occurred_at')) {
@@ -3913,6 +4022,26 @@ class $TransactionsTable extends Transactions
         DriftSqlType.string,
         data['${effectivePrefix}fx_rate'],
       ),
+      fxRateDate: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}fx_rate_date'],
+      ),
+      fxRateSource: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}fx_rate_source'],
+      ),
+      conversionPending: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}conversion_pending'],
+      )!,
+      internalTransferGroupId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}internal_transfer_group_id'],
+      ),
+      internalTransferState: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}internal_transfer_state'],
+      ),
       occurredAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}occurred_at'],
@@ -4055,6 +4184,46 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
   /// amount of money, so it is not a `Money` triple either.
   final String? fxRate;
 
+  /// The date [fxRate] applies to.
+  ///
+  /// **NULL is a real, expected value** and must never be defaulted: it means
+  /// the message stated no date, which the UI renders as the words *"date
+  /// unknown"*. Storing `now()` here instead would fabricate a fact.
+  final DateTime? fxRateDate;
+
+  /// `sms_implied` | `sms_stated` | `user` | `carried_forward` — ADR-009's
+  /// table, mirrored by `FxRateSource` in `features/ledger/base_currency.dart`.
+  final String? fxRateSource;
+
+  /// **ADR-009 case 4.** True for a foreign-currency transaction whose message
+  /// supplied neither a converted amount nor a rate.
+  ///
+  /// Such a row is excluded from base-currency totals and counted on an
+  /// explicit "N transactions not converted" line, so reconciliation is
+  /// *visibly* incomplete rather than silently wrong. Defaults to false, which
+  /// is correct for every existing row: a base-currency transaction is never
+  /// pending, and a foreign one that already stored a converted amount is not
+  /// either.
+  final bool conversionPending;
+
+  /// The pair this transaction belongs to (architecture §4.2
+  /// `InternalTransferLink.groupId`), when a link has been **persisted**.
+  ///
+  /// Read-time detection (`features/ledger/internal_transfer.dart`) derives
+  /// pairs without writing anything, because the two legs routinely arrive in
+  /// separate messages hours apart and a decision taken at ingestion would
+  /// have to be revisited when the second one lands. This column exists for
+  /// the user's own confirmation, which P3b-2 wires up.
+  final String? internalTransferGroupId;
+
+  /// `internal` | `candidate` | `external`, or NULL for "nobody has ruled on
+  /// this".
+  ///
+  /// A stored value **outranks** anything derived: it records a decision a
+  /// person made (AC-B11.2), and a screen re-deriving over the top of it would
+  /// silently overrule the user.
+  final String? internalTransferState;
+
   /// When the movement happened, per the message, in UTC.
   ///
   /// Distinct from `createdAt` (when *we* recorded it) on purpose: a
@@ -4068,10 +4237,16 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
   /// explainable rather than mysterious.
   final String? timeSource;
 
-  /// `debit` | `credit`. A refund is a credit and **reduces** period spend
-  /// (US-B7); it is never stored as a negative debit, because a negative
-  /// amount would break every `Money` invariant that assumes sign lives in
-  /// the direction field.
+  /// `debit` | `credit`. **This column is where the sign of a movement
+  /// lives, and it is the only place it lives** — `amount_amount` is always a
+  /// non-negative magnitude.
+  ///
+  /// A refund is a credit and **reduces** period spend (US-B7); it is never
+  /// stored as a negative debit. `lib/core/money/sign_convention.dart`
+  /// is the full statement of this decision, including why a signed amount
+  /// was rejected and what it obliges the manual-entry form to validate
+  /// (defect O-QA-2). Read it before adding any write path that touches
+  /// money.
   final String direction;
 
   /// The matched rule's `messageType`, e.g. `pos_purchase`, `installment`.
@@ -4195,6 +4370,11 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     this.feeAmountCurrency,
     this.feeAmountMinor,
     this.fxRate,
+    this.fxRateDate,
+    this.fxRateSource,
+    required this.conversionPending,
+    this.internalTransferGroupId,
+    this.internalTransferState,
     this.occurredAt,
     this.timeSource,
     required this.direction,
@@ -4258,6 +4438,21 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     }
     if (!nullToAbsent || fxRate != null) {
       map['fx_rate'] = Variable<String>(fxRate);
+    }
+    if (!nullToAbsent || fxRateDate != null) {
+      map['fx_rate_date'] = Variable<DateTime>(fxRateDate);
+    }
+    if (!nullToAbsent || fxRateSource != null) {
+      map['fx_rate_source'] = Variable<String>(fxRateSource);
+    }
+    map['conversion_pending'] = Variable<bool>(conversionPending);
+    if (!nullToAbsent || internalTransferGroupId != null) {
+      map['internal_transfer_group_id'] = Variable<String>(
+        internalTransferGroupId,
+      );
+    }
+    if (!nullToAbsent || internalTransferState != null) {
+      map['internal_transfer_state'] = Variable<String>(internalTransferState);
     }
     if (!nullToAbsent || occurredAt != null) {
       map['occurred_at'] = Variable<DateTime>(occurredAt);
@@ -4364,6 +4559,19 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       fxRate: fxRate == null && nullToAbsent
           ? const Value.absent()
           : Value(fxRate),
+      fxRateDate: fxRateDate == null && nullToAbsent
+          ? const Value.absent()
+          : Value(fxRateDate),
+      fxRateSource: fxRateSource == null && nullToAbsent
+          ? const Value.absent()
+          : Value(fxRateSource),
+      conversionPending: Value(conversionPending),
+      internalTransferGroupId: internalTransferGroupId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(internalTransferGroupId),
+      internalTransferState: internalTransferState == null && nullToAbsent
+          ? const Value.absent()
+          : Value(internalTransferState),
       occurredAt: occurredAt == null && nullToAbsent
           ? const Value.absent()
           : Value(occurredAt),
@@ -4459,6 +4667,15 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       ),
       feeAmountMinor: serializer.fromJson<int?>(json['feeAmountMinor']),
       fxRate: serializer.fromJson<String?>(json['fxRate']),
+      fxRateDate: serializer.fromJson<DateTime?>(json['fxRateDate']),
+      fxRateSource: serializer.fromJson<String?>(json['fxRateSource']),
+      conversionPending: serializer.fromJson<bool>(json['conversionPending']),
+      internalTransferGroupId: serializer.fromJson<String?>(
+        json['internalTransferGroupId'],
+      ),
+      internalTransferState: serializer.fromJson<String?>(
+        json['internalTransferState'],
+      ),
       occurredAt: serializer.fromJson<DateTime?>(json['occurredAt']),
       timeSource: serializer.fromJson<String?>(json['timeSource']),
       direction: serializer.fromJson<String>(json['direction']),
@@ -4521,6 +4738,15 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       'feeAmountCurrency': serializer.toJson<String?>(feeAmountCurrency),
       'feeAmountMinor': serializer.toJson<int?>(feeAmountMinor),
       'fxRate': serializer.toJson<String?>(fxRate),
+      'fxRateDate': serializer.toJson<DateTime?>(fxRateDate),
+      'fxRateSource': serializer.toJson<String?>(fxRateSource),
+      'conversionPending': serializer.toJson<bool>(conversionPending),
+      'internalTransferGroupId': serializer.toJson<String?>(
+        internalTransferGroupId,
+      ),
+      'internalTransferState': serializer.toJson<String?>(
+        internalTransferState,
+      ),
       'occurredAt': serializer.toJson<DateTime?>(occurredAt),
       'timeSource': serializer.toJson<String?>(timeSource),
       'direction': serializer.toJson<String>(direction),
@@ -4569,6 +4795,11 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     Value<String?> feeAmountCurrency = const Value.absent(),
     Value<int?> feeAmountMinor = const Value.absent(),
     Value<String?> fxRate = const Value.absent(),
+    Value<DateTime?> fxRateDate = const Value.absent(),
+    Value<String?> fxRateSource = const Value.absent(),
+    bool? conversionPending,
+    Value<String?> internalTransferGroupId = const Value.absent(),
+    Value<String?> internalTransferState = const Value.absent(),
     Value<DateTime?> occurredAt = const Value.absent(),
     Value<String?> timeSource = const Value.absent(),
     String? direction,
@@ -4624,6 +4855,15 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
         ? feeAmountMinor.value
         : this.feeAmountMinor,
     fxRate: fxRate.present ? fxRate.value : this.fxRate,
+    fxRateDate: fxRateDate.present ? fxRateDate.value : this.fxRateDate,
+    fxRateSource: fxRateSource.present ? fxRateSource.value : this.fxRateSource,
+    conversionPending: conversionPending ?? this.conversionPending,
+    internalTransferGroupId: internalTransferGroupId.present
+        ? internalTransferGroupId.value
+        : this.internalTransferGroupId,
+    internalTransferState: internalTransferState.present
+        ? internalTransferState.value
+        : this.internalTransferState,
     occurredAt: occurredAt.present ? occurredAt.value : this.occurredAt,
     timeSource: timeSource.present ? timeSource.value : this.timeSource,
     direction: direction ?? this.direction,
@@ -4713,6 +4953,21 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           ? data.feeAmountMinor.value
           : this.feeAmountMinor,
       fxRate: data.fxRate.present ? data.fxRate.value : this.fxRate,
+      fxRateDate: data.fxRateDate.present
+          ? data.fxRateDate.value
+          : this.fxRateDate,
+      fxRateSource: data.fxRateSource.present
+          ? data.fxRateSource.value
+          : this.fxRateSource,
+      conversionPending: data.conversionPending.present
+          ? data.conversionPending.value
+          : this.conversionPending,
+      internalTransferGroupId: data.internalTransferGroupId.present
+          ? data.internalTransferGroupId.value
+          : this.internalTransferGroupId,
+      internalTransferState: data.internalTransferState.present
+          ? data.internalTransferState.value
+          : this.internalTransferState,
       occurredAt: data.occurredAt.present
           ? data.occurredAt.value
           : this.occurredAt,
@@ -4801,6 +5056,11 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           ..write('feeAmountCurrency: $feeAmountCurrency, ')
           ..write('feeAmountMinor: $feeAmountMinor, ')
           ..write('fxRate: $fxRate, ')
+          ..write('fxRateDate: $fxRateDate, ')
+          ..write('fxRateSource: $fxRateSource, ')
+          ..write('conversionPending: $conversionPending, ')
+          ..write('internalTransferGroupId: $internalTransferGroupId, ')
+          ..write('internalTransferState: $internalTransferState, ')
           ..write('occurredAt: $occurredAt, ')
           ..write('timeSource: $timeSource, ')
           ..write('direction: $direction, ')
@@ -4847,6 +5107,11 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     feeAmountCurrency,
     feeAmountMinor,
     fxRate,
+    fxRateDate,
+    fxRateSource,
+    conversionPending,
+    internalTransferGroupId,
+    internalTransferState,
     occurredAt,
     timeSource,
     direction,
@@ -4892,6 +5157,11 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           other.feeAmountCurrency == this.feeAmountCurrency &&
           other.feeAmountMinor == this.feeAmountMinor &&
           other.fxRate == this.fxRate &&
+          other.fxRateDate == this.fxRateDate &&
+          other.fxRateSource == this.fxRateSource &&
+          other.conversionPending == this.conversionPending &&
+          other.internalTransferGroupId == this.internalTransferGroupId &&
+          other.internalTransferState == this.internalTransferState &&
           other.occurredAt == this.occurredAt &&
           other.timeSource == this.timeSource &&
           other.direction == this.direction &&
@@ -4935,6 +5205,11 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
   final Value<String?> feeAmountCurrency;
   final Value<int?> feeAmountMinor;
   final Value<String?> fxRate;
+  final Value<DateTime?> fxRateDate;
+  final Value<String?> fxRateSource;
+  final Value<bool> conversionPending;
+  final Value<String?> internalTransferGroupId;
+  final Value<String?> internalTransferState;
   final Value<DateTime?> occurredAt;
   final Value<String?> timeSource;
   final Value<String> direction;
@@ -4976,6 +5251,11 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     this.feeAmountCurrency = const Value.absent(),
     this.feeAmountMinor = const Value.absent(),
     this.fxRate = const Value.absent(),
+    this.fxRateDate = const Value.absent(),
+    this.fxRateSource = const Value.absent(),
+    this.conversionPending = const Value.absent(),
+    this.internalTransferGroupId = const Value.absent(),
+    this.internalTransferState = const Value.absent(),
     this.occurredAt = const Value.absent(),
     this.timeSource = const Value.absent(),
     this.direction = const Value.absent(),
@@ -5018,6 +5298,11 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     this.feeAmountCurrency = const Value.absent(),
     this.feeAmountMinor = const Value.absent(),
     this.fxRate = const Value.absent(),
+    this.fxRateDate = const Value.absent(),
+    this.fxRateSource = const Value.absent(),
+    this.conversionPending = const Value.absent(),
+    this.internalTransferGroupId = const Value.absent(),
+    this.internalTransferState = const Value.absent(),
     this.occurredAt = const Value.absent(),
     this.timeSource = const Value.absent(),
     this.direction = const Value.absent(),
@@ -5062,6 +5347,11 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     Expression<String>? feeAmountCurrency,
     Expression<int>? feeAmountMinor,
     Expression<String>? fxRate,
+    Expression<DateTime>? fxRateDate,
+    Expression<String>? fxRateSource,
+    Expression<bool>? conversionPending,
+    Expression<String>? internalTransferGroupId,
+    Expression<String>? internalTransferState,
     Expression<DateTime>? occurredAt,
     Expression<String>? timeSource,
     Expression<String>? direction,
@@ -5107,6 +5397,13 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
       if (feeAmountCurrency != null) 'fee_amount_currency': feeAmountCurrency,
       if (feeAmountMinor != null) 'fee_amount_minor': feeAmountMinor,
       if (fxRate != null) 'fx_rate': fxRate,
+      if (fxRateDate != null) 'fx_rate_date': fxRateDate,
+      if (fxRateSource != null) 'fx_rate_source': fxRateSource,
+      if (conversionPending != null) 'conversion_pending': conversionPending,
+      if (internalTransferGroupId != null)
+        'internal_transfer_group_id': internalTransferGroupId,
+      if (internalTransferState != null)
+        'internal_transfer_state': internalTransferState,
       if (occurredAt != null) 'occurred_at': occurredAt,
       if (timeSource != null) 'time_source': timeSource,
       if (direction != null) 'direction': direction,
@@ -5157,6 +5454,11 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     Value<String?>? feeAmountCurrency,
     Value<int?>? feeAmountMinor,
     Value<String?>? fxRate,
+    Value<DateTime?>? fxRateDate,
+    Value<String?>? fxRateSource,
+    Value<bool>? conversionPending,
+    Value<String?>? internalTransferGroupId,
+    Value<String?>? internalTransferState,
     Value<DateTime?>? occurredAt,
     Value<String?>? timeSource,
     Value<String>? direction,
@@ -5201,6 +5503,13 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
       feeAmountCurrency: feeAmountCurrency ?? this.feeAmountCurrency,
       feeAmountMinor: feeAmountMinor ?? this.feeAmountMinor,
       fxRate: fxRate ?? this.fxRate,
+      fxRateDate: fxRateDate ?? this.fxRateDate,
+      fxRateSource: fxRateSource ?? this.fxRateSource,
+      conversionPending: conversionPending ?? this.conversionPending,
+      internalTransferGroupId:
+          internalTransferGroupId ?? this.internalTransferGroupId,
+      internalTransferState:
+          internalTransferState ?? this.internalTransferState,
       occurredAt: occurredAt ?? this.occurredAt,
       timeSource: timeSource ?? this.timeSource,
       direction: direction ?? this.direction,
@@ -5280,6 +5589,25 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     }
     if (fxRate.present) {
       map['fx_rate'] = Variable<String>(fxRate.value);
+    }
+    if (fxRateDate.present) {
+      map['fx_rate_date'] = Variable<DateTime>(fxRateDate.value);
+    }
+    if (fxRateSource.present) {
+      map['fx_rate_source'] = Variable<String>(fxRateSource.value);
+    }
+    if (conversionPending.present) {
+      map['conversion_pending'] = Variable<bool>(conversionPending.value);
+    }
+    if (internalTransferGroupId.present) {
+      map['internal_transfer_group_id'] = Variable<String>(
+        internalTransferGroupId.value,
+      );
+    }
+    if (internalTransferState.present) {
+      map['internal_transfer_state'] = Variable<String>(
+        internalTransferState.value,
+      );
     }
     if (occurredAt.present) {
       map['occurred_at'] = Variable<DateTime>(occurredAt.value);
@@ -5393,6 +5721,11 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
           ..write('feeAmountCurrency: $feeAmountCurrency, ')
           ..write('feeAmountMinor: $feeAmountMinor, ')
           ..write('fxRate: $fxRate, ')
+          ..write('fxRateDate: $fxRateDate, ')
+          ..write('fxRateSource: $fxRateSource, ')
+          ..write('conversionPending: $conversionPending, ')
+          ..write('internalTransferGroupId: $internalTransferGroupId, ')
+          ..write('internalTransferState: $internalTransferState, ')
           ..write('occurredAt: $occurredAt, ')
           ..write('timeSource: $timeSource, ')
           ..write('direction: $direction, ')
@@ -7776,6 +8109,11 @@ typedef $$TransactionsTableCreateCompanionBuilder =
       Value<String?> feeAmountCurrency,
       Value<int?> feeAmountMinor,
       Value<String?> fxRate,
+      Value<DateTime?> fxRateDate,
+      Value<String?> fxRateSource,
+      Value<bool> conversionPending,
+      Value<String?> internalTransferGroupId,
+      Value<String?> internalTransferState,
       Value<DateTime?> occurredAt,
       Value<String?> timeSource,
       Value<String> direction,
@@ -7819,6 +8157,11 @@ typedef $$TransactionsTableUpdateCompanionBuilder =
       Value<String?> feeAmountCurrency,
       Value<int?> feeAmountMinor,
       Value<String?> fxRate,
+      Value<DateTime?> fxRateDate,
+      Value<String?> fxRateSource,
+      Value<bool> conversionPending,
+      Value<String?> internalTransferGroupId,
+      Value<String?> internalTransferState,
       Value<DateTime?> occurredAt,
       Value<String?> timeSource,
       Value<String> direction,
@@ -7919,6 +8262,31 @@ class $$TransactionsTableFilterComposer
 
   ColumnFilters<String> get fxRate => $composableBuilder(
     column: $table.fxRate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get fxRateDate => $composableBuilder(
+    column: $table.fxRateDate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get fxRateSource => $composableBuilder(
+    column: $table.fxRateSource,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get conversionPending => $composableBuilder(
+    column: $table.conversionPending,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get internalTransferGroupId => $composableBuilder(
+    column: $table.internalTransferGroupId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get internalTransferState => $composableBuilder(
+    column: $table.internalTransferState,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -8132,6 +8500,31 @@ class $$TransactionsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get fxRateDate => $composableBuilder(
+    column: $table.fxRateDate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get fxRateSource => $composableBuilder(
+    column: $table.fxRateSource,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get conversionPending => $composableBuilder(
+    column: $table.conversionPending,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get internalTransferGroupId => $composableBuilder(
+    column: $table.internalTransferGroupId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get internalTransferState => $composableBuilder(
+    column: $table.internalTransferState,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get occurredAt => $composableBuilder(
     column: $table.occurredAt,
     builder: (column) => ColumnOrderings(column),
@@ -8338,6 +8731,31 @@ class $$TransactionsTableAnnotationComposer
   GeneratedColumn<String> get fxRate =>
       $composableBuilder(column: $table.fxRate, builder: (column) => column);
 
+  GeneratedColumn<DateTime> get fxRateDate => $composableBuilder(
+    column: $table.fxRateDate,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get fxRateSource => $composableBuilder(
+    column: $table.fxRateSource,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get conversionPending => $composableBuilder(
+    column: $table.conversionPending,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get internalTransferGroupId => $composableBuilder(
+    column: $table.internalTransferGroupId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get internalTransferState => $composableBuilder(
+    column: $table.internalTransferState,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<DateTime> get occurredAt => $composableBuilder(
     column: $table.occurredAt,
     builder: (column) => column,
@@ -8506,6 +8924,11 @@ class $$TransactionsTableTableManager
                 Value<String?> feeAmountCurrency = const Value.absent(),
                 Value<int?> feeAmountMinor = const Value.absent(),
                 Value<String?> fxRate = const Value.absent(),
+                Value<DateTime?> fxRateDate = const Value.absent(),
+                Value<String?> fxRateSource = const Value.absent(),
+                Value<bool> conversionPending = const Value.absent(),
+                Value<String?> internalTransferGroupId = const Value.absent(),
+                Value<String?> internalTransferState = const Value.absent(),
                 Value<DateTime?> occurredAt = const Value.absent(),
                 Value<String?> timeSource = const Value.absent(),
                 Value<String> direction = const Value.absent(),
@@ -8547,6 +8970,11 @@ class $$TransactionsTableTableManager
                 feeAmountCurrency: feeAmountCurrency,
                 feeAmountMinor: feeAmountMinor,
                 fxRate: fxRate,
+                fxRateDate: fxRateDate,
+                fxRateSource: fxRateSource,
+                conversionPending: conversionPending,
+                internalTransferGroupId: internalTransferGroupId,
+                internalTransferState: internalTransferState,
                 occurredAt: occurredAt,
                 timeSource: timeSource,
                 direction: direction,
@@ -8590,6 +9018,11 @@ class $$TransactionsTableTableManager
                 Value<String?> feeAmountCurrency = const Value.absent(),
                 Value<int?> feeAmountMinor = const Value.absent(),
                 Value<String?> fxRate = const Value.absent(),
+                Value<DateTime?> fxRateDate = const Value.absent(),
+                Value<String?> fxRateSource = const Value.absent(),
+                Value<bool> conversionPending = const Value.absent(),
+                Value<String?> internalTransferGroupId = const Value.absent(),
+                Value<String?> internalTransferState = const Value.absent(),
                 Value<DateTime?> occurredAt = const Value.absent(),
                 Value<String?> timeSource = const Value.absent(),
                 Value<String> direction = const Value.absent(),
@@ -8631,6 +9064,11 @@ class $$TransactionsTableTableManager
                 feeAmountCurrency: feeAmountCurrency,
                 feeAmountMinor: feeAmountMinor,
                 fxRate: fxRate,
+                fxRateDate: fxRateDate,
+                fxRateSource: fxRateSource,
+                conversionPending: conversionPending,
+                internalTransferGroupId: internalTransferGroupId,
+                internalTransferState: internalTransferState,
                 occurredAt: occurredAt,
                 timeSource: timeSource,
                 direction: direction,
