@@ -6,7 +6,10 @@ import 'package:riverpod/riverpod.dart';
 import '../../core/crypto/db_master_key_store.dart';
 import '../../core/crypto/lockout_state_repository.dart';
 import '../../core/crypto/wrapped_key.dart'
-    show KeystoreKeyInvalidatedException;
+    show
+        KeystoreFailureKind,
+        KeystoreKeyInvalidatedException,
+        KeystoreOperationException;
 import '../../core/logging/log_event.dart';
 import '../../core/logging/safe_logger.dart';
 import 'app_lock_state.dart';
@@ -117,9 +120,24 @@ class AppLockController extends Notifier<AppLockState> {
 
     state = const AppLockState(status: AppLockStatus.authenticating);
 
-    final bool authenticated = await biometricGate.authenticate(
-      reason: 'Unlock to view your data',
-    );
+    // KHA-72/KHA-75: this call used to sit outside any `try`. `local_auth`
+    // 3.x throws (it does not return `false`) for every platform-level
+    // problem, so any of those propagated straight out of `authenticate()`
+    // and left `state` stuck on [AppLockStatus.authenticating] — which
+    // renders identically to `locked` and offers no way forward. The lock
+    // gate is the only screen in the product, so that is a hung app.
+    final bool authenticated;
+    try {
+      authenticated = await biometricGate.authenticate(
+        reason: 'Unlock to view your data',
+      );
+    } on BiometricGateUnavailableException {
+      // A device fault, not a failed attempt — see that exception's doc
+      // comment. Deliberately routed through [_handlePlatformFault], which
+      // does NOT touch the lockout counter.
+      _handlePlatformFault(logger, const LogEvent(category: 'lock.gate_error'));
+      return;
+    }
     if (!authenticated) {
       await _handleFailure(logger);
       return;
@@ -154,9 +172,75 @@ class AppLockController extends Notifier<AppLockState> {
       // flow has a distinct state to hook into.
       logger.warning(const LogEvent(category: 'lock.keystore_invalidated'));
       state = const AppLockState(status: AppLockStatus.failed);
+    } on KeystoreOperationException catch (e) {
+      // KHA-75, the whole point of this issue. This branch used to be a
+      // bare `catch (_) { _handleFailure(...); }`, which did two harmful
+      // things at once:
+      //  1. it discarded the only evidence of what actually went wrong, so
+      //     a total, 100%-reproducible platform bug was indistinguishable
+      //     from a wrong fingerprint and took two review cycles to find; and
+      //  2. it counted the app's own fault against ADR-005's 5-attempt
+      //     budget, so users hit a lockout within seconds of first launch.
+      // Both are fixed here: a fixed, PII-free category per failure kind
+      // (never an interpolated string — ADR-015), and no counter increment.
+      _handlePlatformFault(logger, _keystoreFailureEvent(e.kind));
     } catch (_) {
-      await _handleFailure(logger);
+      // Anything else at all (a bug in the store layer, an unexpected
+      // StateError). Still not evidence that the user's credential was
+      // wrong, so it is still a platform fault, not a failed attempt.
+      _handlePlatformFault(
+        logger,
+        const LogEvent(category: 'lock.unlock_error.unexpected'),
+      );
     }
+  }
+
+  /// Every category string this class can log for a Keystore failure, as
+  /// `const` literals chosen by a `switch` — ADR-015 requires the category
+  /// passed to [SafeLogger] to be a compile-time constant at the call site,
+  /// so the platform's own error string is never interpolated into a log
+  /// line (that is how a value would eventually leak into one).
+  ///
+  /// These strings are what a maintainer greps for in the in-app
+  /// diagnostics (ADR-015's ring buffer). The matching, `adb logcat`-visible
+  /// line comes from `KeystoreChannel.logFailure` on the Kotlin side.
+  static LogEvent _keystoreFailureEvent(KeystoreFailureKind kind) {
+    return switch (kind) {
+      KeystoreFailureKind.invalidArgument => const LogEvent(
+        category: 'lock.keystore_error.invalid_argument',
+      ),
+      KeystoreFailureKind.userNotAuthenticated => const LogEvent(
+        category: 'lock.keystore_error.user_not_authenticated',
+      ),
+      KeystoreFailureKind.platform => const LogEvent(
+        category: 'lock.keystore_error.platform',
+      ),
+      KeystoreFailureKind.unknown => const LogEvent(
+        category: 'lock.keystore_error.unknown',
+      ),
+    };
+  }
+
+  /// Handles a failure that is the *device's* or *this app's* fault rather
+  /// than a wrong credential (KHA-72 item 2, made urgent by KHA-75).
+  ///
+  /// Contrast with [_handleFailure]: this one deliberately does **not**
+  /// increment [_consecutiveFailures], does not persist anything, and can
+  /// therefore never trigger ADR-005's exponential backoff. Locking someone
+  /// out of their own financial records for minutes because the Keystore
+  /// hiccuped — or because of a bug we shipped — is punishing the user for
+  /// our fault.
+  ///
+  /// It resolves to [AppLockStatus.failed], reusing S-09's existing
+  /// "Authentication failed. Try again." copy, because a *distinct*
+  /// "authentication unavailable" state needs new user-facing copy and
+  /// therefore a design answer — `docs/mockups/lock-gate.html` has no such
+  /// state today. That remains KHA-72's scope; what matters here and is
+  /// fixed here is that the user is never stuck on a screen that does
+  /// nothing, and never locked out for a fault that isn't theirs.
+  void _handlePlatformFault(SafeLogger logger, LogEvent event) {
+    logger.warning(event);
+    state = const AppLockState(status: AppLockStatus.failed);
   }
 
   Future<void> _handleFailure(SafeLogger logger) async {

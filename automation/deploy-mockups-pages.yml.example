@@ -1,0 +1,26 @@
+# CLIENT DESIGN PREVIEW — publishes docs/mockups/ to GitHub Pages so a client
+# can click through the screens at a shareable URL. Copy to .github/workflows/.
+name: design-preview
+on:
+  push:
+    paths: [ "docs/mockups/**" ]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/mockups          # the folder with index.html + screens
+      - id: deploy
+        uses: actions/deploy-pages@v4
+      # The client review link is printed as this job's environment URL.

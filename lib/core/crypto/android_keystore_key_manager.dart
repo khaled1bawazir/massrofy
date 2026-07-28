@@ -20,15 +20,20 @@ import 'wrapped_key.dart';
 /// `setInvalidatedByBiometricEnrollment(false)` until a real recovery path
 /// exists.
 ///
-/// **Test-coverage honesty note (see the PR description for the full
-/// statement):** this class's Dart-side contract (method names, argument
-/// shapes, exception mapping) is covered by
-/// `test/core/crypto/android_keystore_key_manager_test.dart` against a
-/// fake `MethodChannel` handler. The Kotlin implementation itself has not
-/// been exercised by an automated instrumented test in this PR — doing so
-/// needs a real Android device or emulator with Keystore/biometric hardware,
-/// which this build environment does not have. That is a known gap, not a
-/// claim of coverage that doesn't exist.
+/// **Test-coverage note (rewritten by KHA-75 — the previous wording was
+/// technically true and still let a total, ship-blocking defect through).**
+/// `test/core/crypto/android_keystore_key_manager_test.dart` covers this
+/// class against a *fake* `MethodChannel` handler. A fake handler never
+/// crosses the Dart→Java codec boundary: it hands the Dart value straight
+/// back, so `Uint8List` looks identical to `List<int>` on both ends. The
+/// Kotlin side, however, decodes those two as `byte[]` and
+/// `java.util.List<Integer>` respectively, and KHA-75 was precisely that
+/// mismatch — every real wrap/unwrap threw `ClassCastException` while
+/// every Dart test stayed green. The fix is threefold and all three parts
+/// matter: [_asWireBytes] pins one encoding here,
+/// `KeystoreChannel.byteArrayArg` accepts it there, and
+/// `integration_test/keystore_channel_test.dart` runs the *real* channel on
+/// a real device so the wire format is genuinely asserted.
 class AndroidKeystoreKeyManager implements KeyManager {
   static const MethodChannel _channel = MethodChannel(
     'massrofy/keystore_channel',
@@ -40,30 +45,75 @@ class AndroidKeystoreKeyManager implements KeyManager {
   const AndroidKeystoreKeyManager({MethodChannel? channel})
     : channel = channel ?? _channel;
 
+  /// Normalises whatever byte container a caller passed into the ONE wire
+  /// representation `KeystoreChannel.kt` expects (KHA-75).
+  ///
+  /// Flutter's `StandardMessageCodec` encodes a `Uint8List` as a typed-data
+  /// buffer (decoded on the Kotlin side as `byte[]`) but a plain `List<int>`
+  /// as a list (decoded as `java.util.List<Integer>`) — two different wire
+  /// shapes for the same idea. Leaving the choice to each call site is what
+  /// caused KHA-75: production always passed `Uint8List` while the only
+  /// tests passed plain lists, so the two halves of the channel disagreed
+  /// and nothing caught it. Converting here means there is exactly one
+  /// possible encoding on the wire no matter who calls, and the Kotlin side
+  /// only has to be right about one of them.
+  ///
+  /// `Uint8List.fromList` is a no-op-ish copy when the input already is one;
+  /// these are 32-byte keys, so the copy is irrelevant next to the
+  /// correctness guarantee.
+  static Uint8List _asWireBytes(List<int> bytes) =>
+      bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
+
+  /// Translates `KeystoreChannel.kt`'s error codes into the typed
+  /// exceptions the `features/` layer catches — see
+  /// [KeystoreOperationException] for why this mapping lives here rather
+  /// than leaking `PlatformException` upward.
+  static Never _throwMapped(PlatformException e) {
+    if (e.code == 'key_permanently_invalidated') {
+      throw const KeystoreKeyInvalidatedException();
+    }
+    throw KeystoreOperationException(
+      code: e.code,
+      kind: switch (e.code) {
+        'invalid_argument' => KeystoreFailureKind.invalidArgument,
+        'user_not_authenticated' => KeystoreFailureKind.userNotAuthenticated,
+        'keystore_error' => KeystoreFailureKind.platform,
+        _ => KeystoreFailureKind.unknown,
+      },
+    );
+  }
+
   @override
   Future<WrappedKey> wrapWithKeystoreKek(
     List<int> secretBytes, {
     String keyAlias = kDbMasterKeyKeystoreAlias,
   }) async {
-    final Map<Object?, Object?>? result = await channel
-        .invokeMapMethod<Object?, Object?>(
-          'wrapWithKeystoreKek',
-          <String, Object?>{'keyBytes': secretBytes, 'keyAlias': keyAlias},
+    try {
+      final Map<Object?, Object?>? result = await channel
+          .invokeMapMethod<Object?, Object?>(
+            'wrapWithKeystoreKek',
+            <String, Object?>{
+              'keyBytes': _asWireBytes(secretBytes),
+              'keyAlias': keyAlias,
+            },
+          );
+      if (result == null) {
+        throw const KeystoreOperationException(
+          kind: KeystoreFailureKind.unknown,
+          code: 'null_result',
         );
-    if (result == null) {
-      throw PlatformException(
-        code: 'null_result',
-        message: 'KeystoreChannel.wrapWithKeystoreKek returned null',
+      }
+      return WrappedKey(
+        ciphertext: Uint8List.fromList(
+          (result['ciphertext']! as List<Object?>).cast<int>(),
+        ),
+        nonce: Uint8List.fromList(
+          (result['nonce']! as List<Object?>).cast<int>(),
+        ),
       );
+    } on PlatformException catch (e) {
+      _throwMapped(e);
     }
-    return WrappedKey(
-      ciphertext: Uint8List.fromList(
-        (result['ciphertext']! as List<Object?>).cast<int>(),
-      ),
-      nonce: Uint8List.fromList(
-        (result['nonce']! as List<Object?>).cast<int>(),
-      ),
-    );
   }
 
   @override
@@ -72,26 +122,21 @@ class AndroidKeystoreKeyManager implements KeyManager {
     String keyAlias = kDbMasterKeyKeystoreAlias,
   }) async {
     try {
-      final List<Object?>? result = await channel.invokeListMethod<Object?>(
-        'unwrapWithKeystoreKek',
-        <String, Object?>{
-          'ciphertext': wrapped.ciphertext,
-          'nonce': wrapped.nonce,
-          'keyAlias': keyAlias,
-        },
-      );
+      final List<Object?>? result = await channel
+          .invokeListMethod<Object?>('unwrapWithKeystoreKek', <String, Object?>{
+            'ciphertext': _asWireBytes(wrapped.ciphertext),
+            'nonce': _asWireBytes(wrapped.nonce),
+            'keyAlias': keyAlias,
+          });
       if (result == null) {
-        throw PlatformException(
+        throw const KeystoreOperationException(
+          kind: KeystoreFailureKind.unknown,
           code: 'null_result',
-          message: 'KeystoreChannel.unwrapWithKeystoreKek returned null',
         );
       }
       return result.cast<int>();
     } on PlatformException catch (e) {
-      if (e.code == 'key_permanently_invalidated') {
-        throw const KeystoreKeyInvalidatedException();
-      }
-      rethrow;
+      _throwMapped(e);
     }
   }
 
