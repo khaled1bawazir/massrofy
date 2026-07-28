@@ -167,8 +167,46 @@ shape above is the contract devops is producing for it to read.
 | `dependency-scan` | no known-vulnerable dependency versions | OSV-Scanner against `pubspec.lock` |
 | `money-type-guard` | ADR-002 — `double`/`num`/`.toDouble()`/`double.parse` banned under `lib/core/money/`, `lib/domain/`, and any `*money*`/`*amount*`/`*budget*`/`*report*` file; `SUM(`/`TOTAL(`/`AVG(` banned in `.drift` files | grep-based, per ADR-002's own stated enforcement mechanism — see `.github/scripts/check_money_type_ban.sh`. Mobile-engineer may *additionally* add a `custom_lint` rule for IDE-time feedback; it does not replace this CI check |
 | `no-network-permission-guard` | ADR-001 — the **release** manifest never carries `INTERNET` / `ACCESS_NETWORK_STATE` | Checks the source manifest for the two `tools:node="remove"` directives, then builds a release APK and inspects the real merged manifest — see `.github/scripts/check_no_network_permission.sh`. Debug/profile manifests are expected to keep `INTERNET` (hot reload) and are never checked |
-| `android-sqlcipher-integration-test` | ADR-003 — SQLCipher encryption, on a real Android emulator | See KHA-62 (2026-07-28): known intermittent QEMU boot-hang flakiness on GitHub's shared runners. This job now retries the emulator-boot step up to 3 times before failing for real, and on a `pull_request` only runs at all when the PR touches `android/`, `lib/`, `integration_test/`, `pubspec.*`, or `ci.yml` itself (merges to `main` always run it). Job timeout raised to 55 min to fit up to 3 x 15-min attempts; a healthy run still finishes in ~13-15 min |
+| `android-sqlcipher-integration-test` | ADR-003 — SQLCipher encryption, on a real Android emulator | See KHA-62 and KHA-67 (2026-07-28): known intermittent QEMU boot-hang flakiness on GitHub's shared runners. On a `pull_request` this job only runs when the PR touches `android/`, `lib/`, `integration_test/`, `pubspec.*`, or `ci.yml` itself (merges to `main` always run it). It retries the emulator once, after an explicit teardown and against a freshly created AVD. A healthy run finishes in ~15-20 min. See §5.1 for why its timeouts are shaped the way they are |
 | `ci` | fan-in of the above | this is the one status check to require in branch protection (§2.2) |
+
+### 5.1 How to read `timeout-minutes` in `ci.yml` (KHA-67)
+
+`timeout-minutes` is **when GitHub starts cancelling**, not when the job or
+step stops. If the runner cannot stop the running step — a wedged QEMU
+emulator is the case that bites here — GitHub force-terminates **5 minutes
+after cancellation begins**.
+
+That is the whole of the KHA-67 discrepancy: the emulator job on PR #11 (run
+`30379373737`, job `90343139912`) declared `timeout-minutes: 55`, its check
+annotation reads *"The job has exceeded the maximum execution time of 55m0s"*
+at 17:35:49Z, and it was force-killed at 17:40:49Z — **exactly 60m00s**. The
+55 was honoured; the extra 5 was the grace period.
+
+Two consequences that anyone editing this file needs to hold onto:
+
+1. **A declared budget is not a wall clock.** The emulator job declares 62 and
+   its worst-case observed wall clock is 67. Both numbers are written out at
+   the declaration site. Do the same for any new budget.
+2. **Prefer a deadline the step enforces on itself.** Step-level
+   `timeout-minutes` has the same cancel-then-force-kill semantics, so it is a
+   poor primary bound: on job `90343139912` a step declaring 15 minutes ran
+   20m49s, and the next one was 22m48s past its own deadline when the job
+   timeout took over — which is how a nominal "3 x 15 = 45 min" ceiling
+   reached 55. The emulator step now bounds itself with the action's
+   `emulator-boot-timeout` and a `timeout --kill-after=60s 960s` wrapper
+   around `script`, and keeps `timeout-minutes` only as a backstop. A
+   self-enforced deadline also **fails with a readable log**; a force-killed
+   job does not — GitHub never finalised job `90343139912`'s log blob, so the
+   one run everybody needed to read is the one run nobody can.
+
+There is also a sizing lesson worth keeping: the 15-minute step budget was
+killing **healthy** attempts. Job `90326515099`'s attempt 1 printed its
+ADR-003 assertion as passed at 15:55:58Z and was cut one second later at
+15:55:59Z, because a cold `assembleDebug` inside that step measured **728.6 s
+(12.1 min)** on a 2-vCPU runner and grows with the codebase. If the emulator
+job starts timing out again as the app grows, the honest fixes are a Gradle
+build cache on that job or a larger runner — not another slack increase.
 
 All four jobs are written to no-op cleanly (not fail) on this repo *right
 now*, before `pubspec.yaml`/`lib/`/`android/` exist. Each one starts doing real

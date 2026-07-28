@@ -22,13 +22,21 @@
 #      .github/CI_CD.md) — one required check name, however many jobs run
 #      inside it.
 #
-# KHA-62 (2026-07-28): the Android emulator job (4b below) boots a real,
-# nested-KVM-virtualized emulator on a shared GitHub-hosted runner, which is
-# intermittently flaky in ways unrelated to this repo's code (QEMU hangs
-# mid-boot). It now (a) only runs on a PR when the PR actually touches
-# android/, lib/, integration_test/, or pubspec.*, and (b) retries its
-# emulator-boot step up to 3 times before failing the job for real. See the
-# job's own comment block for the evidence and reasoning.
+# KHA-62 / KHA-67 (2026-07-28): the Android emulator job (4b below) boots a
+# real, nested-KVM-virtualized emulator on a shared GitHub-hosted runner, which
+# is intermittently flaky in ways unrelated to this repo's code (QEMU hangs
+# mid-boot). It (a) only runs on a PR when the PR actually touches android/,
+# lib/, integration_test/, or pubspec.*, and (b) retries once, against a torn-
+# down runner and a freshly created AVD, before failing the job for real.
+#
+# A NOTE THAT APPLIES TO EVERY `timeout-minutes:` IN THIS FILE, learned the
+# hard way in KHA-67: `timeout-minutes` is when GitHub starts CANCELLING a
+# job or step, not when it stops. If the runner cannot stop the step, GitHub
+# force-terminates 5 minutes later — which is why a job declaring 55 was
+# killed at exactly 60m00s. Budget against that, and prefer deadlines the
+# step enforces on itself (a `timeout` wrapper, an action's own boot timeout)
+# over the runner's, because only the former fail cleanly and leave a log.
+# See the emulator job's comment block for the full evidence.
 #
 # All four content jobs (1-4) are written to be safe to run on this repo
 # *before* the Flutter project exists (mobile-engineer's P1 scaffold): they
@@ -271,6 +279,70 @@ jobs:
   #     virtualization contention and would likely help) — left as a flagged
   #     option, not implemented, since it costs money and is an org billing
   #     decision, not a workflow-file decision.
+  #
+  # KHA-67 (2026-07-28) — what KHA-62's retry design got wrong, corrected here.
+  # PR #11's run of this job (run 30379373737, job 90343139912) declared
+  # `timeout-minutes: 55` and was killed at exactly 60m00s. Reading the real
+  # timings and the log of the comparable run on `main` (job 90326515099)
+  # turned up three separate defects, all fixed below:
+  #
+  #   1. `timeout-minutes` is when GitHub starts CANCELLING, not when the job
+  #      stops. The check annotation on job 90343139912 reads "The job has
+  #      exceeded the maximum execution time of 55m0s" — so 55 was honoured
+  #      exactly, at 17:35:49Z. The runner then could not stop the wedged
+  #      emulator step, and GitHub force-terminated the job after its fixed
+  #      5-minute cancellation grace, at 17:40:49Z. 60 = 55 + 5. Every budget
+  #      in this job is now written against that fact, and the grace is
+  #      stated wherever a number is declared, so "declared" and "observed"
+  #      can never drift apart silently again.
+  #
+  #   2. The old "3 attempts x 15 min = 45 min ceiling" was never a real
+  #      ceiling, for the same reason. Step-level `timeout-minutes` also only
+  #      starts a cancellation: on job 90343139912 attempt 1 declared 15 min
+  #      and ran 20m49s (16:42:12Z -> 17:03:01Z), and attempt 2 was still
+  #      running 22m48s past its own 15-minute deadline when the job timeout
+  #      took over. So the real worst case was 3 x (15 + an unbounded kill
+  #      overhang), which is how a "45-minute" budget reached 55. The fix is
+  #      NOT to add slack on top of a bound that does not bind — it is to
+  #      give the step bounds it enforces ITSELF (`emulator-boot-timeout`,
+  #      and a `timeout` wrapper around `script`) and leave the runner's
+  #      `timeout-minutes` as a backstop that should never fire.
+  #
+  #   3. THE RETRY WAS NEVER A CLEAN RETRY. Job 90326515099's log shows
+  #      attempt 2 starting while attempt 1's emulator was still alive:
+  #        FATAL | Running multiple emulators with the same AVD is an
+  #                experimental feature. Please use -read-only flag ...
+  #      and then immediately "Emulator booted." — because `adb` found the
+  #      STALE emulator still listening on port 5554 and attached to it. The
+  #      job-end cleanup confirms it was never reaped in between:
+  #        Terminate orphan process: pid (2704) (qemu-system-x86_64-headless)
+  #      So a retry after a boot failure was retrying against the very
+  #      emulator that had just failed. There is now an explicit teardown
+  #      step between attempts, and attempt 2 forces AVD re-creation.
+  #
+  # Also learned from job 90326515099, and it changes the sizing: attempt 1
+  # there was NOT a QEMU hang. It printed
+  #   ✅ ADR-003 (on-device): a database created with a key cannot be opened
+  #      with the wrong key
+  # at 15:55:58Z — the test genuinely PASSED — and was guillotined one second
+  # later at 15:55:59Z by "The action ... has timed out after 15 minutes."
+  # The step spends most of its budget on a cold Gradle build of the app
+  # under test ("Running Gradle task 'assembleDebug'... 728.6s" — 12.1 min on
+  # a 2-vCPU runner, and growing with the codebase). A 15-minute step budget
+  # was therefore killing HEALTHY attempts, manufacturing exactly the
+  # flakiness the retry was added to absorb. The per-attempt budget below is
+  # sized off that measurement, not off a round number.
+  #
+  # Attempts reduced 3 -> 2. Two honest, independent attempts (which is what
+  # the teardown fix in (3) finally makes them) are worth more than three
+  # attempts that overrun their cap; and with a healthy attempt genuinely
+  # costing 13-18 min on these runners, a third attempt buys a little extra
+  # flake tolerance for ~27 more minutes of a required check blocking a merge.
+  #
+  # Still flagged, still not done (it is what would actually make these
+  # numbers small): the cold Gradle build is the dominant cost. Gradle
+  # build-cache restore on this job, or a larger runner, would cut it
+  # materially. Both are deliberately out of scope of a timeout fix.
   # ---------------------------------------------------------------------------
   android-sqlcipher-integration-test:
     name: "ADR-003: SQLCipher integration test (Android emulator)"
@@ -281,13 +353,37 @@ jobs:
     # silently blocks every merge behind it since a required check stuck
     # `pending` is indistinguishable from "still running fine."
     #
-    # Budget: ~5 min of setup steps (checkout/detect/filter/KVM perms/disk
-    # cleanup/Java/Flutter/pub get — all fast and not implicated in any
-    # observed failure) + up to 3 emulator-step attempts x 15 min each
-    # (45 min) = 50 min ceiling, rounded up to 55 for margin. A healthy run
-    # still finishes in ~13-15 minutes exactly as it always has; this bound
-    # only matters when attempts are genuinely hanging.
-    timeout-minutes: 55
+    # Budget (KHA-67). Every term is measured, not guessed; the measurements
+    # are from job 90326515099 (push to main @ c6879f3) and job 90343139912
+    # (PR #11). Each emulator attempt below now bounds ITSELF, so this job
+    # budget is the sum of those internal ceilings, not of the step-level
+    # `timeout-minutes` backstops:
+    #
+    #   setup steps, checkout -> flutter pub get (measured 1m23s)      3 min
+    #   attempt 1  — internal ceiling, see the step's own comment     27 min
+    #   teardown between attempts (its own timeout-minutes: 2)         2 min
+    #   attempt 2  — internal ceiling, same                           27 min
+    #   "Fail the job if every attempt failed"                         1 min
+    #   post steps (Post Flutter / Post Java / Post checkout)          1 min
+    #                                                                -------
+    #   worst case                                                    61 min
+    #   declared                                                      62 min
+    #
+    # Read the two numbers this produces, because they are NOT the same
+    # number and conflating them is what KHA-67 was:
+    #   - 62 min is when GitHub starts cancelling this job.
+    #   - up to 67 min is the worst observed wall clock, because GitHub
+    #     force-terminates 5 minutes after cancellation begins if the runner
+    #     cannot stop the step (this is exactly the 55 -> 60 gap on job
+    #     90343139912). Never read a `timeout-minutes` here as a wall clock.
+    #
+    # If BOTH attempts blow past their internal ceilings and run to their
+    # 30-minute step backstops, the sum would be 67 and this job timeout
+    # fires first. That is deliberate: this is the outermost backstop, and it
+    # is meant to be the thing that stops a genuinely wedged runner.
+    #
+    # A healthy run is unaffected and still finishes in ~15-20 minutes.
+    timeout-minutes: 62
     steps:
       - uses: actions/checkout@v4
         with:
@@ -383,22 +479,56 @@ jobs:
         if: steps.detect.outputs.exists == 'true' && (github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true')
         run: flutter pub get
 
-      # --- KHA-62: retry the flaky emulator boot, up to 3 attempts --------
-      # `continue-on-error: true` on attempts 1-2 means a failed attempt does
+      # --- KHA-62 / KHA-67: retry the flaky emulator boot, up to 2 attempts
+      #
+      # `continue-on-error: true` on attempt 1 means a failed attempt does
       # NOT fail the job by itself — it only lets the next attempt run
       # (guarded by `steps.emulator_attempt_N.outcome == 'failure'`, so a
-      # SUCCESSFUL attempt short-circuits every later one via `if:`, and the
-      # AVD/SDK caches from the failed attempt are reused since
-      # `force-avd-creation: false` and nothing wipes the runner between
-      # attempts). The explicit "Fail the job if every attempt failed" step
-      # after this block is what actually fails the job — this block by
-      # itself would otherwise let the job report success even if the
-      # emulator never once booted successfully.
-      - name: "Run the SQLCipher integration test on a headless Android emulator (attempt 1 of 3)"
+      # SUCCESSFUL attempt short-circuits the later one via `if:`). The
+      # explicit "Fail the job if every attempt failed" step after this block
+      # is what actually fails the job — this block by itself would otherwise
+      # let the job report success even if the emulator never once booted.
+      #
+      # Note `outcome` vs `conclusion`: under `continue-on-error: true` the
+      # API reports a FAILED step's `conclusion` as "success", which is why
+      # job 90343139912's attempt 1 looks green in the REST response even
+      # though it failed. `outcome` is the one that carries the truth, and it
+      # is the one every `if:` below reads.
+      #
+      # KHA-67 — each attempt bounds ITSELF, in three layers, innermost
+      # first, because only the inner two produce a clean failure with a
+      # readable log:
+      #   a. `emulator-boot-timeout: 300` — the action's own boot deadline.
+      #      This is the one that catches the KHA-62 QEMU boot hang. The
+      #      action's default is 600s; a healthy boot on these runners is
+      #      well under a minute once the system image is installed, so 10
+      #      minutes was pure dead time on the exact failure it exists for.
+      #   b. `timeout --kill-after=60s 960s` around `script` — the action has
+      #      no deadline of its own for the script phase, and the script
+      #      phase is where the time actually goes (a cold
+      #      `assembleDebug` measured 728.6s = 12.1 min on job 90326515099,
+      #      and it grows with the codebase). 960s = 16 min gives that
+      #      measurement ~4 min of headroom; the extra 60s escalates SIGTERM
+      #      to SIGKILL for anything that ignores the first signal. `timeout`
+      #      exits 124 on expiry, so the action fails normally and the step's
+      #      outcome is a plain `failure` — no runner-level kill needed.
+      #   c. `timeout-minutes: 30` — a BACKSTOP ONLY, and it should never
+      #      fire. It exists for the case where (a) and (b) themselves wedge.
+      #
+      # Internal ceiling per attempt, which is what the job budget above is
+      # summed from:
+      #   SDK + system image install, AVD create                       4 min
+      #   emulator boot          (capped by emulator-boot-timeout: 300) 5 min
+      #   script       (capped by timeout 960s, +60s kill escalation)  17 min
+      #   the action's own emulator teardown                            1 min
+      #                                                               -------
+      #                                                                27 min
+      # and the step backstop is 30, i.e. 3 min above that ceiling.
+      - name: "Run the SQLCipher integration test on a headless Android emulator (attempt 1 of 2)"
         id: emulator_attempt_1
         if: steps.detect.outputs.exists == 'true' && (github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true')
         continue-on-error: true
-        timeout-minutes: 15
+        timeout-minutes: 30
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -408,6 +538,7 @@ jobs:
           disable-animations: true
           disable-spellchecker: true
           force-avd-creation: false
+          emulator-boot-timeout: 300
           # The `pixel_6` hardware profile asks for a ~7.4 GB userdata
           # partition by default, which is what overflowed the runner's disk
           # (see the cleanup step above). This suite creates a handful of
@@ -416,16 +547,62 @@ jobs:
           # rather than "whatever the device profile happens to default to".
           disk-size: 4096M
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: flutter test integration_test/db_encryption_test.dart -d emulator-5554
+          script: timeout --kill-after=60s 960s flutter test integration_test/db_encryption_test.dart -d emulator-5554
 
-      - name: "Run the SQLCipher integration test on a headless Android emulator (attempt 2 of 3 — retry after attempt 1 failed)"
+      # KHA-67 defect 3: without this step, attempt 2 does not get a fresh
+      # emulator — it silently re-attaches to attempt 1's. Job 90326515099's
+      # log is explicit about it:
+      #   FATAL | Running multiple emulators with the same AVD is an
+      #           experimental feature. Please use -read-only flag ...
+      #   [command] adb -s emulator-5554 shell getprop sys.boot_completed
+      #   1
+      #   Emulator booted.
+      # attempt 2 "booted" in three seconds because it found attempt 1's
+      # process still listening on port 5554. The runner only reaped it at
+      # the very end of the job ("Terminate orphan process: pid (2704)
+      # (qemu-system-x86_64-headless)"). A retry against the emulator that
+      # just failed is not a retry.
+      #
+      # `always()` matters: attempt 1 may have ended by TIMING OUT, and a
+      # plain `if:` on outcome alone would not run after a cancelled step.
+      # Every command is best-effort and the step ends `exit 0` — a teardown
+      # that can fail the build would be worse than the leak it cleans up.
+      - name: Tear down attempt 1's emulator before retrying
+        if: >
+          always() &&
+          steps.detect.outputs.exists == 'true' &&
+          (github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true') &&
+          steps.emulator_attempt_1.outcome == 'failure'
+        timeout-minutes: 2
+        run: |
+          ADB="${ANDROID_HOME:-/usr/local/lib/android/sdk}/platform-tools/adb"
+          echo "Devices adb can still see BEFORE teardown:"
+          "$ADB" devices || true
+          # Ask politely first, then insist. `emu kill` is the only one that
+          # gives the emulator a chance to release its AVD lock cleanly.
+          "$ADB" -s emulator-5554 emu kill || true
+          "$ADB" kill-server || true
+          pkill -f qemu-system-x86_64 || true
+          pkill -f netsimd || true
+          sleep 5
+          pkill -9 -f qemu-system-x86_64 || true
+          pkill -9 -f netsimd || true
+          # Stale lock files/directories inside the AVD are what make a
+          # re-created AVD refuse to start; the emulator writes these as
+          # directories in current versions, hence -rf rather than -f.
+          rm -rf "${ANDROID_AVD_HOME:-$HOME/.android/avd}/test.avd"/*.lock || true
+          echo "Devices adb can see AFTER teardown (expect an empty list):"
+          "$ADB" devices || true
+          exit 0
+
+      - name: "Run the SQLCipher integration test on a headless Android emulator (attempt 2 of 2 — final retry after attempt 1 failed)"
         id: emulator_attempt_2
         if: >
           steps.detect.outputs.exists == 'true' &&
           (github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true') &&
           steps.emulator_attempt_1.outcome == 'failure'
         continue-on-error: true
-        timeout-minutes: 15
+        timeout-minutes: 30
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -434,31 +611,16 @@ jobs:
           profile: pixel_6
           disable-animations: true
           disable-spellchecker: true
-          force-avd-creation: false
+          # KHA-67: attempt 1 reused whatever AVD state was on the runner.
+          # If attempt 1 failed, that state is suspect, so this attempt pays
+          # the ~15s to build the AVD from scratch. Combined with the
+          # teardown above, this is what makes attempt 2 a genuinely
+          # independent trial rather than a second look at the same device.
+          force-avd-creation: true
+          emulator-boot-timeout: 300
           disk-size: 4096M
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: flutter test integration_test/db_encryption_test.dart -d emulator-5554
-
-      - name: "Run the SQLCipher integration test on a headless Android emulator (attempt 3 of 3 — final retry after attempt 2 failed)"
-        id: emulator_attempt_3
-        if: >
-          steps.detect.outputs.exists == 'true' &&
-          (github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true') &&
-          steps.emulator_attempt_2.outcome == 'failure'
-        continue-on-error: true
-        timeout-minutes: 15
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 34
-          target: google_apis
-          arch: x86_64
-          profile: pixel_6
-          disable-animations: true
-          disable-spellchecker: true
-          force-avd-creation: false
-          disk-size: 4096M
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: flutter test integration_test/db_encryption_test.dart -d emulator-5554
+          script: timeout --kill-after=60s 960s flutter test integration_test/db_encryption_test.dart -d emulator-5554
 
       - name: Fail the job if every attempt failed
         if: >
@@ -466,14 +628,17 @@ jobs:
           steps.detect.outputs.exists == 'true' &&
           (github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true') &&
           steps.emulator_attempt_1.outcome != 'success' &&
-          steps.emulator_attempt_2.outcome != 'success' &&
-          steps.emulator_attempt_3.outcome != 'success'
+          steps.emulator_attempt_2.outcome != 'success'
         run: |
-          echo "All 3 attempts of the SQLCipher emulator integration test failed."
+          echo "Both attempts of the SQLCipher emulator integration test failed."
           echo "attempt 1: ${{ steps.emulator_attempt_1.outcome }}"
           echo "attempt 2: ${{ steps.emulator_attempt_2.outcome }}"
-          echo "attempt 3: ${{ steps.emulator_attempt_3.outcome }}"
-          echo "This is very unlikely to be transient boot flakiness (KHA-62) three times in a row — treat this as a genuine failure and check the logs above for each attempt."
+          echo ""
+          echo "Read the two attempts' logs above before assuming flakiness (KHA-62)."
+          echo "Since KHA-67 each attempt fails inside its own deadline and therefore"
+          echo "leaves a readable log, and attempt 2 runs against a freshly created AVD"
+          echo "on a torn-down runner — so two failures here are much more likely to be"
+          echo "a real ADR-003 regression than the same transient boot hang twice."
           exit 1
 
   # ---------------------------------------------------------------------------
