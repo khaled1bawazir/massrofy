@@ -1,10 +1,46 @@
 package com.massrofy.massrofy
 
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity() {
+/**
+ * The app's single Activity.
+ *
+ * ## Why `FlutterFragmentActivity` and not `FlutterActivity` (KHA-71)
+ *
+ * This superclass is **load-bearing for the app lock (ADR-005)**, not a
+ * stylistic choice. `local_auth` — which backs
+ * `lib/features/security/biometric_gate.dart`'s `LocalAuthBiometricGate` —
+ * shows Android's `BiometricPrompt`, and AndroidX Biometric hosts that prompt
+ * in a `DialogFragment`. A fragment needs a `FragmentManager`, which only an
+ * `androidx.fragment.app.FragmentActivity` has. So `local_auth`'s Android
+ * implementation begins with, literally:
+ *
+ * ```java
+ * if (!(activity instanceof FragmentActivity)) {   // LocalAuthPlugin.java
+ *   ... AuthResultCode.NOT_FRAGMENT_ACTIVITY ...   // -> never shows a prompt
+ * }
+ * ```
+ *
+ * With a plain `FlutterActivity` that branch is taken on **every** call: the
+ * Dart side throws `LocalAuthException(uiUnavailable, "The current Activity
+ * must be a FragmentActivity.")` and the native dialog is never shown at all.
+ * Observed on a real device (Honor Magic V5) as the lock gate (S-09) sitting
+ * on "Unlock to view your data" forever, with no prompt and no way past it —
+ * i.e. 100% of the app unreachable. `FlutterFragmentActivity` is Flutter's
+ * own drop-in replacement for exactly this case; it reads the same
+ * `AndroidManifest` meta-data (`NormalTheme`, `SplashScreenDrawable`) and
+ * honours the same `launchMode`/`configChanges`, so nothing else in the
+ * manifest changes.
+ *
+ * `test/platform/main_activity_host_test.dart` asserts this superclass is
+ * still `FlutterFragmentActivity`. It exists because no CI job can catch a
+ * regression here behaviourally — a biometric prompt needs real hardware, and
+ * a one-character edit back to `FlutterActivity` would otherwise ship a
+ * completely unusable app with every check green.
+ */
+class MainActivity : FlutterFragmentActivity() {
 
     /**
      * Held as a field, unlike the other two channels, because Android
