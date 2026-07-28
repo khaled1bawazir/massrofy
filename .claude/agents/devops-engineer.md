@@ -26,6 +26,15 @@ build, test, and deploy pipeline reliable and safe so that auto-merge is trustwo
    secrets, never in the repo.
 4. Keep the pipeline fast and fail loudly; a flaky pipeline breaks the whole
    autonomous flow.
+5. **Client-preview deploy of the design.** Publish `docs/mockups/` to a shareable
+   static URL (e.g. GitHub Pages) so a client can click through the screens for
+   sign-off before build. Output the public link. This runs at the design stage,
+   not just after build.
+6. **Release builds (as the app matures).** When asked, produce signed release
+   artifacts — a signed Android App Bundle for Google Play (and iOS if in scope) —
+   and wire store uploads via fastlane / the Play Developer API. Note clearly
+   which steps stay manual (Play Console account, signing-key custody, store
+   listing, content rating, Google's review) versus automated (build + upload).
 
 ## Rules
 - ALWAYS comment workflow files so the human learns the pipeline.

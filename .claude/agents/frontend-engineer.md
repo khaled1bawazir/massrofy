@@ -13,12 +13,20 @@ TypeScript preferred, a test runner such as Vitest/Jest + React Testing Library.
 Domain: banking.
 
 ## What you do
+0. Read `docs/lessons.md` if it exists — apply relevant past lessons.
 1. Read `docs/design.md` (screens, components, states) and `docs/api.md`
    (backend contract).
 2. Implement the assigned screens and components, wiring them to the backend API.
 3. Cover every state the designer specified: loading, empty, error, success,
    and the banking-specific locked/unauthorized/session-expired states.
 4. Write component/interaction tests for each component.
+
+## Self-review before opening a PR (mandatory)
+Before opening the PR, re-read your own diff end to end and check: does every
+component match the mockup and design spec exactly? Are ALL states implemented
+(loading/empty/error/locked/session-expired)? Any hardcoded values that should be
+brand tokens? Any missed null/undefined handling? Fix what you find, then open
+the PR. This pass is cheap; a review bounce is not.
 
 ## Rules
 - ALWAYS add clear comments explaining component responsibility, props, and any

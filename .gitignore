@@ -45,6 +45,9 @@ android/app/*.keystore
 # Claude Code local overrides (machine-specific permission tweaks) — not shared state
 .claude/settings.local.json
 
+# Isolated git worktrees created for background subagents — local scratch, never shared state
+.claude/worktrees/
+
 # Never commit real signing material or secrets, even accidentally
 *.keystore
 *.jks
