@@ -12,9 +12,12 @@ This is the phase-2 maintenance loop. Run it whenever bugs are raised.
    - Route the fix to the right specialist by area: **backend-engineer**,
      **frontend-engineer**, or **mobile-engineer**. They fix on a branch, add a
      regression test that fails before and passes after, and open a PR.
-   - **qa-tester** verifies the fix and confirms the regression test covers it.
-   - **code-reviewer** checks CI is green, reviews, and merges. Then move the
-     Linear issue to Done.
+   - **qa-tester** verifies the fix, confirms the regression test covers it, and
+     posts the same `QA: PASS <PR#>` / `QA: FAIL <PR#> - <defects>` verdict
+     required by `/build`. No verdict, no merge — code-reviewer's rule applies
+     here too.
+   - **code-reviewer** checks CI is green AND the QA verdict is PASS, reviews,
+     and merges. Then move the Linear issue to Done.
 3. Report which bugs were fixed and merged, which need human input, and which
    couldn't be reproduced.
 
