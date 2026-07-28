@@ -1,5 +1,5 @@
-STATUS: IN PROGRESS — covers Epic 0 (Foundation), Epic A (SMS ingestion) and the
-Epic B slice built by P3a (PR #11)
+STATUS: IN PROGRESS — covers Epic 0 (Foundation), Epic A (SMS ingestion), the
+Epic B slice built by P3a (PR #11) and the P3b-1 slice (PR #18)
 
 # Massrofy — Test Plan and Acceptance-Criteria Traceability Matrix
 
@@ -344,6 +344,128 @@ cannot date is exactly the traceability AC-B9.3 exists to require. Filed as
 because AC-B9.x is KHA-27's scope and the current display is honest about showing
 only what the message stated.
 
+### 7d. Third pass — P3b-1, PR #18 (`feature/p3b-1-currency-refunds-transfers`, head `3ba320d`)
+
+Run 2026-07-29, same environment (Flutter 3.44.8 / Dart 3.12.2, Temurin JDK 21,
+Windows), against a checkout of the PR head SHA verified to equal
+`3ba320d61f762793adc02b52b0de67dfd669ea62`. Nothing below is copied from the PR
+description; every command was re-run and every cited test name was read in the
+file and observed passing in this session's run.
+
+| Check | Command | Engineer claimed | QA observed |
+|---|---|---|---|
+| Static analysis | `flutter analyze --fatal-infos` | No issues | **No issues found (9.4s)** — matches |
+| Formatting | `dart format --set-exit-if-changed lib test integration_test` | 159 files, 0 changed | **159 files, 0 changed** — matches |
+| Unit + widget tests | `flutter test --exclude-tags=release_mode_guard` | "+782 ~3", body text says 784 | **+784 ~3, exit 0** — matches the 784 figure; the 3 skips are the pre-existing desktop-SQLCipher cases, unchanged by this PR |
+| Money-type ban (ADR-002) | `bash .github/scripts/check_money_type_ban.sh` | clean | **clean** — re-checked by hand against the four new columns: `fxRateDate` is `DateTimeColumn`, `fxRateSource`/`internalTransferGroupId`/`internalTransferState` are `TextColumn`, `conversionPending` is `BoolColumn`. No `real()`/`double`/`num` introduced |
+| Android build | `flutter build apk --debug` | succeeds | **succeeds** (`app-debug.apk`, 192.9s) |
+
+**Audit-trail invariant re-checked (NFR-A2/NFR-R6):** `TransactionDao` has seven
+mutating methods and seven `auditLogDao.append(...)` calls, each inside the same
+Drift `transaction()` block. PR #18 adds **no** new mutation method — the FX and
+internal-transfer columns ride on the two existing insert paths — so the P3a
+audit verification carries forward unchanged.
+
+#### QA-authored probe suite
+
+Because two of this PR's claims are corrections to previously-filed defects, they
+were verified by executing code rather than by reading doc comments.
+`test/security/qa_pr18_probe_test.dart` (11 tests, all passing) is the evidence.
+It is QA-authored and is **not** part of the engineer's claimed coverage.
+
+| Probe | What it attacks | Result |
+|---|---|---|
+| A1 | `insertFromParsedSms` with `-50.00 SAR` | **Repelled** — `ArgumentError`, `transactions` table empty. Note the guard throws *synchronously*, before the `Future` exists |
+| A2 | `insertManualCompletion` with `-50.00 SAR` | **Repelled** — same |
+| A3 | `TransactionDao.create()` with `-1.500 KWD` | **SUCCEEDED — see D-QA-3.** Row stored (`amountAmount = '-1.5'`, `amountMinor = -1500`) with a well-formed audit entry |
+| A4 | Does that negative row invert a total? | **Yes** — a debit carrying a negative magnitude yields `-50` net spend: the exact O-QA-2 shape, still reachable through the unguarded path |
+| B1 | Refund **larger** than the original charge (not covered by AC-B7.2 or by `combined_totals_test`) | **Correct** — `100 − 250 = −150`, not clamped; `netKept = 150` |
+| B2 | Three-transaction foreign over-refund, each leg on its **own** rate (`sms_implied` then `sms_stated 3.60`) | **Correct** — `+450.12 − 450.12 − 72.00 = −72.00`. No rate bleeds between transactions |
+| C1 | Internal transfer where the **incoming** leg has no resolved instrument | Counted as spend (safe over-statement) but `needsReviewCount == 0` — **see D-QA-4** |
+| C2 | Month-boundary transfer (31 Jul out / 1 Aug in) | **Correct with the real callers.** `report()` runs the detector over the whole live set, so the pair is seen and July excludes it. Pre-filtering the list first yields `2000` instead — a documented sharp edge, not a live bug: `periodReportProvider` and `bankTreeProvider` both pass the full `watchLive()` stream |
+| C3 | Cross-currency internal transfer (2000 SAR out / 533.19 USD in, same reference) | Not paired (correct — no invented rate) but `needsReviewCount == 0`, contradicting the file's own doc — **see D-QA-4** |
+| C4 | Unproven candidate pair — does it inflate income as well as spend? | Yes, both by 2000; but `netKept` stays invariant at `0` and both legs are flagged (`needsReviewCount == 2`). Acceptable |
+| D1 | Is the per-instrument exclusion assertion strong, or could it pass for a weaker reason? | **Genuinely strong** — see below |
+
+#### Verification of the three headline claims
+
+1. **Sign convention (`lib/core/money/sign_convention.dart`).** Independently
+   confirmed on the two paths the PR names: the DAO rejects a negative magnitude
+   and writes nothing. The *ingestion* half was confirmed by reading
+   `ingestion_pipeline.dart:585` (`amount == null || violationForAmount(amount) != null`
+   → `rawMessageDao.insert(classification: 'financial_unparsed')`,
+   `routedToReviewQueue + 1`) — the branch is correct but **has no test**
+   (O-QA-4), because the bundled pack cannot produce a negative amount and no
+   synthetic pack fixture was added. The claim "there is no negative number
+   anywhere in the transaction table" is **false as stated** (D-QA-3).
+
+2. **`combined_totals_test.dart` arithmetic.** Every hand-calculated figure in
+   the comments was re-computed independently and all are correct:
+   `152.75 + 450.12 − 187.46 + 800.00 − 75.00 = 1140.41`; the stated-rate leg
+   `20.00 × 3.7500 = 75.00`; native SAR `952.75` / USD `50.01` / EUR `35`;
+   card slice `152.75 + 450.12 − 187.46 − 75.00 = 340.41`; bank tree
+   `800 + 0 + 340.41 = 1140.41`; `netKept 14500 − 1140.41 = 13359.59`;
+   soft-delete `1140.41 + 187.46 = 1327.87`; unproven variant `1140.41 + 2000 = 3140.41`;
+   USD-base `+120.00 − 49.99 − 20.00 = 50.01`. **No arithmetic error found.**
+
+3. **Is the slicing assertion real?** Yes, and this was the specific thing
+   checked. `tx()` defaults `affectsSpend: true`, and fixture 5 (the internal
+   leg) does **not** override it, so its exclusion cannot come from the pack
+   veto. Fixture 10 is the *same* `transfer_out` type on the *same* instrument
+   and **is** counted (800.00), so the exclusion cannot come from the transaction
+   type either. The only remaining explanation is the whole-ledger pair analysis
+   `BankTreeBuilder` hands down. Probe D1 reproduces this in isolation
+   (`analyze()` returns `internal` for the paired leg and `null` for the
+   unpaired one on the same instrument). **The assertion proves what it claims.**
+   *One weaker row noted:* the savings-account assertion (`totals.base` is null)
+   would also pass because that leg carries `affectsSpend: false` and is
+   `transferIn` (income) — it is not load-bearing. Not a defect.
+
+4. **The `transfer_out` fix.** Confirmed the old behaviour was wrong against the
+   codebase's own definition: `internal_transfer.dart:333-345` requires both legs
+   to resolve to *different, known* instruments with matching amount+currency
+   inside a 24h window — a property of the **pair**, which an S-19 form filling
+   one leg cannot observe. So `'transfer_out'` in `_nonSpendTypes` dropped genuine
+   third-party payments. The regression test
+   (`p3b_screens_test.dart` → `an outgoing transfer completed by hand now COUNTS as spend…`)
+   drives the real widget and asserts `affectsSpend == true`, and probe D1 confirms
+   the classifier still excludes the *paired* case. Fix and test both correct.
+
+#### 7d-i. Traceability — Epic B ACs claimed by KHA-27 / KHA-28 / KHA-29 / KHA-70
+
+| AC | Test case (file → test name, verbatim) | Type | Result |
+|---|---|---|---|
+| **AC-B7.1** — a refund/credit is recorded as a credit and **decreases** period spend | `period_totals_test.dart` group "AC-B7.1 — a credit reduces spend, never increases it" → `a refund subtracts from the period figure`, `a month with more refunds than purchases goes negative rather than…`; `spend_classification_test.dart` (refund → `spendCredit`); `combined_totals_test.dart` → `net spend in the base currency is 1,140.41 SAR`; QA probe B1 (over-refund → `−150`, uncovered by the engineer's suite) | Unit + QA probe | **PASS** |
+| **AC-B7.2** — charge + refund net to zero, or to the difference | `p3b_ingestion_totals_test.dart` group "AC-B7.2 — a charge and its full refund net to zero" → `Aljazira's card: 187.46 charged, 187.46 refunded, and the card's…` (asserts a *computed* `0.00` with `isEmpty == false`, not an empty state) and `D360's card: 450.12 charged, 187.46 refunded, net 262.66 — a…`. Both run through the real pack → parser → DAO → schema v4 → mapper → totals | Integration | **PASS (partial)** — the AC says *"the net effect on that **category** is zero"*. There is no `Category` table until P4, so the netting is proven at the instrument/period level only. Flagged so P4 is still held to the category half |
+| **AC-B7.3** — a credit is visually distinct from a debit (NFR-U4: not colour alone) | `p3b_screens_test.dart` group "AC-B7.3 / NFR-U4 — a credit is distinguishable without colour" → `a credit is "+", a debit is "−", and each carries a spoken…` | Widget | **PASS** — sign + semantic label, so it survives greyscale and a screen reader |
+| **AC-B9.1** — both native and converted amounts displayed | `p3b_screens_test.dart` → `AC-B9.1 — a foreign transaction shows BOTH its native amount…` | Widget | **PASS** |
+| **AC-B9.2** — period totals computed in the base currency from each transaction's **recorded** conversion, never by summing across currencies | `base_currency_test.dart` (ADR-009 cases 1–4, incl. `no rate is invented; the value is explicitly unavailable`, `a malformed stored rate degrades to "not converted", never to a…`, `a zero or negative stored rate is refused — it would convert real…`); `combined_totals_test.dart` → `the native per-currency breakdown reconciles with the same five…` and `the EUR purchase is missing from the base figure AND visible on the…`; `p3b_screens_test.dart` group "AC-B9.2 — the \"not converted\" line"; QA probe B2 (per-leg rates do not bleed) | Unit + widget + QA probe | **PASS** — the strongest AC in this PR. `Money.sum` throws `CurrencyMismatchError` if a wrong-currency value ever reaches a bucket, so NFR-A5 is enforced at runtime as well as by the type |
+| **AC-B9.3 / KHA-70** — the rate **and rate date** are inspectable | `p3b_screens_test.dart` → `**the KHA-70 done check**: a rate is NEVER rendered without…` (the widget half) and `AC-B9.3 — the rate source is stated in words, so the user…`; `p3b_ingestion_totals_test.dart` → `**KHA-70's DAO done-check**: a message stating no rate stores NULL…`, `a message stating the rate stores it verbatim, with the movement…`, `a message giving both amounts but no rate stores the IMPLIED rate,…`; `base_currency_test.dart` → `**the KHA-70 case**: when the message stated no time, the rate date…` | Widget + integration | **PASS — KHA-70 closed.** Both halves of the issue's own done-check are present. The `occurredAtUtc`-not-`occurredAt` distinction was verified in `ingestion_pipeline.dart:612-623`: a delivery-time fallback leaves the rate date NULL rather than fabricating one |
+| **AC-B10.1** — salary is recorded as income, not spend | `p3b_ingestion_totals_test.dart` → `AC-B10.1 — a salary message becomes income, not spend`; `p3b_screens_test.dart` → `AC-B10.1 — salary is offered, and choosing it sets the…`; `spend_classification_test.dart` | Integration + widget | **PASS (partial)** — the AC's second clause, *"visible in a distinct income view"*, is not built. The figure ships inside the Spent-vs-Kept card; a dedicated income screen is P5. Disclosed in the PR body |
+| **AC-B10.2** — an ATM withdrawal is recorded as a withdrawal | `p3b_ingestion_totals_test.dart` → `AC-B10.2 — an ATM withdrawal is a withdrawal, and is in neither…`; `spend_classification_test.dart` (`cashWithdrawal`); `p3b_screens_test.dart` → `AC-B10.2 — a cash withdrawal is a debit that does not count…`; `combined_totals_test.dart` asserts `cashWithdrawals.base == 500` reported but never subtracted | Integration + widget | **PASS (partial)** — the "later reclassify the cash as spending via manual entry" clause needs KHA-26's manual entry (P3b-2) |
+| **AC-B10.3** — "spent vs kept" nets spend against income | `combined_totals_test.dart` → `AC-B10.3 — spent vs kept nets income against spend and nothing…` (`14500 − 1140.41 = 13359.59`, hand-checked); `p3b_screens_test.dart` group "S-32 Spent vs Kept — AC-B10.3" → `every component of the netting is on screen, so the user can…`, `cash withdrawn and internal transfers are shown but NOT…`, `a period that spent more than it received shows a negative…`, `with no data at all it says so, rather than showing 0.00`, `an incomplete report says the figures are incomplete` | Unit + widget | **PASS** — `netKept` correctly returns `null` (not zero) when a component holds unconvertible transactions, which is the subtle half |
+| **AC-B11.1** — internal transfers excluded from all spend totals | `internal_transfer_test.dart`; `combined_totals_test.dart` → `the internal transfer is excluded from spend and shown as its own…` and **`**the slicing test**: a per-instrument total still excludes the internal transfer, even though its partner leg is on another instrument`**; QA probe D1 independently reproduces the discrimination | Unit + QA probe | **PASS** — verified strong, not incidental (see "Is the slicing assertion real?" above). **Partial on the AC's second clause** (*"and category breakdowns"*) — no `Category` table until P4 |
+| **AC-B11.2** — an undeterminable transfer is **flagged for review**, not silently classified | `internal_transfer_test.dart`; `combined_totals_test.dart` group "AC-B11.2 — the same month with an UNPROVEN internal transfer" → `the candidate keeps counting as spend — 1,140.41 + 2,000.00`, `…and the user is told the figure is provisional`; `p3b_screens_test.dart` → `an unproven candidate says it is still being counted —…`, `a persisted state on the row is used when the caller passes…` | Unit + widget | **PASS (partial) — two named gaps.** (a) A transfer the detector cannot *pair at all* — cross-currency, or a leg whose instrument did not resolve — is counted as spend with **no** review flag (QA probes C1/C3, **D-QA-4**). (b) Derived candidates do not reach the Needs Review inbox and cannot be confirmed — disclosed by the engineer and tracked as **KHA-78** |
+| **NFR-A5** — no hard-coded base currency | `base_currency_test.dart` group "NFR-A5 — the base currency is a parameter, not an assumption"; `combined_totals_test.dart` → `the same month reported in USD converts what it can and reports…` (`50.01` USD, 3 unconverted, SAR never blended in) | Unit | **PASS** |
+| **NFR-A6** — no derived figure that cannot be traced to its constituents | `combined_totals_test.dart` → `the bank total equals the sum of its instruments, which equals the…`; the detector is a pure function with nothing cached (read, confirmed); every `PeriodTotals` carries `transactionCount` beside its figure | Unit | **PASS** |
+| **PRD §3.4** — the FX fee is its own field, never folded into spend | `combined_totals_test.dart` → `the FX fee is its own figure and is not inside net spend…` (pins that spend is *not* `1151.66`); `base_currency_test.dart` group "the FX fee converts on its own terms (PRD §3.4)" incl. `a fee in a third currency with no rate is NOT silently added to a…` | Unit | **PASS** |
+| **Schema v4 migration** | `schema_v4_migration_test.dart`; `schema_v3_migration_test.dart` (updated to strip v4's columns — the "duplicate column name" trap the PR body calls out) | Unit | **PASS** |
+| **O-QA-2 (from pass 2) — a negative amount typed on S-19** | `p3a_adversarial_test.dart` → `a NEGATIVE amount can no longer reach the ledger — O-QA-2, closed at…` (the test that used to *assert the defect* now asserts the fix) and `zero is still a valid amount — it is a different fact from unknown…`; `sign_convention_test.dart` (7 tests); QA probes A1/A2 | Unit + QA probe | **CLOSED at the domain layer**, with the caveat in D-QA-3. The form-level message is KHA-26's half, still open |
+
+**P3b-1 tally: 15 AC/invariant rows — 9 full PASS, 6 PASS (partial), 0 FAIL.**
+Every partial is partial because the remainder of the AC belongs to an issue that
+has not started (P4 categories, P5 income view, KHA-26, KHA-78) — except
+AC-B11.2's gap (a), which is new and is filed as D-QA-4.
+
+#### 7d-ii. QA-found items on PR #18 (none merge-blocking)
+
+| Ref | Severity | Summary |
+|---|---|---|
+| **D-QA-3** | Medium | `TransactionDao.create()` carries no `checkMovementAmount` guard and stores a negative amount with a valid audit entry. No production caller today, so not exploitable — but it falsifies the PR's "no negative number anywhere in the transaction table", and `transaction_dao_test.dart:173` (`a negative KWD amount preserves its sign correctly`) **actively pins the wrong invariant**, so closing the gap means changing a currently-green test |
+| **D-QA-4** | Low–Medium | A transfer the detector cannot pair *at all* (cross-currency legs, or a leg whose instrument did not resolve) is counted as spend with no review flag, though `internal_transfer.dart:338-341` says such transfers *"stay visible as spend **and as a review item**"*. AC-B11.2's flag is only produced for *paired* candidates |
+| **O-QA-3** | Low | `ingestion_pipeline.dart:578` says *"a negative **or zero** magnitude is as unusable as a missing one"* and the comment below says a zero amount *"must never happen"* — both contradict `sign_convention.dart`'s deliberate "zero is valid" (KHA-25) and the passing test that pins it. The **code** is right; the comment invites a future engineer to "fix" it and break KHA-25 |
+| **O-QA-4** | Low | The ingestion negative-amount → review-queue branch has no test. It is the NFR-A7 half of the O-QA-2 closure claim; only the DAO half is covered. Reachable only via an imported pack (risk R-11), which is exactly the scenario it was written for |
+
 ### 7c. Epics C–I — not yet built
 
 Per PRD §9: C (15 ACs), D (14), E (14), F (14), G (4), H (3), I (3) have no
@@ -374,8 +496,22 @@ already does.
 |---|---|---|---|---|---|
 | 0 — Foundation (P1) | 8 done-checks | 7 | 1 (SQLCipher desktop-vs-emulator split) | 0 | Merged, main — verified |
 | A — SMS ingestion (P2) | 19 ACs | 13 + 1 (AC-A4.2 closed by P3a) | 3 | 2 (1 device, 1 QA-found test gap → now KHA-66) | Merged — verified against the branch before merge |
-| B — instruments/transactions, **P3a slice only** | 20 AC rows | 17 | 3 (each waiting on KHA-26/28/40, not on P3a) | 0 | **PR #11 open** — verified against head `51bb730` |
-| B — remainder + C–I | ~139 ACs | — | — | — | Not yet built |
+| B — instruments/transactions, **P3a slice only** | 20 AC rows | 17 | 3 (each waiting on KHA-26/28/40, not on P3a) | 0 | Merged (PR #11) — verified against head `51bb730` |
+| B — **P3b-1 slice** (KHA-27/28/29/70) | 15 AC/invariant rows | 9 | 6 (P4 categories, P5 income view, KHA-26, KHA-78, D-QA-4) | 0 | **PR #18 open** — verified against head `3ba320d` |
+| B — remainder + C–I | ~124 ACs | — | — | — | Not yet built |
+
+**Overall (pass 3, PR #18):** **QA: PASS.** No defect found in P3b-1's own scope
+that blocks merge. All five claimed local results were reproduced exactly
+(analyze clean, format clean at 159 files, **784 passing / 3 skipped**, money-type
+guard clean, debug APK built). The two claims that correct previously-filed
+defects were verified by *executing* code, not by reading doc comments: the
+sign-convention rejection was probed at three DAO write paths, and every
+hand-calculated figure in `combined_totals_test.dart` was re-derived
+independently and found correct. The per-instrument exclusion assertion was
+specifically checked for weak-pass and is genuinely load-bearing. An 11-test
+QA probe suite (`test/security/qa_pr18_probe_test.dart`) found one real gap
+(D-QA-3) and one AC-B11.2 sub-case (D-QA-4); neither is exploitable from
+shipped code paths today.
 
 **Overall (pass 2, PR #11):** no defect found in P3a's own scope that would block
 merge. Every check the engineer claimed was reproduced exactly (628 passing,

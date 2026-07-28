@@ -14,6 +14,33 @@ KHA-64 first half), PR #11, head `51bb730`. See `docs/test-plan.md` §1a, §6a a
 
 ## Summary
 
+### Pass 3 (PR #18, P3b-1 — multi-currency, refunds, income/transfers)
+
+**No defect was found in P3b-1's own scope that blocks its merge. Verdict: QA: PASS 18.**
+All five claimed gates were reproduced against the PR head `3ba320d`, not read
+from the description: `flutter analyze --fatal-infos` (0 issues),
+`dart format --set-exit-if-changed lib test integration_test` (159 files, 0
+changed), `flutter test --exclude-tags=release_mode_guard` (**784 passed, 3
+skipped**), `check_money_type_ban.sh` (pass), `flutter build apk --debug`
+(built). Every figure matches.
+
+Because two of this PR's claims are corrections to previously-filed defects, they
+were verified by **executing** code rather than reading doc comments. An
+11-test QA probe suite (`test/security/qa_pr18_probe_test.dart`) attacked the
+sign convention at all three DAO write paths and probed five money-math /
+transfer edge cases the engineer's `combined_totals_test.dart` does not cover.
+Separately, every hand-calculated figure in that test's comments was re-derived
+independently — **no arithmetic error found** — and its per-instrument
+"slicing" assertion was specifically checked for weak-pass and found genuinely
+load-bearing (see `docs/test-plan.md` §7d).
+
+Three items raised, **none blocking**: **D-QA-3** (medium, KHA-79 — a third DAO
+write path escapes the sign guard, with a green test pinning the wrong
+invariant), **D-QA-4** (low–medium, KHA-80 — an *unpairable* transfer is counted
+as spend with no AC-B11.2 review flag), and **O-QA-3/O-QA-4** (low, KHA-81 — a
+doc comment contradicting the "zero is valid" decision, and an untested
+ingestion branch). Details below.
+
 ### Pass 2 (PR #11, P3a domain spine)
 
 **No defect was found in P3a's own scope that blocks its merge.** All four gates
@@ -121,6 +148,98 @@ for what did surface, correctly classified as risks and gaps rather than defects
   migration deliberately backfills nothing — a backfilled rate date would be
   fabricated provenance, which is this defect one level deeper
   (`test/data/db/schema_v4_migration_test.dart`).
+- **QA confirmation (pass 3):** independently verified. The
+  `occurredAtUtc`-not-`occurredAt` distinction — the thing that separates fixing
+  this defect from papering over it — was checked in
+  `ingestion_pipeline.dart:612-623`: where the pipeline fell back to the SMS
+  delivery time, the rate date is left NULL rather than defaulted to that
+  timestamp. **D-QA-2 / KHA-70 closed.**
+
+### D-QA-3 — a third DAO write path escapes the sign-convention guard
+
+- **Severity: Medium.** Found in pass 3 (PR #18, head `3ba320d`).
+  **Not a merge blocker** — no production caller.
+- **Linear:** KHA-79.
+- **What.** PR #18 states *"There is no negative number anywhere in the
+  transaction table"* and *"`TransactionDao` refuses a negative magnitude at the
+  write boundary"*. Two of the DAO's three insert paths carry
+  `checkMovementAmount` (`insertFromParsedSms:257`, `insertManualCompletion:413`);
+  **`create():29` does not.**
+- **Steps to reproduce** (synthetic data only, NFR-M3):
+  `dao.create(amount: Money.parse('-1.500', currency: 'KWD'), actor: 'user')`
+  → row persists with `amountAmount == '-1.5'`, `amountMinor == -1500`, and a
+  well-formed audit entry, so it is indistinguishable downstream from a
+  legitimate row. A debit carrying a negative magnitude then yields
+  `LedgerTotals.spend(...).base == '-50'` — the O-QA-2 shape, still reachable.
+  Reproduction in `test/security/qa_pr18_probe_test.dart`, probes A3/A4.
+- **Expected vs actual.** Expected: every write path refuses a negative
+  magnitude, per `sign_convention.dart`'s own *"failing loudly at the write
+  boundary beats a negative magnitude reaching a total three screens away"*.
+  Actual: one path accepts it silently.
+- **Aggravating factor.** `test/data/dao/transaction_dao_test.dart:173`
+  (`a negative KWD amount preserves its sign correctly`) **asserts the wrong
+  invariant and is green**, so closing the gap means changing a passing test —
+  the situation in which a guard tends to get reverted instead.
+- **Why not blocking.** `create()` has no caller in `lib/`. It is a P1-era
+  method for proving the audit mechanism. Every shipping path is guarded and QA
+  verified both by execution. It matters because KHA-26 (P3b-2) is about to add
+  a manual-entry write path and `create()` is the obvious method to reach for.
+
+### D-QA-4 — an UNPAIRABLE transfer is counted as spend with no AC-B11.2 review flag
+
+- **Severity: Low–Medium.** Found in pass 3 (PR #18). **Not a merge blocker.**
+- **Linear:** KHA-80. Distinct from KHA-78 (which covers *paired* candidates
+  that are flagged in the domain but do not reach the review inbox).
+- **What.** `InternalTransferDetector.analyze` derives a state only for
+  transfers it can pair; `SpendClassification` sets `needsReview` only for a
+  derived `candidate`. A transfer it cannot pair at all yields `null`, is
+  classified as ordinary spend, and carries **no flag** — though
+  `internal_transfer.dart:338-341` promises such transfers *"stay visible as
+  spend **and as a review item**"*.
+- **Steps to reproduce** (`qa_pr18_probe_test.dart`, group PROBE C):
+  (a) 2,000.00 SAR out / 533.19 USD in, same reference, 5 min apart →
+  `spend.base == '2000'`, `needsReviewCount == 0`.
+  (b) outgoing leg on a known instrument, incoming leg with `instrument == null`
+  (too few digits to key on) → same result. Case (b) is **risk R-7's
+  bootstrapping problem in its purest form**, and the common case early in the
+  app's life.
+- **Expected vs actual.** Expected (AC-B11.2): a transfer the app cannot
+  classify is flagged for review, not silently classified. Actual: silently
+  counted as spend. The *number* errs safely (over-statement, the documented
+  bias); the *flag* half of the AC is not met, so the error is invisible rather
+  than correctable.
+- **Why not blocking.** No total is under-stated and no money is lost;
+  AC-B11.2 passes for the case P3b-1 primarily targets. This is a sub-case gap.
+
+---
+
+## Observations from the pass-3 probe suite (low severity, recorded for audit)
+
+### O-QA-3 — an ingestion comment contradicts the "zero is valid" decision
+
+- **Severity: Low** (documentation). **Linear:** KHA-81.
+- `ingestion_pipeline.dart:578` (added by PR #18) says *"a negative **or zero**
+  magnitude is as unusable as a missing one"*, and the comment below it says a
+  zero amount *"must never happen"*. Both contradict `sign_convention.dart`'s
+  deliberate *"Accept zero"* contract (KHA-25: unknown must stay distinguishable
+  from zero) and the green test that pins it.
+- The **code is correct** — `violationForAmount` rejects negative only. Only the
+  comment is wrong. It sits directly above the guard, telling the next reader
+  that zero should be rejected, which is an invitation to "fix" the code and
+  break KHA-25 — the exact failure mode `sign_convention.dart` warns about.
+
+### O-QA-4 — the ingestion negative→review-queue branch has no test
+
+- **Severity: Low** (coverage gap; code reads correct). **Linear:** KHA-81.
+- PR #18 claims O-QA-2's domain half is closed by two mechanisms. The DAO half
+  is tested and QA re-verified it by execution. The ingestion half
+  (`ingestion_pipeline.dart:585` → `financial_unparsed` raw message,
+  `routedToReviewQueue + 1`, no throw) is **not** exercised by any test, because
+  the bundled `sa-core` pack cannot produce a negative amount and no synthetic
+  pack fixture was added.
+- The branch exists specifically for risk R-11 (an imported pack whose regex
+  captured a leading minus) — so the one scenario it was written for is the one
+  nothing verifies.
 
 ---
 
