@@ -272,19 +272,46 @@ final class PeriodReport {
   /// **AC-B10.3 — "spent vs kept".** Income minus net spend, in the base
   /// currency. Positive means the user kept money this period.
   ///
-  /// Null when either side has no base-currency figure at all: netting a
-  /// known number against an unknown one produces a number that looks
-  /// authoritative and is not. Cash withdrawals are **not** subtracted — the
-  /// money is still the user's; it is reported separately so a user who wants
-  /// to treat it as spent can see the figure and decide.
+  /// ## When this is null, and why the distinction is not pedantic
+  ///
+  /// A missing base figure means one of two very different things, and only
+  /// one of them can be treated as zero:
+  ///
+  ///  - **The component has no transactions.** Nothing was received this
+  ///    month → income genuinely contributes zero to the netting.
+  ///  - **The component has transactions but none could be converted.** Every
+  ///    purchase was in a currency the messages quoted no rate for. Treating
+  ///    that as zero would report *"you kept 14,500.00 SAR"* to someone who
+  ///    spent all of it — a number that looks authoritative and is the
+  ///    opposite of the truth.
+  ///
+  /// So the second case returns null, and the card renders the empty-state
+  /// words instead of a figure. Cash withdrawals are **not** subtracted from
+  /// either — the money is still the user's; it is reported on its own line
+  /// so a user who wants to treat it as spent can see it and decide.
   Money? get netKept {
-    final Money? spent = spend.base;
-    final Money? earned = income.base;
-    if (spent == null && earned == null) {
+    final Money zero = Money.zero(baseCurrencyCode);
+    final Money? spent = _contributionOf(spend, zero);
+    final Money? earned = _contributionOf(income, zero);
+    if (spent == null || earned == null) {
       return null;
     }
-    final Money zero = Money.zero(baseCurrencyCode);
-    return (earned ?? zero) - (spent ?? zero);
+    if (spend.isEmpty && income.isEmpty) {
+      // Nothing at all happened. "You kept 0.00" would claim we measured
+      // something; the caller renders "no transactions in this period".
+      return null;
+    }
+    return earned - spent;
+  }
+
+  /// A component's contribution to the netting: its base figure, `zero` when
+  /// it is genuinely empty, or **null** when it holds transactions the app
+  /// could not convert.
+  static Money? _contributionOf(PeriodTotals totals, Money zero) {
+    if (totals.base != null) {
+      return totals.base;
+    }
+    return totals.isEmpty ? zero : null;
   }
 
   /// True when any component omits an unconvertible transaction, so a screen

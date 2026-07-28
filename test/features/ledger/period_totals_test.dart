@@ -244,6 +244,39 @@ void main() {
       expect(report.netKept!.toCanonicalString(), '-250');
     });
 
+    test('a period whose spend is entirely UNCONVERTIBLE yields no net at all '
+        '— not "you kept everything"', () {
+      // The subtle one. Income converts, spend does not, and treating the
+      // missing spend figure as zero would tell someone who spent all of it
+      // that they kept 14,500.00 SAR.
+      final PeriodReport report = LedgerTotals.report(<LedgerTransaction>[
+        txn(id: 1, amount: '400.00', currency: 'EUR'),
+        txn(
+          id: 2,
+          amount: '14500.00',
+          direction: 'credit',
+          type: 'salary_income',
+          affectsSpend: false,
+        ),
+      ], period: july2026);
+
+      expect(report.income.base!.toCanonicalString(), '14500');
+      expect(report.spend.base, isNull);
+      expect(report.spend.isEmpty, isFalse, reason: 'there IS spending');
+      expect(report.netKept, isNull);
+      expect(report.isIncomplete, isTrue);
+    });
+
+    test('an empty income component contributes zero rather than blocking the '
+        'net — "nothing came in" is a measurement, not a gap', () {
+      final PeriodReport report = LedgerTotals.report(<LedgerTransaction>[
+        txn(id: 1, amount: '250.00'),
+      ], period: july2026);
+
+      expect(report.income.isEmpty, isTrue);
+      expect(report.netKept!.toCanonicalString(), '-250');
+    });
+
     test('income is accumulated as a magnitude, so an income figure never '
         'renders negative', () {
       final PeriodReport report = LedgerTotals.report(<LedgerTransaction>[
