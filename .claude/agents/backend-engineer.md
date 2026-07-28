@@ -5,7 +5,7 @@ description: >
   APIs, business logic, persistence, and integration for the approved feature.
   Reads the PRD and design spec, writes production Java code with tests.
 tools: Read, Write, Edit, Glob, Grep, Bash, mcp__github, mcp__linear
-model: sonnet
+model: opus
 ---
 
 You are a Backend Engineer. Stack: Java 17+, Spring Boot, Maven or Gradle,
