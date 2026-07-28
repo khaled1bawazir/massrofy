@@ -28,10 +28,12 @@ import 'dart:async' show unawaited;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/crypto/domain_separated_key.dart';
 import '../../core/time/clock.dart';
 import '../../data/dao/ingest_watermark_dao.dart';
 import '../../data/sms/android_sms_source.dart';
 import '../../features/ingestion/background_entrypoint.dart';
+import '../../features/ingestion/content_hmac.dart';
 import '../../features/ingestion/historical_importer.dart';
 import '../../features/ingestion/ingestion_pipeline.dart';
 import '../../features/ingestion/review_queue.dart';
@@ -118,11 +120,16 @@ final FutureProvider<IngestionPipeline?> ingestionPipelineProvider =
         transactionDao: session.transactionDao,
         watermarkDao: IngestWatermarkDao(session.database),
         logger: ref.watch(safeLoggerProvider),
-        // ADR-017 D1's HMAC key. Reusing the Keystore-held audit chain key
-        // rather than provisioning a second secret: one key, two uses, versus
-        // a second key with its own lifecycle, rotation story and failure
-        // modes to get wrong. See `content_hmac.dart`.
-        contentHmacKey: session.auditLogDao.auditChainKey,
+        // ADR-017 D1's HMAC key. Derived from the Keystore-held audit chain
+        // key rather than provisioning a second secret from scratch: one
+        // root secret, still one lifecycle/rotation story, but a distinct,
+        // domain-separated subkey per protocol (KHA-21 / B5) so the audit
+        // chain's HMAC and this one can never authenticate for each other.
+        // See `domain_separated_key.dart` and `content_hmac.dart`.
+        contentHmacKey: DomainSeparatedKey.derive(
+          rootKey: session.auditLogDao.auditChainKey,
+          label: ContentHmac.keyDerivationLabel,
+        ),
       );
     });
 

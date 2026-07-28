@@ -43,11 +43,23 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 abstract final class ContentHmac {
+  /// Fixed label for deriving this protocol's HMAC subkey from the shared
+  /// audit-chain root key via `DomainSeparatedKey.derive` (see that file for
+  /// the full rationale, and `ingestion_providers.dart` for where the
+  /// derivation actually happens). [compute]'s `key` parameter must always
+  /// be a subkey derived with this label, never the root key itself —
+  /// reusing one raw key across the audit chain's HMAC and this one would
+  /// let a single leaked/forged key authenticate two unrelated protocols
+  /// (KHA-21 / ADR-017 B5), which defeats the point of an HMAC whose only
+  /// job is tamper-evidence.
+  static const String keyDerivationLabel = 'massrofy/dedup-content-hmac/v1';
+
   /// The D1 key for one message.
   ///
-  /// [key] is the same Keystore-held chain key used by the audit log
-  /// (`AuditChainKeyStore`) — one secret, two uses, rather than a second key
-  /// with its own lifecycle, rotation story and failure modes to get wrong.
+  /// [key] must be the audit-chain root key's dedup subkey — derive it with
+  /// `DomainSeparatedKey.derive(rootKey: auditChainKey, label:
+  /// ContentHmac.keyDerivationLabel)` — never the raw `auditChainKey`
+  /// itself. See [keyDerivationLabel]'s doc comment for why.
   ///
   /// The three inputs are joined with `\x00`, a byte that cannot occur in
   /// SMS text. Concatenating without a separator would let a crafted sender
