@@ -45,6 +45,24 @@ android {
     }
 }
 
+dependencies {
+    // ADR-006 — WorkManager runs the ingestion sweep. `CoroutineWorker`
+    // (used by IngestWorker.kt) lives in work-runtime-ktx.
+    //
+    // NOTE for a dependency reviewer: WorkManager persists job metadata in
+    // its OWN unencrypted SQLite database. That is precisely why ADR-006
+    // forbids passing the SMS body through it as input `Data` — the receiver
+    // carries no content at all, and the worker re-reads from the SMS
+    // provider instead. Nothing sensitive is handed to this library; it is
+    // used only as a scheduler.
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
+
+    // ADR-005 already pulls androidx.core in transitively via the Flutter
+    // embedding, but ActivityCompat.requestPermissions in SmsChannel.kt is a
+    // direct use, so it is declared directly rather than relied on.
+    implementation("androidx.core:core-ktx:1.13.1")
+}
+
 flutter {
     source = "../.."
 }

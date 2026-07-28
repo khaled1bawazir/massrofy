@@ -75,5 +75,178 @@
   "homePlaceholderBody": "This is the Massrofy foundation build. SMS ingestion, categorisation, and reporting are built in later phases — this screen only proves the app launches, unlocks, and reads/writes its encrypted store correctly.",
   "@homePlaceholderBody": {
     "description": "Explanatory copy for the placeholder home screen."
+  },
+
+  "smsRationaleTitle": "Why Massrofy needs SMS access",
+  "@smsRationaleTitle": {
+    "description": "S-02 headline (docs/mockups/onboarding.html). Shown BEFORE the OS permission dialog — design flag D-9, AC-A1.2."
+  },
+
+  "smsRationaleLead": "Your bank sends transaction alerts by SMS. Massrofy reads only those messages, on your device, to build a picture of your spending.",
+  "@smsRationaleLead": {
+    "description": "S-02 explanation card body."
+  },
+
+  "smsRationalePointOnDevice": "Everything is processed on your phone",
+  "@smsRationalePointOnDevice": {
+    "description": "S-02 guarantee bullet 1. Backed by ADR-001: the release build declares no INTERNET permission, so this is an OS-enforced property, not a promise."
+  },
+
+  "smsRationalePointNoSharing": "No data is sent to us or to anyone else",
+  "@smsRationalePointNoSharing": {
+    "description": "S-02 guarantee bullet 2 (AC-F4.2)."
+  },
+
+  "smsRationalePointRevocable": "You can revoke access at any time",
+  "@smsRationalePointRevocable": {
+    "description": "S-02 guarantee bullet 3."
+  },
+
+  "smsRationalePointNoiseIgnored": "Non-financial messages are ignored and never stored",
+  "@smsRationalePointNoiseIgnored": {
+    "description": "S-02 guarantee bullet 4. This is literally true per NFR-P4: a message from an unrecognised sender produces no database row at all."
+  },
+
+  "smsRationaleGrant": "Grant SMS access",
+  "@smsRationaleGrant": {
+    "description": "S-02 primary CTA — opens the OS permission dialog."
+  },
+
+  "smsRationaleNotNow": "Not now",
+  "@smsRationaleNotNow": {
+    "description": "S-02 secondary CTA. Declining leads to S-04 limited mode, never to a dead end."
+  },
+
+  "smsLimitedModeTitle": "Limited mode is on",
+  "@smsLimitedModeTitle": {
+    "description": "S-04 headline. Covers both permission-declined and permission-revoked (AC-A1.2, AC-A1.3)."
+  },
+
+  "smsLimitedModeBody": "Without SMS access, transactions will not be added automatically. Any data you already have is still intact, and you can add transactions manually at any time.",
+  "@smsLimitedModeBody": {
+    "description": "S-04 body. The 'already have is still intact' half is required by AC-A1.3 — a user who fears their history is gone may reinstall, which would actually destroy it."
+  },
+
+  "smsLimitedModeOpenSettings": "Open system settings",
+  "@smsLimitedModeOpenSettings": {
+    "description": "S-04 primary CTA when the permission is permanently denied — the OS silently no-ops a re-request, so a deep link is the only honest offer."
+  },
+
+  "smsLimitedModeTryAgain": "Grant SMS access",
+  "@smsLimitedModeTryAgain": {
+    "description": "S-04 primary CTA when the permission was merely declined and the OS dialog will still appear."
+  },
+
+  "smsLimitedModeAddManually": "Add a transaction manually",
+  "@smsLimitedModeAddManually": {
+    "description": "S-04 fallback CTA — the app must never be a dead end (AC-A1.2)."
+  },
+
+  "smsRevokedBannerTitle": "SMS access was turned off",
+  "@smsRevokedBannerTitle": {
+    "description": "AC-A1.3 persistent banner shown on Home when access was granted and later revoked — including by Android 11+'s automatic permission reset for unused apps."
+  },
+
+  "importProgressTitle": "Importing your messages",
+  "@importProgressTitle": {
+    "description": "S-05 headline (AC-A3.2)."
+  },
+
+  "importProgressFound": "{count} transactions found so far…",
+  "@importProgressFound": {
+    "description": "S-05 live count.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "41"
+      }
+    }
+  },
+
+  "importProgressContinueInBackground": "Continue in the background",
+  "@importProgressContinueInBackground": {
+    "description": "S-05 dismiss action. The import is non-blocking per NFR-R2/AC-A3.2 — the user is never trapped on this screen."
+  },
+
+  "importProgressScopeNote": "Massrofy imports messages from the start of this month.",
+  "@importProgressScopeNote": {
+    "description": "Sets the expectation set by AC-A3.1 (OQ-11 resolved: current calendar month, not full history) so an empty-looking result is not mistaken for a failure."
+  },
+
+  "needsReviewTitle": "Needs review",
+  "@needsReviewTitle": {
+    "description": "S-18 app-bar title."
+  },
+
+  "needsReviewTabUnparsed": "Not understood ({count})",
+  "@needsReviewTabUnparsed": {
+    "description": "S-18 tab 1 — messages the parser could not turn into a transaction (US-A4). Kept separate from low-confidence items, which are a different problem with a different fix.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "2"
+      }
+    }
+  },
+
+  "needsReviewTabLowConfidence": "Low confidence ({count})",
+  "@needsReviewTabLowConfidence": {
+    "description": "S-18 tab 2 — parsed transactions flagged for the user, including ADR-017 possible duplicates.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "4"
+      }
+    }
+  },
+
+  "needsReviewEmpty": "Nothing needs review right now",
+  "@needsReviewEmpty": {
+    "description": "S-18 empty state. Reassurance, not an error — deliberately not styled as a warning."
+  },
+
+  "needsReviewEmptyBody": "Every message and transaction is understood and categorised.",
+  "@needsReviewEmptyBody": {
+    "description": "S-18 empty-state body."
+  },
+
+  "needsReviewFillInDetails": "Fill in details",
+  "@needsReviewFillInDetails": {
+    "description": "S-18 primary action on an unparsed message — opens S-19 (AC-A4.2)."
+  },
+
+  "needsReviewNotATransaction": "Not a transaction",
+  "@needsReviewNotATransaction": {
+    "description": "S-18 dismissal (US-A4). Marks the message as dismissed; never deletes it, so a later inbox sweep cannot resurrect it."
+  },
+
+  "needsReviewReceivedFrom": "Received {time} · From: {sender}",
+  "@needsReviewReceivedFrom": {
+    "description": "S-18 metadata line under a raw message preview.",
+    "placeholders": {
+      "time": {
+        "type": "String",
+        "example": "today, 09:12"
+      },
+      "sender": {
+        "type": "String",
+        "example": "BAJ"
+      }
+    }
+  },
+
+  "needsReviewPossibleDuplicate": "Possible duplicate",
+  "@needsReviewPossibleDuplicate": {
+    "description": "Badge on a transaction flagged by ADR-017's D2/D3 tiers. Both transactions stay in every total until the user decides — never auto-removed."
+  },
+
+  "needsReviewReasonNoRule": "This message did not match any known format",
+  "@needsReviewReasonNoRule": {
+    "description": "Explains UnparsedReason.noRuleMatched in plain language — usually means the bank changed its template (risk R-4)."
+  },
+
+  "needsReviewReasonMissingField": "Some details were missing from this message",
+  "@needsReviewReasonMissingField": {
+    "description": "Explains UnparsedReason.requiredFieldMissing / extractionRegexFailed."
   }
 }

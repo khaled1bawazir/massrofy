@@ -1,0 +1,499 @@
+{
+  "_readme": [
+    "Massrofy bundled parser rule pack — docs/architecture.md ADR-007 / §5.2 Contract A.",
+    "",
+    "THIS FILE IS DATA, NOT CODE. Adding a bank or a message type means editing this",
+    "file; it must never mean editing lib/features/parsing/. That is the whole point of",
+    "ADR-007 (NFR-M1), and it is the acceptance bar on Linear KHA-19.",
+    "",
+    "NFR-M3 — every pattern here was authored from the STRUCTURAL descriptions in",
+    "docs/PRD.md §3.4. No genuine bank SMS was copied into this file, and none may be.",
+    "Bank names are real (they are public companies), but every template, amount,",
+    "merchant, account suffix, reference number and date in the matching fixture corpus",
+    "is invented. See test/fixtures/sms_corpus/.",
+    "",
+    "Rules are matched in DESCENDING priority, first match wins (§5.2). The ignore rules",
+    "sit at 900 so an OTP that happens to contain a transaction keyword is recognised as",
+    "an OTP first (AC-A2.1) — get that ordering wrong and the app invents a purchase out",
+    "of a security code. The bare 'debited from account' rules sit at 100 so every more",
+    "specific debit template (fee, installment, bill, repayment) is tried before the",
+    "catch-all.",
+    "",
+    "Note on `network` values: they are extracted verbatim from the message, so the",
+    "Arabic-language bank yields Arabic tokens. Canonicalising those onto the",
+    "visa|mada|mastercard vocabulary in architecture §4.2 is P3 entity-resolution work,",
+    "not a parser concern — the parser's job is to report what the message said."
+  ],
+
+  "schemaVersion": 1,
+  "packId": "sa-core",
+  "packVersion": "2026.07.28",
+  "locales": ["ar", "en"],
+
+  "banks": [
+    {
+      "bankId": "bank-aljazira",
+      "displayName": { "ar": "بنك الجزيرة", "en": "Bank Aljazira" },
+      "aliases": ["ALJAZIRA", "BAJ", "الجزيرة"],
+      "senderPatterns": ["^(BAJ|Aljazira|AlJazira|BankAlJazira)$"],
+
+      "messageRules": [
+        {
+          "ruleId": "baj-otp",
+          "priority": 900,
+          "messageType": "otp",
+          "intent": "ignore",
+          "match": {
+            "anyOf": ["رمز التحقق", "رمز الدخول", "كلمة المرور المؤقتة", "OTP"]
+          }
+        },
+        {
+          "ruleId": "baj-marketing",
+          "priority": 890,
+          "messageType": "marketing",
+          "intent": "ignore",
+          "match": {
+            "anyOf": ["عرض خاص", "عرض حصري", "اربح", "للتفاصيل اتصل", "تمويل شخصي بأرباح"],
+            "noneOf": ["شراء", "حوالة", "سداد", "خصم من حساب", "قسط"]
+          }
+        },
+        {
+          "ruleId": "baj-balance-info",
+          "priority": 880,
+          "messageType": "balance_info",
+          "intent": "ignore",
+          "match": {
+            "allOf": ["رصيد حسابك"],
+            "noneOf": ["شراء", "حوالة", "سداد", "خصم من حساب", "قسط"]
+          }
+        },
+
+        {
+          "ruleId": "baj-online-purchase-ar",
+          "priority": 560,
+          "messageType": "online_purchase",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["شراء عبر الإنترنت", "بطاقة"],
+            "noneOf": ["رمز التحقق", "عرض خاص"]
+          },
+          "regex": "بطاقة\\s*:\\s*(?<net>[^\\-]+?)\\s*-\\s*(?<card>[\\*x0-9]{3,})\\s*مبلغ\\s*:\\s*(?<amt>[0-9.,]+)\\s*(?<cur>[A-Za-z]{3})\\s*\\(\\s*(?<conv>[0-9.,]+)\\s*(?<convCur>[A-Za-z]{3})\\s*\\)(?:\\s*رسوم دولية\\s*:\\s*(?<fee>[0-9.,]+)\\s*(?<feeCur>[A-Za-z]{3}))?\\s*لدى\\s*:\\s*(?<mer>.+?)\\s*في\\s*:\\s*(?<dt>[0-9]{2}-[0-9]{2}-[0-9]{2}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "convertedAmount": { "group": "conv", "transform": ["normalizeNumerals"] },
+            "convertedCurrency": { "group": "convCur", "transform": ["upper"] },
+            "feeAmount": { "group": "fee", "transform": ["normalizeNumerals"] },
+            "feeCurrency": { "group": "feeCur", "transform": ["upper"] },
+            "merchant": { "group": "mer", "transform": ["trim", "collapseWs"] },
+            "instrumentRef": { "group": "card", "kind": "card", "maskPolicy": "last4" },
+            "instrumentRefNetwork": { "group": "net", "transform": ["trim"] },
+            "occurredAt": { "group": "dt", "format": "dd-MM-yy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "ruleId": "baj-pos-purchase-ar",
+          "priority": 550,
+          "messageType": "pos_purchase",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["شراء", "بطاقة", "لدى"],
+            "noneOf": ["شراء عبر الإنترنت", "رمز التحقق", "عرض خاص"]
+          },
+          "regex": "بطاقة\\s*:\\s*(?<net>[^\\-]+?)\\s*-\\s*(?<card>[\\*x0-9]{3,})\\s*مبلغ\\s*:\\s*(?<amt>[0-9.,]+)\\s*(?<cur>[A-Za-z]{3})\\s*لدى\\s*:\\s*(?<mer>.+?)\\s*في\\s*:\\s*(?<dt>[0-9]{2}-[0-9]{2}-[0-9]{2}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "merchant": { "group": "mer", "transform": ["trim", "collapseWs"] },
+            "instrumentRef": { "group": "card", "kind": "card", "maskPolicy": "last4" },
+            "instrumentRefNetwork": { "group": "net", "transform": ["trim"] },
+            "occurredAt": { "group": "dt", "format": "dd-MM-yy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "ruleId": "baj-transfer-out-ar",
+          "priority": 540,
+          "messageType": "transfer_out",
+          "intent": "transaction",
+          "match": { "allOf": ["حوالة صادرة"] },
+          "regex": "حساب\\s*:\\s*(?<acct>[\\*x0-9]{3,})\\s*مبلغ\\s*:\\s*(?<amt>[0-9.,]+)\\s*(?<cur>[A-Za-z]{3})\\s*إلى\\s*:\\s*(?<cp>.+?)\\s*بنك\\s*:\\s*(?<cpbank>.+?)\\s*رقم العملية\\s*:\\s*(?<ref>[A-Za-z0-9\\-]+)\\s*في\\s*:\\s*(?<dt>[0-9]{2}-[0-9]{2}-[0-9]{2}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "instrumentRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "counterpartyName": { "group": "cp", "transform": ["trim", "collapseWs"] },
+            "counterpartyBankName": { "group": "cpbank", "transform": ["trim", "collapseWs"] },
+            "referenceNumber": { "group": "ref", "transform": ["trim"] },
+            "occurredAt": { "group": "dt", "format": "dd-MM-yy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "ruleId": "baj-transfer-in-ar",
+          "priority": 530,
+          "messageType": "transfer_in",
+          "intent": "transaction",
+          "match": { "allOf": ["حوالة واردة"] },
+          "regex": "حساب\\s*:\\s*(?<acct>[\\*x0-9]{3,})\\s*مبلغ\\s*:\\s*(?<amt>[0-9.,]+)\\s*(?<cur>[A-Za-z]{3})\\s*من\\s*:\\s*(?<cp>.+?)\\s*بنك\\s*:\\s*(?<cpbank>.+?)\\s*رقم العملية\\s*:\\s*(?<ref>[A-Za-z0-9\\-]+)\\s*في\\s*:\\s*(?<dt>[0-9]{2}-[0-9]{2}-[0-9]{2}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "instrumentRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "counterpartyName": { "group": "cp", "transform": ["trim", "collapseWs"] },
+            "counterpartyBankName": { "group": "cpbank", "transform": ["trim", "collapseWs"] },
+            "referenceNumber": { "group": "ref", "transform": ["trim"] },
+            "occurredAt": { "group": "dt", "format": "dd-MM-yy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "credit",
+          "affectsSpend": false,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "ruleId": "baj-bill-payment-ar",
+          "priority": 520,
+          "messageType": "bill_payment",
+          "intent": "transaction",
+          "match": { "allOf": ["سداد فاتورة"] },
+          "regex": "حساب\\s*:\\s*(?<acct>[\\*x0-9]{3,})\\s*مبلغ\\s*:\\s*(?<amt>[0-9.,]+)\\s*(?<cur>[A-Za-z]{3})\\s*المفوتر\\s*:\\s*(?<biller>[^\\s]+)\\s*رقم الفاتورة\\s*:\\s*(?<inv>[A-Za-z0-9\\-]+)\\s*في\\s*:\\s*(?<dt>[0-9]{2}-[0-9]{2}-[0-9]{2}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "instrumentRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "merchant": { "group": "biller", "transform": ["trim"] },
+            "billerCode": { "group": "biller", "transform": ["trim", "upper"] },
+            "invoiceNumber": { "group": "inv", "transform": ["trim"] },
+            "occurredAt": { "group": "dt", "format": "dd-MM-yy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "ruleId": "baj-card-repayment-ar",
+          "priority": 510,
+          "messageType": "card_repayment",
+          "intent": "transaction",
+          "match": { "allOf": ["سداد بطاقة ائتمانية"] },
+          "regex": "بطاقة\\s*:\\s*(?<card>[\\*x0-9]{3,})\\s*من حساب\\s*:\\s*(?<acct>[\\*x0-9]{3,})\\s*مبلغ\\s*:\\s*(?<amt>[0-9.,]+)\\s*(?<cur>[A-Za-z]{3})\\s*في\\s*:\\s*(?<dt>[0-9]{2}-[0-9]{2}-[0-9]{2}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "instrumentRef": { "group": "card", "kind": "card", "maskPolicy": "last4" },
+            "settlementRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "occurredAt": { "group": "dt", "format": "dd-MM-yy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": false,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "ruleId": "baj-fee-ar",
+          "priority": 500,
+          "messageType": "fee",
+          "intent": "transaction",
+          "match": { "anyOf": ["رسوم وضريبة", "ضريبة قيمة مضافة", "رسوم خدمة"] },
+          "regex": "حساب\\s*:\\s*(?<acct>[\\*x0-9]{3,})\\s*مبلغ\\s*:\\s*(?<amt>[0-9.,]+)\\s*(?<cur>[A-Za-z]{3})\\s*في\\s*:\\s*(?<dt>[0-9]{2}-[0-9]{2}-[0-9]{2}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "instrumentRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "occurredAt": { "group": "dt", "format": "dd-MM-yy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "ruleId": "baj-installment-ar",
+          "priority": 490,
+          "messageType": "installment",
+          "intent": "transaction",
+          "match": { "anyOf": ["قسط تمويل", "قسط التمويل"] },
+          "regex": "حساب\\s*:\\s*(?<acct>[\\*x0-9]{3,})\\s*مبلغ\\s*:\\s*(?<amt>[0-9.,]+)\\s*(?<cur>[A-Za-z]{3})\\s*المتبقي\\s*:\\s*(?<rem>[0-9.,]+)\\s*(?<remCur>[A-Za-z]{3})\\s*في\\s*:\\s*(?<dt>[0-9]{2}-[0-9]{2}-[0-9]{2}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "remainingBalance": { "group": "rem", "transform": ["normalizeNumerals"] },
+            "remainingBalanceCurrency": { "group": "remCur", "transform": ["upper"] },
+            "instrumentRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "occurredAt": { "group": "dt", "format": "dd-MM-yy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "ruleId": "baj-account-debit-ar",
+          "priority": 100,
+          "messageType": "account_debit",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["خصم من حساب"],
+            "noneOf": ["شراء", "حوالة", "سداد", "قسط", "رسوم"]
+          },
+          "regex": "خصم من حساب\\s*:\\s*(?<acct>[\\*x0-9]{3,})\\s*مبلغ\\s*:\\s*(?<amt>[0-9.,]+)\\s*(?<cur>[A-Za-z]{3})\\s*في\\s*:\\s*(?<dt>[0-9]{2}-[0-9]{2}-[0-9]{2}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "instrumentRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "occurredAt": { "group": "dt", "format": "dd-MM-yy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        }
+      ]
+    },
+
+    {
+      "bankId": "d360",
+      "displayName": { "ar": "دي ٣٦٠", "en": "D360 Bank" },
+      "aliases": ["D360", "D360BANK"],
+      "senderPatterns": ["^(D360|D360Bank|D-360)$"],
+
+      "messageRules": [
+        {
+          "ruleId": "d360-otp",
+          "priority": 900,
+          "messageType": "otp",
+          "intent": "ignore",
+          "match": {
+            "anyOf": ["verification code", "one-time password", "OTP", "security code"]
+          }
+        },
+        {
+          "ruleId": "d360-marketing",
+          "priority": 890,
+          "messageType": "marketing",
+          "intent": "ignore",
+          "match": {
+            "anyOf": ["cashback", "terms apply", "special offer", "apply now", "enjoy up to"],
+            "noneOf": ["purchase of", "transfer of", "bill payment", "debited from", "installment"]
+          }
+        },
+        {
+          "ruleId": "d360-balance-info",
+          "priority": 880,
+          "messageType": "balance_info",
+          "intent": "ignore",
+          "match": {
+            "allOf": ["balance for account"],
+            "noneOf": ["purchase of", "transfer of", "bill payment", "debited from", "installment"]
+          }
+        },
+
+        {
+          "ruleId": "d360-online-purchase-en",
+          "priority": 560,
+          "messageType": "online_purchase",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["online purchase of"],
+            "noneOf": ["verification code"]
+          },
+          "regex": "online purchase of\\s+(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s*\\(\\s*(?<convCur>[A-Za-z]{3})\\s*(?<conv>[0-9.,]+)\\s*\\)\\s*with\\s+(?<net>[A-Za-z]+)\\s+(?<ctype>Credit|Debit|Prepaid)\\s+Card ending\\s+(?<card>[0-9]{3,})\\s*at\\s+(?<mer>.+?)\\.\\s*FX fee\\s+(?<feeCur>[A-Za-z]{3})\\s*(?<fee>[0-9.,]+)\\.\\s*Rate\\s+(?<rate>[0-9.,]+)\\.\\s*On\\s+(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "convertedAmount": { "group": "conv", "transform": ["normalizeNumerals"] },
+            "convertedCurrency": { "group": "convCur", "transform": ["upper"] },
+            "feeAmount": { "group": "fee", "transform": ["normalizeNumerals"] },
+            "feeCurrency": { "group": "feeCur", "transform": ["upper"] },
+            "exchangeRate": { "group": "rate", "transform": ["normalizeNumerals"] },
+            "merchant": { "group": "mer", "transform": ["trim", "collapseWs"] },
+            "instrumentRef": { "group": "card", "kind": "card", "maskPolicy": "last4" },
+            "instrumentRefNetwork": { "group": "net", "transform": ["lower"] },
+            "instrumentRefType": { "group": "ctype", "transform": ["lower"] },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "ruleId": "d360-pos-purchase-en",
+          "priority": 550,
+          "messageType": "pos_purchase",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["purchase of", "card ending"],
+            "noneOf": ["online purchase of", "verification code"]
+          },
+          "regex": "purchase of\\s+(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s*with\\s+(?<net>[A-Za-z]+)\\s+(?<ctype>Credit|Debit|Prepaid)\\s+Card ending\\s+(?<card>[0-9]{3,})\\s*at\\s+(?<mer>.+?)\\s*on\\s+(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "merchant": { "group": "mer", "transform": ["trim", "collapseWs"] },
+            "instrumentRef": { "group": "card", "kind": "card", "maskPolicy": "last4" },
+            "instrumentRefNetwork": { "group": "net", "transform": ["lower"] },
+            "instrumentRefType": { "group": "ctype", "transform": ["lower"] },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "ruleId": "d360-transfer-out-en",
+          "priority": 540,
+          "messageType": "transfer_out",
+          "intent": "transaction",
+          "match": { "allOf": ["outgoing transfer of"] },
+          "regex": "outgoing transfer of\\s+(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s*from account ending\\s+(?<acct>[0-9]{3,})\\s*to\\s+(?<cp>.+?)\\s*at\\s+(?<cpbank>[^.]+?)\\.\\s*Ref\\s+(?<ref>[A-Za-z0-9\\-]+)\\.\\s*On\\s+(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "instrumentRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "counterpartyName": { "group": "cp", "transform": ["trim", "collapseWs"] },
+            "counterpartyBankName": { "group": "cpbank", "transform": ["trim", "collapseWs"] },
+            "referenceNumber": { "group": "ref", "transform": ["trim"] },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "ruleId": "d360-transfer-in-en",
+          "priority": 530,
+          "messageType": "transfer_in",
+          "intent": "transaction",
+          "match": { "allOf": ["incoming transfer of"] },
+          "regex": "incoming transfer of\\s+(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s*to account ending\\s+(?<acct>[0-9]{3,})\\s*from\\s+(?<cp>.+?)\\s*at\\s+(?<cpbank>[^.]+?)\\.\\s*Ref\\s+(?<ref>[A-Za-z0-9\\-]+)\\.\\s*On\\s+(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "instrumentRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "counterpartyName": { "group": "cp", "transform": ["trim", "collapseWs"] },
+            "counterpartyBankName": { "group": "cpbank", "transform": ["trim", "collapseWs"] },
+            "referenceNumber": { "group": "ref", "transform": ["trim"] },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "credit",
+          "affectsSpend": false,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "ruleId": "d360-bill-payment-en",
+          "priority": 520,
+          "messageType": "bill_payment",
+          "intent": "transaction",
+          "match": { "allOf": ["bill payment of"] },
+          "regex": "bill payment of\\s+(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s*from account ending\\s+(?<acct>[0-9]{3,})\\.\\s*Biller\\s+(?<biller>[^\\s.]+)\\.\\s*Invoice\\s+(?<inv>[A-Za-z0-9\\-]+)\\.\\s*On\\s+(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "instrumentRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "merchant": { "group": "biller", "transform": ["trim"] },
+            "billerCode": { "group": "biller", "transform": ["trim", "upper"] },
+            "invoiceNumber": { "group": "inv", "transform": ["trim"] },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "ruleId": "d360-card-repayment-en",
+          "priority": 510,
+          "messageType": "card_repayment",
+          "intent": "transaction",
+          "match": { "allOf": ["credit card payment of"] },
+          "regex": "credit card payment of\\s+(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s*to card ending\\s+(?<card>[0-9]{3,})\\s*from account ending\\s+(?<acct>[0-9]{3,})\\.\\s*On\\s+(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "instrumentRef": { "group": "card", "kind": "card", "maskPolicy": "last4" },
+            "settlementRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": false,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "ruleId": "d360-fee-en",
+          "priority": 500,
+          "messageType": "fee",
+          "intent": "transaction",
+          "match": { "anyOf": ["service fee and vat", "service fee of", "vat of"] },
+          "regex": "of\\s+(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s*debited from account ending\\s+(?<acct>[0-9]{3,})\\.\\s*On\\s+(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "instrumentRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "ruleId": "d360-installment-en",
+          "priority": 490,
+          "messageType": "installment",
+          "intent": "transaction",
+          "match": { "anyOf": ["finance installment of", "loan installment of"] },
+          "regex": "installment of\\s+(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s*debited from account ending\\s+(?<acct>[0-9]{3,})\\.\\s*Remaining balance\\s+(?<remCur>[A-Za-z]{3})\\s*(?<rem>[0-9.,]+)\\.\\s*On\\s+(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "remainingBalance": { "group": "rem", "transform": ["normalizeNumerals"] },
+            "remainingBalanceCurrency": { "group": "remCur", "transform": ["upper"] },
+            "instrumentRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "ruleId": "d360-account-debit-en",
+          "priority": 100,
+          "messageType": "account_debit",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["debited from account ending"],
+            "noneOf": ["purchase of", "transfer of", "bill payment of", "installment of", "fee", "vat"]
+          },
+          "regex": "(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s*debited from account ending\\s+(?<acct>[0-9]{3,})\\.\\s*On\\s+(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "instrumentRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        }
+      ]
+    }
+  ]
+}

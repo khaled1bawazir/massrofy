@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'dart:async' show unawaited;
+
 import 'features/security/app_lock_controller.dart';
 import 'features/security/app_lock_state.dart';
 import 'presentation/l10n/generated/app_localizations.dart';
 import 'presentation/providers/app_providers.dart';
+import 'presentation/providers/ingestion_providers.dart';
 import 'presentation/screens/home_placeholder_screen.dart';
 import 'presentation/screens/lock_gate_screen.dart';
 import 'presentation/theme/app_theme.dart';
@@ -74,6 +77,20 @@ class _AppLockGatewayState extends ConsumerState<_AppLockGateway>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // ADR-006: tell the Kotlin side which Dart function the background
+    // WorkManager job should start, and arm the Layer-2 periodic sweep.
+    //
+    // Deferred to after the first frame because it crosses a platform
+    // channel, and `initState` runs before the binding has finished wiring
+    // one up. `unawaited` is correct rather than lazy: nothing on screen
+    // depends on the result, and a failure here degrades to "foreground
+    // sweeps only", which is a working app.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(
+        registerBackgroundIngestion(ref.read(smsPermissionServiceProvider)),
+      );
+    });
   }
 
   @override
@@ -106,6 +123,16 @@ class _AppLockGatewayState extends ConsumerState<_AppLockGateway>
         if (status == AppLockStatus.locked) {
           controller.authenticate();
         }
+        // ADR-006's permission auto-reset check: Android 11+ can revoke
+        // RECEIVE_SMS/READ_SMS on its own if the app goes unused for months.
+        // Re-reading on every foreground is what makes the AC-A1.3 warning
+        // appear at all, instead of the app silently capturing nothing.
+        ref.invalidate(smsPermissionStatusProvider);
+        // ADR-006 Layer 2's foreground trigger. See `foregroundSweepProvider`
+        // — this is currently the layer doing the real work on any wake where
+        // the app was locked, and the watermark guarantees it picks up
+        // everything since the last successful run.
+        ref.invalidate(foregroundSweepProvider);
       case AppLifecycleState.detached:
       case AppLifecycleState.hidden:
         break;
@@ -115,6 +142,20 @@ class _AppLockGatewayState extends ConsumerState<_AppLockGateway>
   @override
   Widget build(BuildContext context) {
     final bool unlocked = ref.watch(appLockControllerProvider).isUnlocked;
+
+    if (unlocked) {
+      // Watching (not reading) is what makes the sweep run on unlock as well
+      // as on resume: the provider is rebuilt the moment the database session
+      // becomes available, which is the first instant ingestion is possible
+      // at all (ADR-005 — no unwrapped key means no database to write to).
+      //
+      // The AsyncValue itself is intentionally not rendered. The result of a
+      // sweep reaches the UI through Drift streams on the ledger and the
+      // review queue, not through this future — architecture §7.5's
+      // "reactive, no polling".
+      ref.watch(foregroundSweepProvider);
+    }
+
     return unlocked ? const HomePlaceholderScreen() : const LockGateScreen();
   }
 }

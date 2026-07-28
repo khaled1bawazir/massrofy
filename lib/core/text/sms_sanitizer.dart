@@ -97,8 +97,81 @@ abstract final class SmsSanitizer {
   // finds digit runs *and* validates Luhn in one step.
   static final RegExp _digitRunPattern = RegExp('[$_digitChars]+');
 
-  // The secret-bearing keywords, English and Arabic, shared by both of the
-  // OTP patterns below so the two directions can never drift apart. Covers
+  // A PAN candidate that may be **group-separated**: two or more digit
+  // groups joined by a single space or hyphen, e.g. "4111 1111 1111 1111"
+  // or "4111-1111-1111-1111", as well as the plain contiguous run.
+  //
+  // ## Why this exists (Linear KHA-54, gap 3 — the highest-severity one)
+  //
+  // [_digitRunPattern] only ever matches a *maximal contiguous* run, so the
+  // single most common real-world way of writing a card number — in groups
+  // of four — never even reached the 13-19 length window, let alone the
+  // Luhn check. A grouped PAN therefore survived `sanitize` completely
+  // intact **and** `panRedacted` reported `false`, so the schema flag
+  // actively recorded the absence of a PAN that was sitting in the row in
+  // cleartext. That is precisely the outcome NFR-S2/NFR-C2 exist to make
+  // structurally impossible.
+  //
+  // Note this is a **widening of ADR-013's literal wording** ("Luhn-valid
+  // 13-19 digit runs"). It is recorded as an ADR amendment request rather
+  // than a silent divergence — see the PR description for this phase.
+  //
+  // Group size is `{2,}` rather than exactly 4 so that non-standard
+  // groupings (4-6-5 Amex-style, or 4-4-4-4-3 for a 19-digit PAN) are
+  // covered too. The separator class is deliberately *single* space/hyphen
+  // only: allowing runs of separators would let the pattern swallow two
+  // unrelated numbers that merely sit near each other in the sentence.
+  static final RegExp _groupedDigitRunPattern = RegExp(
+    '[$_digitChars]{2,}(?:[ -][$_digitChars]{2,})+',
+  );
+
+  // A run of digits long enough to plausibly be a secret. Used by the
+  // proximity sweep below, which redacts **every** such run inside a
+  // keyword's window rather than only the nearest one.
+  static final RegExp _secretDigitRunPattern = RegExp('[$_digitChars]{3,}');
+
+  // Just the keywords, with no digits attached — the proximity sweep locates
+  // the keyword first and then decides which digit runs are "near" it,
+  // instead of trying to express both in one pattern (which is what made the
+  // old single-shot patterns miss whenever a decoy number sat in between).
+  static final RegExp _secretKeywordPattern = RegExp(
+    '(?:$_secretKeywords)',
+    caseSensitive: false,
+  );
+
+  /// How far, in **words**, a digit run may sit from a secret-bearing
+  /// keyword and still be treated as the secret.
+  ///
+  /// KHA-54 gap 2 was caused by measuring this in *characters*: with a
+  /// 20-character bound, `"Your verification code, valid for 5 minutes, is
+  /// 903212"` redacted nothing at all — the `5` in "5 minutes" blocked the
+  /// old no-digits-allowed gap class, and the remaining distance to the live
+  /// code exceeded 20 characters. Counting words instead is stable against
+  /// exactly that kind of ordinary connecting phrase, in both English and
+  /// Arabic, and does not silently change meaning when a bank adds two words
+  /// to its template.
+  ///
+  /// Set to 12 rather than something tighter after measuring against the
+  /// longest realistic phrasings: `Your one-time password to complete your
+  /// purchase at MERCHANT is CODE` and `Your verification code, valid for 5
+  /// minutes, is CODE` both fall comfortably inside it, and a bank adding two
+  /// words to a template must not silently reopen the leak.
+  ///
+  /// The cost of the generous bound is over-redaction, and it is bounded in
+  /// turn: it can only fire in a message that contains a secret keyword at
+  /// all, and such a message is almost always classified `intent: ignore`
+  /// (OTP/marketing), whose body is discarded entirely anyway. The worst
+  /// realistic case is a transaction message that mentions a code, which is
+  /// then routed to the review queue where the user can see it — visible and
+  /// recoverable, versus a leaked live code, which is neither.
+  static const int _secretProximityWords = 12;
+
+  /// A hard character ceiling on the same window, so that a message with no
+  /// spaces at all (or a pathological one-word block) cannot turn the word
+  /// bound into "the entire message".
+  static const int _secretProximityMaxChars = 120;
+
+  // The secret-bearing keywords, English and Arabic. Covers
   // common OTP synonyms beyond the original CVV/PIN/OTP set —
   // "verification code"/"one-time password"/"access code" in English, and
   // "رمز الدخول"/"رمز التفعيل" in Arabic — since real bank OTP messages
@@ -108,66 +181,17 @@ abstract final class SmsSanitizer {
       r'CVV|CVC|PIN|OTP|one[- ]time password|verification code|access code|'
       r'رمز التحقق|رمز الدخول|رمز التفعيل|رمز|الرقم السري|كلمة المرور';
 
-  // A secret-bearing keyword, followed — somewhere in the next few
-  // characters — by the secret digits themselves. Three capture groups:
-  // (1) the keyword, (2) the connecting gap, (3) the digit run.
-  //
-  // ## Why the digit run is `{3,}` and NOT `{3,8}`
-  // A bounded upper limit leaks. With `(\d{3,8})`, the input
-  // "OTP: 123456789 is your code" matched only the first EIGHT digits and
-  // produced "OTP: [REDACTED]9" — publishing the tail of a live code. OTP
-  // lengths genuinely vary between banks (4, 5, 6, 8... ), so raising the
-  // bound just moves the leak rather than closing it. An unbounded `{3,}`
-  // is greedy, so it consumes the **entire contiguous digit run**, leaving
-  // no remainder at either end. See the 9-digit regression tests in
-  // test/core/text/sms_sanitizer_test.dart.
-  //
-  // The gap is `[^$_digitChars]{0,20}` — generous enough for a short
-  // connecting phrase ("is", "هو", a colon, a space) while, crucially,
-  // being unable to match a digit. That is what guarantees the digit run
-  // this pattern finds is genuinely adjacent to the keyword, and it also
-  // keeps the quantifier bounded, so there is no catastrophic-backtracking
-  // risk.
-  static final RegExp _keywordBeforeDigitsPattern = RegExp(
-    '($_secretKeywords)'
-    '([^$_digitChars]{0,20})'
-    '([$_digitChars]{3,})',
-    caseSensitive: false,
-  );
-
-  // The mirror image of [_keywordBeforeDigitsPattern]: the digits appear
-  // *first*, then the keyword — the ordinary phrasing of a very common
-  // Arabic OTP message shape, e.g. "١٢٣٤٥٦ هو رمز التحقق الخاص بك" ("123456
-  // is your verification code"). A pattern that only ever looks for
-  // "keyword, then digits" never matches this at all, which is precisely
-  // the OTP-under-redaction gap this closes: without this second pattern, a
-  // 6-digit OTP phrased this (extremely common) way would sail through
-  // [sanitize] completely unredacted, unless it also happened to be a
-  // Luhn-valid 13-19 digit PAN candidate (it almost never is — OTPs are
-  // typically 4-6 digits).
-  //
-  // The same unbounded-`{3,}` reasoning applies here, and this direction is
-  // where a bounded quantifier leaked from the *front*: "123456789 is your
-  // OTP" used to produce "1[REDACTED] is your OTP", because the engine gave
-  // up on matching 8 digits at offset 0 and simply restarted one character
-  // later. Greedy-and-unbounded matches the whole run from its true start.
-  // Groups: (1) the digit run, (2) the gap, (3) the keyword.
-  static final RegExp _digitsBeforeKeywordPattern = RegExp(
-    '([$_digitChars]{3,})'
-    '([^$_digitChars]{0,20})'
-    '($_secretKeywords)',
-    caseSensitive: false,
-  );
-
   /// Redacts [rawBody] and returns a [SanitizedSmsText]. This is the **only**
   /// place in the app that is allowed to see genuinely raw SMS text and turn
   /// it into something persistable.
   ///
   /// [extraRedactPatterns] lets a per-bank rule pack (ADR-007's `redact[]`
   /// list) contribute additional regexes without this class needing to know
-  /// about rule packs — parsing (P2) is not built yet in this P1 foundation,
-  /// so this parameter defaults to empty and is here so the call site
-  /// contract is already stable for when ADR-007 lands.
+  /// about rule packs. The P2 ingestion pipeline
+  /// (`lib/features/ingestion/ingestion_pipeline.dart`) now passes the
+  /// matched bank's patterns here for real; the generic path below is the
+  /// fallback for any sender whose rule pack has no `redact[]` list, and is
+  /// never a *substitute* for it.
   static SanitizedSmsText sanitize(
     String rawBody, {
     List<RegExp> extraRedactPatterns = const <RegExp>[],
@@ -185,40 +209,43 @@ abstract final class SmsSanitizer {
       return 'SA**…$last4'; // "SA**…<last4>" per ADR-013
     });
 
-    // 2) PAN candidates: maximal digit runs of length 13-19 that pass the
-    // Luhn checksum. Luhn is exactly what makes this specific, not a blunt
-    // "redact every long number" rule that would eat transaction reference
-    // numbers and defeat duplicate-detection (ADR-017).
-    text = text.replaceAllMapped(_digitRunPattern, (Match match) {
-      final String digits = match.group(0)!;
-      if (digits.length < 13 || digits.length > 19 || !_isLuhnValid(digits)) {
-        return digits; // leave untouched — not PAN-shaped
+    // 2) PAN candidates, **including group-separated ones**.
+    //
+    // Two passes, longest-form first: the grouped pattern is tried before
+    // the contiguous one so that "4111 1111 1111 1111" is consumed as a
+    // single 16-digit candidate rather than as four unrelated 4-digit runs
+    // that individually fail the length window. (KHA-54 gap 3.)
+    //
+    // Luhn is what makes this specific rather than a blunt "redact every
+    // long number" rule — the latter would eat transaction reference
+    // numbers and defeat duplicate detection (ADR-017 D2), which is a
+    // correctness regression traded for no security gain.
+    text = text.replaceAllMapped(_groupedDigitRunPattern, (Match match) {
+      final String candidate = match.group(0)!;
+      final String digits = _stripGroupSeparators(candidate);
+      if (!_isPanShaped(digits)) {
+        return candidate; // leave untouched — not PAN-shaped
       }
       panRedacted = true;
-      final String last4 = digits.substring(digits.length - 4);
-      return '****$last4';
+      return '****${digits.substring(digits.length - 4)}';
     });
 
-    // 3) CVV / PIN / OTP / password-shaped secrets, wherever the keyword
-    // (English or Arabic) appears — in **either** order relative to the
-    // digits, since real bank messages use both ("Your OTP is 123456" and
-    // "123456 هو رمز التحقق"). Running both directions is what actually
-    // closes the OTP-under-redaction gap; a single direction silently
-    // missed a whole common phrasing (see the pattern doc comments above).
+    text = text.replaceAllMapped(_digitRunPattern, (Match match) {
+      final String digits = match.group(0)!;
+      if (!_isPanShaped(digits)) {
+        return digits;
+      }
+      panRedacted = true;
+      return '****${digits.substring(digits.length - 4)}';
+    });
+
+    // 3) CVV / PIN / OTP / password-shaped secrets.
     //
-    // Both patterns capture the connecting gap as its own group, so the
-    // replacement is a straight reassembly of "everything except the digit
-    // run". (An earlier version recomputed the gap with `substring` index
-    // arithmetic over group lengths — correct, but fragile enough that it
-    // was worth removing now that the quantifiers are variable-length.)
-    // Group 3 / group 1 respectively — the digit run — is simply dropped
-    // and replaced wholesale, so no digit of it can survive.
-    text = text.replaceAllMapped(_keywordBeforeDigitsPattern, (Match match) {
-      return '${match.group(1)}${match.group(2)}[REDACTED]';
-    });
-    text = text.replaceAllMapped(_digitsBeforeKeywordPattern, (Match match) {
-      return '[REDACTED]${match.group(2)}${match.group(3)}';
-    });
+    // See [_redactSecretsNearKeywords] for why this is a proximity sweep
+    // over *every* nearby digit run rather than the two single-shot
+    // "keyword then digits" / "digits then keyword" regexes it replaced
+    // (Linear KHA-54, gaps 1 and 2).
+    text = _redactSecretsNearKeywords(text);
 
     // 4) Per-bank additional patterns from a rule pack (ADR-007), if any.
     // Each is expected to have exactly one capture group naming the secret,
@@ -232,6 +259,136 @@ abstract final class SmsSanitizer {
     }
 
     return SanitizedSmsText._(text, panRedacted);
+  }
+
+  /// Removes the single space/hyphen separators inside a grouped digit
+  /// candidate so the length window and Luhn check see the number the way
+  /// the issuer wrote it, not the way the bank's template printed it.
+  static String _stripGroupSeparators(String candidate) =>
+      candidate.replaceAll(' ', '').replaceAll('-', '');
+
+  /// ADR-013's PAN test, in one place so the contiguous and grouped passes
+  /// can never disagree about what "PAN-shaped" means.
+  static bool _isPanShaped(String digits) =>
+      digits.length >= 13 && digits.length <= 19 && _isLuhnValid(digits);
+
+  /// Destroys **every** digit run of 3+ digits that sits within
+  /// [_secretProximityWords] words of a secret-bearing keyword, in either
+  /// direction.
+  ///
+  /// ## Why a sweep, and not the two regexes this replaced
+  ///
+  /// The previous implementation used one pattern for "keyword, gap, digits"
+  /// and a mirrored one for "digits, gap, keyword". Both matched **the
+  /// nearest** digit run only, and both defined "gap" as up to 20 characters
+  /// containing *no digits*. Linear KHA-54 reproduced two consequences of
+  /// that, and both leaked a live secret in cleartext:
+  ///
+  /// 1. **A decoy wins.** `"Your OTP for account 1234 is 567890"` redacted
+  ///    the account suffix `1234` — because it was nearest — and left the
+  ///    actual code `567890` untouched. The redaction marker in the output
+  ///    made the message *look* handled.
+  /// 2. **A decoy plus distance redacts nothing.** `"Your verification code,
+  ///    valid for 5 minutes, is 903212"` matched neither direction: the `5`
+  ///    in "5 minutes" broke the no-digits gap class, and the distance from
+  ///    the keyword to the code exceeded the 20-character bound.
+  ///
+  /// The fix is to stop trying to identify *which* run is the secret — that
+  /// is not knowable from the text — and instead destroy all of them inside
+  /// the window. **Over-redaction is the correct failure mode here.** The
+  /// worst case is that a message becomes unparseable and therefore lands in
+  /// the review queue (US-A4), where the user sees it and can act; the
+  /// alternative failure mode is a live one-time code sitting in the database
+  /// forever, which is silent and unrecoverable. That is the same asymmetry
+  /// ADR-017 reasons from when it biases toward flagging over auto-removal.
+  ///
+  /// Note the deliberate consequence: an OTP/marketing message from a known
+  /// bank is classified `intent: ignore` by ADR-007 and stored **with no body
+  /// at all**, so aggressive redaction of exactly those messages costs the
+  /// product nothing. The messages this could over-redact are transaction
+  /// messages that happen to contain a secret keyword — and those are
+  /// precisely the ones where a secret would otherwise be persisted.
+  static String _redactSecretsNearKeywords(String text) {
+    final List<Match> keywords = _secretKeywordPattern
+        .allMatches(text)
+        .toList();
+    if (keywords.isEmpty) {
+      return text;
+    }
+
+    // Collect the [start, end) span of every digit run to destroy. A Set
+    // keyed by start offset would be enough, but a list of spans reads more
+    // obviously and the counts here are tiny (an SMS is <= 1600 chars).
+    final List<({int start, int end})> spans = <({int start, int end})>[];
+
+    for (final Match digitRun in _secretDigitRunPattern.allMatches(text)) {
+      final bool nearAnyKeyword = keywords.any(
+        (Match keyword) => _isWithinProximity(
+          text,
+          keywordStart: keyword.start,
+          keywordEnd: keyword.end,
+          runStart: digitRun.start,
+          runEnd: digitRun.end,
+        ),
+      );
+      if (nearAnyKeyword) {
+        spans.add((start: digitRun.start, end: digitRun.end));
+      }
+    }
+
+    if (spans.isEmpty) {
+      return text;
+    }
+
+    // Rebuild the string, replacing each span wholesale. Iterating forwards
+    // and tracking a cursor keeps every offset valid — mutating in place
+    // while indices shift underneath is the classic way this kind of code
+    // starts leaving stray digits behind.
+    final StringBuffer out = StringBuffer();
+    int cursor = 0;
+    for (final ({int start, int end}) span in spans) {
+      out.write(text.substring(cursor, span.start));
+      out.write('[REDACTED]');
+      cursor = span.end;
+    }
+    out.write(text.substring(cursor));
+    return out.toString();
+  }
+
+  /// True when the digit run at `[runStart, runEnd)` is close enough to the
+  /// keyword at `[keywordStart, keywordEnd)` to be treated as its secret.
+  ///
+  /// "Close enough" is **word count first, character count as a ceiling** —
+  /// see [_secretProximityWords] for why measuring in characters alone was
+  /// the bug.
+  static bool _isWithinProximity(
+    String text, {
+    required int keywordStart,
+    required int keywordEnd,
+    required int runStart,
+    required int runEnd,
+  }) {
+    // The text strictly between the two spans, whichever order they occur in.
+    final int gapStart = runEnd <= keywordStart ? runEnd : keywordEnd;
+    final int gapEnd = runEnd <= keywordStart ? keywordStart : runStart;
+    if (gapEnd < gapStart) {
+      return true; // overlapping — e.g. "PIN1234" with no separator at all
+    }
+
+    final String gap = text.substring(gapStart, gapEnd);
+    if (gap.length > _secretProximityMaxChars) {
+      return false;
+    }
+    // `trim().split(whitespace)` on an empty/blank gap yields [''], i.e. a
+    // length of 1, which is why the blank case is short-circuited: an
+    // adjacent run must never be pushed over the bound by counting a
+    // phantom word.
+    final String trimmed = gap.trim();
+    if (trimmed.isEmpty) {
+      return true;
+    }
+    final int words = trimmed.split(RegExp(r'\s+')).length;
+    return words <= _secretProximityWords;
   }
 
   /// The numeric value 0-9 of a single digit character, in any of the three

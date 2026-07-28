@@ -115,6 +115,12 @@ flutter:
 
   assets:
     - assets/fonts/LICENSE_OFL.txt
+    # ADR-007 — the bundled parser rule pack. Shipped as an asset (not as
+    # Dart source) precisely so that "banks are data": a template change at
+    # a bank is a JSON edit, and an *imported* pack can replace it at
+    # runtime without reinstalling the APK (the answer to risk R-11 on a
+    # side-loaded build).
+    - assets/rule_packs/sa-core.json
 
   # docs/brand.md §3.1: both families must be bundled as local assets — never
   # a Google Fonts CDN link — so the shipped (network-permission-less) app
