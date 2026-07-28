@@ -40,6 +40,39 @@ library;
 /// pass with the offsets still valid.
 typedef _Redaction = ({int start, int end, String replacement});
 
+/// How one character participates in the question *"is this keyword match a
+/// fragment of a longer word, or a word in its own right?"* — see
+/// [SmsSanitizer._isTokenBounded].
+///
+/// Declared at library level because Dart does not allow an `enum` inside a
+/// class body.
+///
+/// The point of naming the two scripts separately, rather than collapsing
+/// them into one `letter` case, is that **they do not get the same rule** —
+/// and an `enum` forces that asymmetry to be written down as an explicit,
+/// exhaustive case in [SmsSanitizer._continuesWord] rather than left implicit
+/// in what some regex happens not to cover. Anyone who later wants to give
+/// Arabic a boundary has to edit the branch where the reason it has none is
+/// documented. That is the same technique this codebase uses elsewhere to
+/// make a decision hard to reverse by accident (`ParseOutcome` is sealed with
+/// no `default:`; `DuplicateAction` has no `delete` case).
+enum _BoundaryClass {
+  /// `A-Z` / `a-z`. Deliberately ASCII: every Latin keyword in
+  /// [SmsSanitizer._secretKeywords] is ASCII, and treating an accented Latin
+  /// letter as a non-letter can only *admit* a match, which is the
+  /// over-redaction direction ADR-013 §13.6 has already chosen as safe.
+  latinLetter,
+
+  /// A letter of the Arabic script.
+  arabicLetter,
+
+  /// A digit in any of the three families [SmsSanitizer._digitChars] accepts.
+  digit,
+
+  /// Punctuation, whitespace, symbols, and every other script.
+  other,
+}
+
 class SanitizedSmsText {
   /// The redacted text. Safe to store, log (via [SafeLogger]-style redaction
   /// rules elsewhere), and display for user verification of a parse
@@ -207,6 +240,14 @@ abstract final class SmsSanitizer {
   // the keyword first and then decides which digit runs are "near" it,
   // instead of trying to express both in one pattern (which is what made the
   // old single-shot patterns miss whenever a decoy number sat in between).
+  //
+  // The pattern only *locates* candidate keywords. Whether a candidate is a
+  // word in its own right or a fragment of a longer one is decided in Dart by
+  // [_isTokenBounded] — the same "regex finds, Dart adjudicates" split this
+  // file already uses for PAN length and Luhn (see [_digitRunPattern]), and
+  // for the same reason: the adjudication is script-dependent, and a regex
+  // that expressed it would be unreviewable in a file where being wrong leaks
+  // a live secret.
   static final RegExp _secretKeywordPattern = RegExp(
     '(?:$_secretKeywords)',
     caseSensitive: false,
@@ -232,7 +273,9 @@ abstract final class SmsSanitizer {
   ///
   /// The cost of the generous bound is over-redaction, and it is bounded in
   /// turn: it can only fire in a message that contains a secret keyword at
-  /// all, and such a message is almost always classified `intent: ignore`
+  /// all — a claim that is only true because [_isTokenBounded] rejects
+  /// keywords found inside longer words, and which was false while it did not
+  /// exist — and such a message is almost always classified `intent: ignore`
   /// (OTP/marketing), whose body is discarded entirely anyway. The worst
   /// realistic case is a transaction message that mentions a code, which is
   /// then routed to the review queue where the user can see it — visible and
@@ -690,8 +733,14 @@ abstract final class SmsSanitizer {
   /// withdrew v1.0's "3-8 digits"). A 9-digit code is still a secret; an
   /// upper bound is an under-redaction bug wearing a specificity costume.
   static List<_Redaction> _findSecretSpans(String view) {
+    // Fragments of longer words are dropped here, not matched and then
+    // regretted — see [_isTokenBounded]. Without this filter the three-letter
+    // Latin keywords fire inside ordinary merchant names ("S**PIN**NEYS"),
+    // and the sweep below then destroys the amount and the card suffix of a
+    // perfectly ordinary purchase message.
     final List<Match> keywords = _secretKeywordPattern
         .allMatches(view)
+        .where((Match keyword) => _isTokenBounded(view, keyword))
         .toList();
     if (keywords.isEmpty) {
       return const <_Redaction>[];
@@ -724,6 +773,173 @@ abstract final class SmsSanitizer {
     }
 
     return spans;
+  }
+
+  /// True when [keyword] stands as its own token in [view], rather than
+  /// sitting inside a longer word that merely happens to contain its letters.
+  ///
+  /// ## The defect this exists to close
+  ///
+  /// [_secretKeywordPattern] had no boundary of any kind, so its three-letter
+  /// Latin keywords matched *inside unrelated words* — `PIN` inside
+  /// `SHOPPING`, `SHIPPING`, `SPINNEYS`, `TOPPING`, `ALPINE`, `PINEAPPLE`;
+  /// `OTP` inside `OTPARK`. Because [_findSecretSpans] then destroys **every**
+  /// 3+ digit run within [_secretProximityWords] words of the keyword, one
+  /// spurious match wrecked an entire legitimate transaction message:
+  ///
+  /// ```text
+  /// in : Purchase of SAR 137.50 at SPINNEYS RIYADH card ending 4321
+  /// out: Purchase of SAR [REDACTED].50 at SPINNEYS RIYADH card ending [REDACTED]
+  /// ```
+  ///
+  /// That is not ADR-013's "over-redaction is the safe failure mode" working
+  /// as intended — it **invalidates the bound the ADR relies on to call
+  /// over-redaction acceptable**, which is that the sweep "can only fire in a
+  /// message that contains a secret keyword at all" (see
+  /// [_secretProximityWords]). A message about a supermarket contains no
+  /// secret. And the collateral damage is not cosmetic: the amount and the
+  /// card suffix are exactly the fields ADR-017's D2/D3 duplicate detection
+  /// compares, so destroying them turns a security rule into a correctness
+  /// regression in the ledger.
+  ///
+  /// ## Why not `\b`
+  ///
+  /// Dart's `\b` is defined against `\w`, which is ASCII (`[A-Za-z0-9_]`).
+  /// Every Arabic letter is therefore a *non*-word character to it, so
+  /// `\bرمز\b` asserts a boundary between two Arabic letters and matches in
+  /// places no reader would predict. Using `\b` would fix the Latin
+  /// false positives by breaking Arabic keyword matching — trading a
+  /// correctness bug for a **leak**, in the primary locale. Hence a
+  /// script-aware check written in Dart instead.
+  ///
+  /// ## Why the two scripts get different rules
+  ///
+  /// This asymmetry is deliberate and is the substance of this method.
+  ///
+  /// Arabic is written with **clitics attached directly to the word, with no
+  /// space**: the definite article `ال`, the conjunction `و`, the
+  /// prepositions `ب`/`ل`/`ك`, and possessive suffixes such as `ـك`. So
+  /// `الرمز السري` ("the secret code") and `رمزك` ("your code") contain the
+  /// keyword `رمز` with an Arabic letter pressed against it on one side —
+  /// and both are **genuine keyword occurrences**, not fragments. They redact
+  /// correctly today, and there is a regression test pinning that. Imposing a
+  /// letter boundary on the Arabic keywords would silently stop redacting a
+  /// PIN in the product's primary language: an under-redaction bug, which is
+  /// the failure direction this whole class exists to prevent, introduced
+  /// while fixing one that merely mangles text.
+  ///
+  /// Latin has no such morphology here — `SPINNEYS` is not an inflection of
+  /// `PIN` — so a letter boundary on the Latin keywords costs nothing and
+  /// removes the entire reported false-positive class.
+  ///
+  /// ## Digits deliberately do **not** form a boundary
+  ///
+  /// `PIN1234` and `OTP445566` — keyword and code run together with no
+  /// separator — are real bank template shapes, and [_isWithinProximity]
+  /// already has a branch for exactly that overlap. Treating a digit as a
+  /// boundary blocker would stop them matching, which is again the
+  /// under-redaction direction. The reported false positives are all
+  /// *letter*-adjacent, so blocking on letters alone is sufficient to close
+  /// them.
+  ///
+  /// ## Why filtering after the match cannot hide a real keyword
+  ///
+  /// `allMatches` is non-overlapping, so rejecting a match could in principle
+  /// skip a keyword that started inside it. It cannot here: any such hidden
+  /// match would begin *within a run of Latin letters* (the rejected
+  /// keyword's own), so its own left neighbour is a Latin letter and it would
+  /// be rejected too. `OTPIN` is the worst case, and neither `OTP` nor `PIN`
+  /// is a token in it.
+  static bool _isTokenBounded(String view, Match keyword) {
+    final int start = keyword.start;
+    final int end = keyword.end;
+
+    if (start > 0 &&
+        _continuesWord(
+          edge: _boundaryClass(view.codeUnitAt(start)),
+          neighbour: _boundaryClass(view.codeUnitAt(start - 1)),
+        )) {
+      return false;
+    }
+
+    if (end < view.length &&
+        _continuesWord(
+          edge: _boundaryClass(view.codeUnitAt(end - 1)),
+          neighbour: _boundaryClass(view.codeUnitAt(end)),
+        )) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /// True when [neighbour], sitting immediately outside a keyword match whose
+  /// outermost character is [edge], means the match is a fragment of a longer
+  /// word rather than a word of its own.
+  ///
+  /// Every branch is a decision, not a fallthrough — see [_BoundaryClass] for
+  /// why this is an exhaustive `switch` rather than one boolean expression.
+  static bool _continuesWord({
+    required _BoundaryClass edge,
+    required _BoundaryClass neighbour,
+  }) => switch (edge) {
+    // `SPINNEYS`, `PINEAPPLE`, `OTPARK`. The reported defect, and the only
+    // case that blocks.
+    _BoundaryClass.latinLetter => neighbour == _BoundaryClass.latinLetter,
+
+    // **Never blocks — deliberately.** Arabic clitics attach with no space,
+    // so an adjacent Arabic letter is evidence of ordinary morphology
+    // (`الرمز`, `رمزك`), not of a fragment. Read the "Why the two scripts get
+    // different rules" section of [_isTokenBounded] before changing this: it
+    // is a leak, not a false positive, that sits on the other side of it.
+    _BoundaryClass.arabicLetter => false,
+
+    // Unreachable with the current keyword list (no keyword begins or ends
+    // with a digit), and harmless if one ever did: a keyword whose own edge
+    // is a digit has no word to be a fragment of.
+    _BoundaryClass.digit => false,
+
+    // Likewise unreachable today — `one-time password`'s hyphen is interior,
+    // never an edge.
+    _BoundaryClass.other => false,
+  };
+
+  /// Classifies one UTF-16 code unit for [_isTokenBounded].
+  ///
+  /// The Arabic ranges are the *letter* subranges of the Arabic block and its
+  /// supplements — deliberately not the whole `U+0600`-`U+06FF` block, which
+  /// also contains the Arabic-Indic digits (already classified as
+  /// [_BoundaryClass.digit] above), Arabic punctuation such as `،` and `؛`,
+  /// and the combining marks. Those are genuine word separators or
+  /// non-letters and must not be mistaken for letters.
+  ///
+  /// Written as `\uXXXX`-style hex bounds rather than literal glyphs for the
+  /// same reason as [_digitChars]: an Arabic range endpoint is not reviewable
+  /// by eye.
+  static _BoundaryClass _boundaryClass(int codeUnit) {
+    if ((codeUnit >= 0x41 && codeUnit <= 0x5A) || // A-Z
+        (codeUnit >= 0x61 && codeUnit <= 0x7A)) {
+      // a-z
+      return _BoundaryClass.latinLetter;
+    }
+    if (_digitValue(codeUnit) != null) {
+      return _BoundaryClass.digit;
+    }
+    if ((codeUnit >= 0x0620 && codeUnit <= 0x064A) || // Arabic letters
+        (codeUnit >= 0x066E && codeUnit <= 0x066F) || // dotless beh/qaf
+        (codeUnit >= 0x0671 && codeUnit <= 0x06D3) || // extended letters
+        codeUnit == 0x06D5 || // AE
+        (codeUnit >= 0x06E5 && codeUnit <= 0x06E6) || // small waw/yeh
+        (codeUnit >= 0x06EE && codeUnit <= 0x06EF) || // dal/reh with inv. v
+        (codeUnit >= 0x06FA && codeUnit <= 0x06FF) || // more extended letters
+        (codeUnit >= 0x0750 && codeUnit <= 0x077F) || // Arabic Supplement
+        (codeUnit >= 0x08A0 && codeUnit <= 0x08BF) || // Arabic Extended-A
+        (codeUnit >= 0xFB50 && codeUnit <= 0xFDFF) || // Presentation Forms-A
+        (codeUnit >= 0xFE70 && codeUnit <= 0xFEFC)) {
+      // Presentation Forms-B
+      return _BoundaryClass.arabicLetter;
+    }
+    return _BoundaryClass.other;
   }
 
   /// True when the digit run at `[runStart, runEnd)` is close enough to the

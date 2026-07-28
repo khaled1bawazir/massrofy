@@ -43,27 +43,63 @@
 /// not prevent another bank's purchase from being recorded — and on a
 /// background isolate, an uncaught exception takes the whole run down.
 ///
-/// ## The locked-database problem, stated honestly
+/// ## Background ingestion is suspended while the app is locked — **ADR-018**
 ///
-/// ADR-005 makes the app lock **cryptographic**: the DB Master Key is
-/// unwrapped only through a Keystore key with
-/// `setUserAuthenticationRequired(true)`. A background isolate woken by an
-/// SMS broadcast therefore **cannot open the database** while the app is
-/// locked, and no amount of engineering here changes that — it is the
-/// security property working as designed.
+/// This section used to describe an unresolved ADR gap. It is resolved:
+/// `docs/architecture.md` **ADR-018** (architecture v1.1, resolving KHA-56)
+/// ratified the behaviour below as the design. It is not a stub, not a
+/// placeholder, and not waiting on anybody.
 ///
-/// ADR-006 does not address this interaction (it assumes the worker can
-/// write). Rather than invent a resolution, this pipeline takes the only
-/// option that loses nothing: **if the database cannot be opened, the run is
-/// a no-op and the watermark is not advanced.** The messages are picked up on
-/// the next run that *can* open it — the next unlock, or the foreground
-/// sweep. Correctness is preserved; the cost is latency, and only while the
-/// app is locked.
+/// **The conflict ADR-018 settles.** ADR-005 makes the app lock
+/// *cryptographic*: the DB Master Key is unwrapped only through a Keystore
+/// key created with `setUserAuthenticationRequired(true)`, under a 5-second
+/// authentication validity window. A background isolate woken by an SMS
+/// broadcast has no user present and no recent authentication, so it
+/// **cannot open the database** — not sometimes, *never*. Since the lock
+/// grace default is 0 s, the app is locked from the moment the user leaves
+/// it, which makes the locked case the **normal** case rather than an edge
+/// one. ADR-006 assumed the worker could write; ADR-005 guarantees it cannot;
+/// v1.0 never noticed.
 ///
-/// This is recorded as an ADR gap in this phase's PR rather than being
-/// papered over. The alternatives (a second, auth-free Keystore key for a
-/// staging queue; or plaintext staging) both weaken ADR-004/ADR-005 and are
-/// the architect's call, not this file's.
+/// **What ADR-018 decided.** A background run is a no-op: it MUST NOT advance
+/// the watermark, and it MUST report *success* to WorkManager rather than
+/// failure, because retrying would burn the backoff budget on a condition
+/// only a human unlocking the phone can clear. ADR-018 explicitly rejected
+/// the alternative that would have delivered locked-state ingestion — a
+/// second Keystore key with `setUserAuthenticationRequired(false)` guarding
+/// an "ingest inbox" — on the grounds that it buys no durability (the SMS
+/// content provider is already the durable queue, which is exactly why
+/// ADR-006's receiver carries no content), buys latency no user is awake to
+/// observe, and turns "nothing in this app is readable without
+/// authentication" into a claim needing a footnote. Plaintext staging and
+/// weakening the lock were rejected outright.
+///
+/// **Read the implementation precisely.** As shipped,
+/// `runBackgroundIngestion()` in `background_entrypoint.dart` is an
+/// **unconditional** no-op — it returns success without attempting to open
+/// the database at all. It is *not* conditional on the lock state, so ADR-006
+/// Layer 1 performs zero ingestion in every case, including the unlocked one,
+/// and the wake path is the only part of Layer 1 that ships. That is a
+/// superset of what ADR-018 decision 1 requires and is strictly safe in the
+/// same way: the watermark never moves, so nothing can be lost. All actual
+/// ingestion is done by Layer 2's foreground/post-unlock sweep, which runs
+/// this identical pipeline over everything since the watermark.
+///
+/// **What this costs, stated as the architecture states it.** Latency, not
+/// data. NFR-R1's "single-digit seconds from SMS arrival" now holds only
+/// while the app is unlocked; while locked it becomes "single-digit seconds
+/// **from unlock**, with nothing lost and nothing silently reordered". That
+/// is a genuine reduction against the PRD's wording, and it is on the record
+/// as **H-13** rather than quietly reinterpreted.
+///
+/// **Two consequences that are easy to get wrong.** ADR-006's Layer 3
+/// foreground service is re-scoped, not a workaround: it keeps the *wake
+/// signal* alive on hostile OEMs but **cannot open the database either**, so
+/// it MUST NOT be made default-on on NFR-R1 grounds (H-6). And ADR-018
+/// decision 3 makes a post-unlock sweep part of the unlock transition, with
+/// the home screen showing an explicit "updating" state — a stale month total
+/// rendered confidently as final is worse than an honest spinner, for a
+/// product whose success criterion is that the user trusts the numbers.
 library;
 
 import '../../core/logging/log_event.dart';

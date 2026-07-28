@@ -103,26 +103,45 @@ void massrofyIngestEntrypoint() {
 /// watermark has not moved. Reporting failure here would be technically
 /// accurate and practically wrong.
 Future<bool> runBackgroundIngestion() async {
-  // ## Why this is a documented stub rather than a wired-up pipeline
+  // ## This no-op is the ratified design (ADR-018), not a stub
   //
-  // Everything it would call already exists and is tested:
-  // `IngestionPipeline.runIncremental()` (this directory),
-  // `AndroidSmsSource` (`data/sms/`), `RulePackMessageParser`
-  // (`features/parsing/`). What is missing is not code — it is a **decision**:
-  // how a background isolate is supposed to obtain the DB Master Key when
-  // ADR-004 deliberately made that key require user authentication.
+  // ADR-018 decision 1 names this function and this file directly: *"a no-op
+  // ... This is the design, not a stub. It MUST NOT advance the watermark,
+  // and it MUST report success to WorkManager rather than failure."* This
+  // comment cites that ADR, replacing the earlier text that raised the
+  // situation as an open ADR gap — the gap is closed (KHA-56, architecture
+  // v1.1).
   //
-  // Composing the pipeline here today would mean either (a) it throws on
-  // every real background wake, which is a worse outcome than an honest
-  // no-op, or (b) inventing an auth-free key path — a security decision that
-  // belongs to the solution-architect and to an ADR amendment, not to this
-  // file.
+  // **Why there is nothing to compose here.** ADR-005 unwraps the DB Master
+  // Key through a Keystore key with `setUserAuthenticationRequired(true)` and
+  // a 5-second authentication validity window. A background isolate has no
+  // user present, so it can never unwrap that key. The pieces this function
+  // would otherwise wire together all exist and are tested —
+  // `IngestionPipeline.runIncremental()`, `AndroidSmsSource` (`data/sms/`),
+  // `RulePackMessageParser` (`features/parsing/`) — but composing them here
+  // would only produce a call that throws on every real background wake.
+  // ADR-018 considered and rejected the alternatives (an auth-free "ingest
+  // inbox" key, plaintext staging, widening the grace window, leaning on a
+  // foreground service) in its options table; the short version is that each
+  // creates a second, weaker copy of the user's financial data to buy latency
+  // nobody is awake to observe.
   //
-  // So the wiring stops at a clearly-labelled boundary, the ADR gap is raised
-  // explicitly in this phase's PR, and **the product is still correct in the
-  // meantime**: the Layer-2 foreground sweep runs the identical pipeline the
-  // moment the user opens the app, and the watermark guarantees it picks up
-  // everything that arrived while the app was locked. What is lost is
-  // latency, not data.
+  // **This is unconditional, and deliberately so.** It does not test the lock
+  // state and does not attempt to open the database. ADR-018 decision 1 is
+  // phrased as "a no-op when the database cannot be opened"; returning
+  // unconditionally is a superset of that and is safe for the same single
+  // reason — **the watermark does not move**, so ADR-006's Layer-2 sweep
+  // re-reads every message that arrived since it, the moment the app is next
+  // opened. The consequence, stated plainly rather than buried: ADR-006
+  // Layer 1 contributes zero ingestion in *every* case, not only while
+  // locked. What ships from Layer 1 is the wake path.
+  //
+  // **Returning `true`, not `false`** — see this function's doc comment.
+  //
+  // **Not yet implemented from ADR-018:** decision 2's `ingest.skipped.locked`
+  // diagnostic event (counts only, ADR-015) for the parser-health panel. It
+  // is the evidence the human would need if H-13 is ever revisited. Flagged
+  // here rather than silently omitted; it belongs with the diagnostics screen
+  // phase, not this file.
   return true;
 }
