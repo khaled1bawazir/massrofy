@@ -14,6 +14,93 @@ KHA-64 first half), PR #11, head `51bb730`. See `docs/test-plan.md` §1a, §6a a
 
 ## Summary
 
+### Pass 9 (PR #41, P5a — home dashboard, transaction list, bank/instrument screens, and the three P5-entry-gate High defects)
+
+**Nothing found that blocks merge. Verdict: `QA: PASS 41`.** Head `d9fac9e`.
+Scope: KHA-35, KHA-36, KHA-113, KHA-114, KHA-115.
+
+**This is the PR that makes the app usable end to end for a new user, so the
+question that got the most attention was the plainest one: would a real fresh
+install actually work?** It would. The chain that was broken — nothing in `lib/`
+called `SmsPermissionService.request()`, so a fresh install never activated —
+is now closed at both ends: the onboarding gate calls it, and (verified
+separately, because nothing tested it) the foreground sweep converts a granted
+permission into a ledger *however* the permission arrived, including the
+out-of-band Android-Settings grant a human hit in practice.
+
+All four engineer-claimed gates were **re-measured on `d9fac9e`** rather than
+cited: format clean (234 files, 0 changed), analyze clean, **1434 pass / 3 skip /
+0 fail**, Flutter floor satisfied. See `docs/test-plan.md` §7g.1.
+
+**Two claims were checked by mutation rather than by reading, and both mutations
+found something:**
+
+1. **NFR-A6's generated sweep does not cover what its doc comment says it does.**
+   Removing `transfers: transfers` from `BankTreeBuilder._nodeFor` — the change
+   that makes every internal transfer count as spend at the sending bank, which
+   `LedgerTotals.report`'s own doc calls *"the most plausible way to reintroduce
+   AC-B11.1 as a bug"* — leaves `totals_reconciliation_test.dart` **passing
+   5/5**. The shipped behaviour is correct; the test simply cannot see it,
+   because its generator emits only `posPurchase`/`refund` in `SAR`. Recorded as
+   **G-QA-41-1** and **closed in this pass** by probes A1–A3.
+2. **NFR-S3's regression test is not load-bearing.** Commenting out
+   `_collapseToLockGate()` in `lib/app.dart` leaves
+   `p5a_lock_collapses_stack_test.dart` **passing 2/2**, because that test
+   re-implements the collapse inside the test file and drives the copy. Filed as
+   **D-QA-41-1** (low). QA's probe C1 pumps the real `MassrofyApp` and does fail
+   on the mutation.
+
+**Nine QA probes** (`test/security/qa_pr41_probe_test.dart`), all passing on
+`d9fac9e`, zero production diff:
+
+| Probe | What it attacks | Result |
+|---|---|---|
+| A1 | internal transfer split across **two banks** — the slicing trap | chain exact; transfer excluded from both bank totals and the period total |
+| A2 | additivity **under currency conversion**, incl. the "N not converted" counts | exact; counts reconcile at both levels |
+| A3 | 200 generated ledgers, different seed, 9 debit types + 3 credit types + 3 currencies + fees + cash + transfer pairs | chain holds every run |
+| A4 | **business oracle** — 17-transaction realistic month recomputed by an independent fold and a hand-written literal | `5,436.55 SAR` exactly; drill-down `5,376.55`, i.e. −60.00 cash, as designed |
+| A5 | a **candidate** transfer must keep counting (the deliberate over-statement bias, risk R-7) | counts and flags — a future "fix" that excluded it would now fail |
+| B1 | permission granted **outside the app** (Android Settings), rationale screen bypassed | sweep runs, 3 inbox messages → 3 transactions |
+| B2 | control: permission denied | sweep null, nothing written |
+| B3 | granted later + the resume handler's two `invalidate` calls | import starts on the very next sweep, no relaunch |
+| C1 | NFR-S3 on the **real** `MassrofyApp`, not a copy | pushed route with a figure on it is gone after a lock |
+
+**Also verified rather than accepted:** the KHA-115 diagnosis is genuinely the
+SDK's `persist = persist ?? action != null`, and QA grepped `lib/` independently
+— the four other `showSnackBar` call sites carry **no action**, so none of them
+can persist, and nothing slipped past the new `source_hygiene_test` guard. The
+hero-tag fix is real (`fab.home` / `fab.transactionList`). The NFR-U4 greyscale
+test is a real negative-control test, not a token check. `KHA-37` genuinely
+exists and owns the deferred Reports tab, and `KHA-38` genuinely owns AC-E5.3;
+neither is silently dropped scope.
+
+**The app was RUN, on a device, as a new user — and the fresh-install journey
+works.** Debug APK from `d9fac9e` on the `massrofy_test` AVD (API 35) after
+`pm clear`, with both SMS permissions confirmed `granted=false` first. Fourteen
+journeys `RUNTIME-VERIFIED`, sixteen screenshots in
+`docs/evidence/qa-pr41/`. The two that matter most:
+
+- **KHA-113's fix works end to end.** Fresh install → lock gate → **S-02
+  rationale** → the real OS dialog → granted → Home. Then two rule-pack-matching
+  Arabic BAJ messages became a ledger, and Home showed **`−972.40 SAR`** — which
+  is exactly `312.40 + 660.00`, the hand-computed sum of what was seeded. Deleting
+  the 660.00 row moved it to **`−312.40 SAR`** (`972.40 − 660.00`) and the Banks
+  screen agreed to the halala (`Bank Aljazira · −312.40 SAR`). **NFR-A6's chain
+  and AC-E1.2 verified on hardware, not only in tests.**
+- **KHA-114's fix works, including its undisclosed half.** S-11 offers Edit and
+  Delete; Delete raises AC-B6.2's confirmation; and after confirming, the row
+  **stays on screen** with the deleted banner and a Restore button — the
+  `watchById` change, which is the part that was never filed.
+
+**Two things the walk found that no test could**, both filed, neither blocking:
+**KHA-122** (Medium, Epic A — an SMS arriving while the app is *open* is not
+ingested until the next foreground cycle, so AC-A1.1's *"without any user
+action"* does not hold on a device; `requestImmediateSweep()` has no caller) and
+**KHA-123** (Low — S-11 reads *"SMS · Unknown bank"* because `bankDisplayName`
+has no production caller, the fifth omitted-optional-parameter on that screen).
+
+Five observations recorded below (O-QA-41-1..5), none blocking.
+
 ### Pass 8 (PR #34, P4b — the categorization UI + ADR-008 v1.4 code fix)
 
 **No defect was found that blocks merge. Verdict: `QA: PASS 34`.** Head
@@ -454,6 +541,43 @@ for what did surface, correctly classified as risks and gaps rather than defects
 *(Convention: ID, title, severity, steps to reproduce with synthetic — never real
 — data per NFR-M3, expected vs. actual, story/AC broken, linked Linear issue.)*
 
+### Pass 9 (PR #41, P5a), head `d9fac9e`
+
+#### D-QA-41-1 — NFR-S3's lock-collapse regression test drives a copy of the production logic, so it cannot catch the regression it was written for
+
+**Severity: LOW.** The shipped code is **correct** — probe C1 confirms the real
+`MassrofyApp` collapses the stack on lock. What is wrong is the *test*, which
+gives a security NFR the appearance of protection it does not have. Filed
+because the next person to touch `app.dart` will reasonably believe a green
+suite means NFR-S3 is still held.
+
+**Steps to reproduce**
+
+1. In `lib/app.dart`, comment out the `_collapseToLockGate();` call inside
+   `_AppLockGatewayState.build`'s `ref.listen` callback.
+2. `flutter test test/widget/p5a_lock_collapses_stack_test.dart`
+
+**Expected:** at least one test fails — the file's own header says it exists to
+pin *"the gateway therefore collapses the stack on every lock."*
+
+**Actual:** `00:03 +2: All tests passed!`
+
+**Root cause.** The test declares its own `_Gateway`/`_GatewayState` with its own
+copy of the `popUntil((route) => route.isFirst)` post-frame callback, and pumps
+that. `_AppLockGateway` is private to `app.dart`, so the author could not
+construct it directly — but `MassrofyApp` is public and can be pumped with
+`appLockControllerProvider`, `unlockedDatabaseSessionProvider`,
+`smsPermissionServiceProvider`, `smsSourceProvider` and
+`activeRulePacksProvider` overridden. Probe C1 in
+`test/security/qa_pr41_probe_test.dart` does exactly that and **fails** on the
+mutation above with the intended message.
+
+**Broken:** none of the NFR's behaviour; its regression protection.
+**Suggested fix (mobile-engineer):** keep C1 (or fold it into
+`p5a_lock_collapses_stack_test.dart`) and delete the duplicated `_Gateway`, or
+mark the duplicate explicitly as a pattern demo so nobody reads it as coverage.
+**Linear:** KHA-121 (P5 milestone set at creation).
+
 ### Pass 6 (PR #27, P4a — KHA-30 categories + KHA-31 merchant rule store), head `10df548`
 
 **Verdict: `QA: PASS 27` — no merge-blocking defect.** Eight defects found, all
@@ -598,6 +722,125 @@ and not High.
 - **Done check:** either the noise strip runs before the digit strip (making the
   invariant true), or `of`'s doc comment stops claiming idempotence and states
   the ordering dependence instead. Probe M1 inverted in place.
+
+## Coverage gaps and observations from the pass-9 probe suite (PR #41, P5a)
+
+### G-QA-41-1 — the NFR-A6 generated sweep never emits an internal transfer, income, cash, a fee, or a non-SAR currency (closed in this pass)
+
+`test/features/ledger/totals_reconciliation_test.dart`'s doc comment claims its
+200 generated ledgers cover *"refunds outnumbering purchases, a bank with no
+instruments, an instrument with no transactions, **an internal transfer split
+across two banks**"*. The first three are covered. The fourth is not: the
+generator's type selection is
+`credit ? TransactionType.refund : TransactionType.posPurchase`, all in `SAR`.
+
+**Why it matters and not merely tidiness.** `LedgerTotals.report`'s own doc says
+of the `transfers` parameter: *"a per-instrument slice contains one leg of a
+transfer and not the other, so callers that slice must analyse the full set first
+and pass the result down; `BankTreeBuilder` does exactly that, and **getting it
+wrong is the most plausible way to reintroduce AC-B11.1 as a bug**."* That exact
+regression is invisible to the test suite as shipped — verified by mutation, see
+the pass-9 summary.
+
+**Closed in this pass**, not deferred: probes A1 (the two-bank fixture), A2 (FX
+additivity plus reconciling unconverted counts) and A3 (a richer 200-run sweep)
+all fail on the mutation and pass on `d9fac9e`. No Linear issue — the tests now
+exist and land with this PR. The engineer-owned residue is one **doc comment**
+that overstates its own generator; worth a one-line correction next time that
+file is touched, not a ticket.
+
+### O-QA-41-1 — the period total includes cash; the sum of bank totals structurally cannot
+
+`LedgerTotals.spend` counts a transaction with no instrument (US-B4 cash,
+OQ-19), and `BankTreeBuilder` has nowhere to put one. Probe A4 measures the gap
+concretely: the same 17-transaction month totals `5,436.55 SAR` on Home and
+`5,376.55 SAR` across the banks, differing by exactly the `60.00` cash row.
+
+**Not a defect at this tier, and here is the specific reason:** `BanksScreen`
+renders per-bank totals and **no grand total**, so the app never displays two
+figures that claim to agree and do not. A user who adds the rows up by hand could
+notice, and there is no line explaining cash. Worth a sentence when the Reports
+hub (KHA-37) lands, since AC-E3.2 asks for card-breakdown totals that *do* sum to
+the period total — that is where the gap becomes user-visible arithmetic rather
+than a private property. The shipped test pins the gap deliberately, which is the
+right treatment for now.
+
+### O-QA-41-2 — an out-of-band permission grant never writes `onboarding_complete`, so a later Android auto-revoke shows S-02 instead of the AC-A1.3 banner
+
+`OnboardingGate` short-circuits to the app when `permission.allowsIngestion`,
+without calling `markOnboardingComplete()`. So a user who granted SMS access in
+Android Settings before ever seeing the rationale carries
+`onboarding_complete = false` indefinitely. If Android 11+ later auto-revokes
+(ADR-006), the gate reads *"never asked"* and shows S-02 rather than AC-A1.3's
+banner-over-the-app.
+
+**Why this is an observation and not a defect:** S-02 is not a dead end — Grant
+re-raises the OS dialog and lands the user back in the app with their history
+intact — and it is arguably the *better* screen for someone who has genuinely
+never read the rationale. Ingestion is unaffected either way (probe B1).
+
+Two related, and deliberately grouped here so a future refactor sees them:
+
+- The AC-A1.3 banner on Home is gated on `permission.value != null &&
+  !allowsIngestion` — the live permission only. Its doc comment says it is
+  *"deliberately NOT shown before the user has been through onboarding at all"*,
+  but there is **no `onboardingComplete` check in the code**. Today that is
+  unreachable except through the gate's two error fall-throughs (`hasError` →
+  `AppShell`), and the copy is written to survive it: *"**Any** data you already
+  have is still intact"* claims nothing false to a user with no data. The comment
+  asserting a guard the code does not have is the part worth fixing.
+- A user who **declines** at S-04 and continues into the app also gets the
+  banner, titled *"SMS access was turned off"*. Accurate, if slightly odd
+  immediately after a decline.
+
+### O-QA-41-3 — the Flutter floor moved to `>=3.44.0`, which is very close to current stable
+
+`pubspec.yaml` raises the floor because `SnackBar.persist` must exist for
+`scoped_snack_bar.dart` to compile. Local toolchain is **3.44.8**; the floor is
+`3.44.0`, i.e. roughly one patch series of headroom. This is deliberate and
+argued in the pubspec comment (*"a build below this line would not compile rather
+than silently regressing"*), and CI tracks `stable`, so it is correct — but it
+does mean the project can no longer be built on any Flutter older than a
+very recent release. Recorded so nobody is surprised by it on a fresh machine.
+
+### O-QA-41-5 — after granting SMS access, the first-run journey lands on a red "Authentication failed. Try again."
+
+Observed on the emulator walk (`docs/evidence/qa-pr41/05-after-grant.png`), on
+the single most important journey in this PR.
+
+Sequence: S-02 → *Grant SMS access* → the OS permission activity takes focus →
+ADR-005's grace-0 policy re-locks the app on `paused` → on `resumed`,
+`app.dart` calls `controller.authenticate()` while the permission dialog is
+still up, so the `BiometricPrompt` is cancelled by the system and reported as a
+failure. The user, having just done exactly the right thing, is looking at a red
+error banner.
+
+**Not a dead end, and that is why this is an observation rather than a defect:**
+`lock_gate_screen.dart` renders a *"Use device passcode instead"* `TextButton`
+that calls `authenticate()` again, and one tap on it recovered cleanly every
+time (`docs/evidence/qa-pr41/06-home-first-real-data.png`). But the label
+describes a *fallback method* rather than the *retry* it actually is in this
+state, and the fingerprint circle beside it is decorative — QA tapped it and
+nothing happened.
+
+**Pre-existing, and P5a is only the PR that makes it reachable.** Before this
+PR the app launched no external activity, so nothing ever stole focus mid-auth.
+That is the `docs/lessons.md` expiry pattern again. Not filed as its own issue
+because the fix is a P1 lock-gate concern and the P5 milestone already carries
+enough; worth folding into whichever issue next touches `lock_gate_screen.dart`,
+as either "re-raise the prompt on resume if the last attempt was cancelled
+rather than genuinely rejected" or "label the retry as a retry".
+
+### O-QA-41-4 — a third FAB still carries Flutter's default hero tag
+
+`category_management_screen.dart:112` constructs a `FloatingActionButton` with no
+`heroTag`. It cannot collide today: it lives on its own pushed route, while the
+two FABs alive together in `AppShell`'s `IndexedStack` now carry `'fab.home'` and
+`'fab.transactionList'`. It becomes an assertion failure the moment that screen
+is moved into the shell or shown beside another default-tagged FAB — the same
+shape the PR just fixed. A one-word change if anyone is in the file.
+
+---
 
 ## Observations from the pass-7 probe suite (recorded for audit, not defects)
 
