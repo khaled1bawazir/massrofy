@@ -3,11 +3,62 @@ import 'package:drift/drift.dart';
 import '../../core/money/currency_exponents.dart';
 import '../../core/money/money.dart';
 import '../../core/money/sign_convention.dart';
+import '../../core/types/edited.dart';
 import '../db/app_database.dart';
 import '../db/tables/transaction_table.dart';
 import 'audit_log_dao.dart';
+import 'user_edited_fields.dart';
+
+export '../../core/types/edited.dart' show Edited;
+export 'user_edited_fields.dart' show TransactionField, decodeUserEditedFields;
 
 part 'transaction_dao.g.dart';
+
+/// The fields a merge will copy onto the surviving transaction.
+///
+/// **Every field here is null-means-"leave it alone".** There is no
+/// `Edited<T>` wrapper on purpose, and the asymmetry with
+/// [TransactionDao.applyUserEdit] is the point: an *edit* must be able to
+/// clear a field, because the user may be removing something wrong; a *merge*
+/// may only ever fill a gap. ADR-017 D2 says a merge "enriches" — it adds
+/// information that was missing. Letting it write null would let it delete
+/// information, which is the R-8 failure mode wearing a different hat.
+///
+/// Built by `MergePlan.between` in
+/// `lib/features/ledger/transaction_merge.dart`, which is where the policy
+/// (and its tests) live.
+final class MergeEnrichment {
+  final String? merchantRawText;
+  final String? referenceNumber;
+  final String? counterpartyName;
+  final DateTime? occurredAt;
+  final int? instrumentId;
+
+  const MergeEnrichment({
+    this.merchantRawText,
+    this.referenceNumber,
+    this.counterpartyName,
+    this.occurredAt,
+    this.instrumentId,
+  });
+
+  /// Nothing to copy — the survivor already knew everything the other row did.
+  static const MergeEnrichment none = MergeEnrichment();
+
+  /// True when this merge would change no field on the survivor. The merge is
+  /// still worth performing (it is what removes the duplicate from the total),
+  /// but the UI can describe it differently.
+  bool get isEmpty =>
+      merchantRawText == null &&
+      referenceNumber == null &&
+      counterpartyName == null &&
+      occurredAt == null &&
+      instrumentId == null;
+
+  /// No merchant, no counterparty (NFR-S4).
+  @override
+  String toString() => 'MergeEnrichment(empty: $isEmpty)';
+}
 
 /// A P1-minimal ledger DAO — see `lib/data/db/tables/transaction_table.dart`
 /// for why this table is intentionally small. Its purpose in this phase is
@@ -26,6 +77,29 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
   TransactionDao(super.attachedDatabase, this.auditLogDao);
 
   /// Creates a new transaction row and its matching `create` audit entry.
+  ///
+  /// ## KHA-79 — this method is guarded now, and that is a behaviour change
+  ///
+  /// P3b-1 settled the sign convention (`lib/core/money/sign_convention.dart`)
+  /// and guarded the two *shipping* write paths, but not this one, because it
+  /// had no production caller: it is a P1-era method whose original purpose
+  /// was to prove the audit mechanism. QA found the gap and, more to the
+  /// point, found a green test **pinning the wrong invariant** — that
+  /// `create()` accepted a negative amount and round-tripped its sign.
+  ///
+  /// P3b-2 is the phase that adds real callers reaching for exactly this
+  /// method (manual entry, the enrichment merge, transfer confirmation), so
+  /// the guard lands *before* they do rather than after. The test that pinned
+  /// the old behaviour has been rewritten to pin the rejection —
+  /// deliberately, in the same change, because "a currently-green test asserts
+  /// the opposite" is the situation in which a correct guard gets reverted by
+  /// the next person instead of the test being fixed.
+  ///
+  /// **Note for callers and test authors:** [checkMovementAmount] throws
+  /// *synchronously*, before this method's `Future` is ever constructed. A
+  /// `.catchError(...)` on the returned future will not see it, and a test
+  /// must write `expect(() => dao.create(...), throwsA(...))` rather than
+  /// `expectLater(dao.create(...), throwsA(...))`.
   Future<int> create({
     String? merchantRawText,
     required Money amount,
@@ -34,6 +108,7 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
     String? actorDetail,
     DateTime? now,
   }) {
+    checkMovementAmount(amount, context: 'create');
     final DateTime timestamp = now ?? DateTime.now();
     return transaction<int>(() async {
       final int id = await into(transactions).insert(
@@ -165,7 +240,26 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
     });
   }
 
-  /// Restores a soft-deleted transaction (US-B8.2).
+  /// Restores a soft-deleted transaction (US-B8, **AC-B8.2**).
+  ///
+  /// ## "With its full prior history intact"
+  ///
+  /// AC-B8.2 asks for the transaction back *with its history*, and the shape
+  /// of this method is what delivers that literally rather than approximately:
+  /// a soft delete never removed anything, so restoring is a single boolean
+  /// flip. No row is recreated, so the row **id is the same id**, so every
+  /// audit entry ever written against it — including the deletion — is still
+  /// addressed by `queryFor('transaction', id)` and still chained. A
+  /// delete-then-reinsert implementation would produce a new id and orphan the
+  /// entire history, which is the failure this AC is written to prevent.
+  ///
+  /// The restore itself is appended to that same history, so the record reads
+  /// created → deleted → restored, not created → (gap).
+  ///
+  /// [reads the row first] so the audit entry carries a genuine before/after
+  /// (NFR-A2) instead of the previously hard-coded `from: 'true'` — which was
+  /// a *claim* about the prior state rather than an observation of it, and
+  /// would have been a lie for any row that was not actually deleted.
   Future<void> restore({
     required int id,
     required String actor,
@@ -174,6 +268,10 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
   }) {
     final DateTime timestamp = now ?? DateTime.now();
     return transaction<void>(() async {
+      final TransactionRow existing = await (select(
+        transactions,
+      )..where((Transactions t) => t.id.equals(id))).getSingle();
+
       await (update(
         transactions,
       )..where((Transactions t) => t.id.equals(id))).write(
@@ -191,10 +289,38 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
         actor: actor,
         actorDetail: actorDetail,
         changedAt: timestamp,
-        fieldChanges: const <AuditFieldChange>[
-          AuditFieldChange(field: 'isDeleted', from: 'true', to: 'false'),
+        fieldChanges: <AuditFieldChange>[
+          AuditFieldChange(
+            field: 'isDeleted',
+            from: existing.isDeleted.toString(),
+            to: 'false',
+          ),
+          // Restoring a row that was merged away is how a user undoes a merge.
+          // Recording the pointer's removal makes that reversal explicit in
+          // the history rather than something the reader has to infer.
+          if (existing.mergedIntoId != null)
+            AuditFieldChange(
+              field: 'mergedIntoId',
+              from: existing.mergedIntoId.toString(),
+              to: null,
+            ),
         ],
       );
+
+      if (existing.mergedIntoId != null) {
+        await (update(
+          transactions,
+        )..where((Transactions t) => t.id.equals(id))).write(
+          const TransactionsCompanion(mergedIntoId: Value<int?>(null)),
+        );
+        await (update(transactions)
+              ..where((Transactions t) => t.id.equals(existing.mergedIntoId!)))
+            .write(
+              const TransactionsCompanion(
+                mergedFromTransactionId: Value<int?>(null),
+              ),
+            );
+      }
     });
   }
 
@@ -476,6 +602,540 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
         ],
       );
       return id;
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // P3b-2 — the mutation surface (KHA-26, KHA-64, KHA-78)
+  //
+  // Everything below either creates a record a person typed, or changes one
+  // that already exists. NFR-A2 applies to every one of them: the row change
+  // and its audit entry are written inside the **same** `transaction()` block,
+  // so there is no window in which a mutation exists without its history.
+  // -------------------------------------------------------------------------
+
+  /// **US-B4 — a transaction the user entered from scratch**, with no SMS
+  /// behind it. Cash spending is the motivating case (OQ-19), and it is
+  /// first-class rather than a fallback.
+  ///
+  /// ## How this differs from [insertManualCompletion], which it resembles
+  ///
+  /// [insertManualCompletion] completes a message the parser could not read:
+  /// `provenance` stays `sms` because a real message exists and NFR-A1 must
+  /// keep pointing at it. Here there is **no message at all**, so `provenance`
+  /// is `manual` and `sourceMessageId` is null. That difference is what
+  /// AC-B4.3's "Manual" badge is rendered from, and what lets AC-B1.2's
+  /// "show me the original SMS" panel honestly say there isn't one.
+  ///
+  /// The sign convention is enforced here as well as in the form, for the
+  /// reason stated on [create]: the form protects the person, the write
+  /// boundary protects the data, and neither trusts the other.
+  Future<int> insertManual({
+    required Money amount,
+    String? merchantRawText,
+    required DateTime occurredAt,
+    required String direction,
+    required String transactionType,
+    required bool affectsSpend,
+    int? instrumentId,
+    String? categoryId,
+    String? referenceNumber,
+    String? counterpartyName,
+    DateTime? now,
+  }) {
+    checkMovementAmount(amount, context: 'insertManual');
+    final DateTime timestamp = now ?? DateTime.now();
+    return transaction<int>(() async {
+      final int id = await into(transactions).insert(
+        TransactionsCompanion.insert(
+          merchantRawText: Value<String?>(merchantRawText),
+          amountAmount: amount.toCanonicalString(),
+          amountCurrency: amount.currencyCode,
+          amountMinor: _toMinorUnitsBestEffort(amount),
+          categoryId: Value<String?>(categoryId),
+          occurredAt: Value<DateTime?>(occurredAt),
+          // The user stated when it happened. Neither SMS time source would be
+          // truthful, and `received_at_fallback` would be actively wrong —
+          // there was no message to receive.
+          timeSource: const Value<String?>('user_stated'),
+          direction: Value<String>(direction),
+          transactionType: Value<String>(transactionType),
+          affectsSpend: Value<bool>(affectsSpend),
+          referenceNumber: Value<String?>(referenceNumber),
+          counterpartyName: Value<String?>(counterpartyName),
+          instrumentId: Value<int?>(instrumentId),
+          provenance: const Value<String>('manual'),
+          createdAt: Value<DateTime>(timestamp),
+          updatedAt: Value<DateTime>(timestamp),
+        ),
+      );
+
+      await auditLogDao.append(
+        entityType: 'transaction',
+        entityId: id.toString(),
+        action: 'create',
+        actor: 'user',
+        actorDetail: 'manual_entry',
+        changedAt: timestamp,
+        fieldChanges: <AuditFieldChange>[
+          AuditFieldChange(
+            field: 'amount',
+            from: null,
+            to: amount.toCanonicalString(),
+          ),
+          AuditFieldChange(
+            field: 'currency',
+            from: null,
+            to: amount.currencyCode,
+          ),
+          AuditFieldChange(
+            field: 'transactionType',
+            from: null,
+            to: transactionType,
+          ),
+          AuditFieldChange(field: 'direction', from: null, to: direction),
+          AuditFieldChange(field: 'provenance', from: null, to: 'manual'),
+          if (merchantRawText != null)
+            AuditFieldChange(
+              field: 'merchantRawText',
+              from: null,
+              to: merchantRawText,
+            ),
+        ],
+      );
+      return id;
+    });
+  }
+
+  /// **US-B5 — the user corrects a field on an existing transaction.**
+  ///
+  /// ## Two things happen here, and the second one is the important one
+  ///
+  /// 1. The named fields are written, and every actual change becomes one
+  ///    `{field, from, to}` entry in a single `update` audit row. AC-B5.2's
+  ///    *"the detail view shows both the original auto-detected value and the
+  ///    user-edited value"* is served from exactly that record — see
+  ///    `TransactionEditHistory` — rather than from a duplicate "original"
+  ///    column that could drift from it.
+  /// 2. Each changed field's name is added to `user_edited_fields`, which is
+  ///    **AC-B5.3**: no later automated write (a re-scan, or ADR-017 D2's
+  ///    enrichment merge) may overwrite it. User intent outranks the parser,
+  ///    permanently, and that has to be recorded at the moment of the edit
+  ///    because afterwards there is no way to tell a user's value from a
+  ///    parser's.
+  ///
+  /// A parameter left null means *"do not touch this field"*; passing
+  /// `Edited(null)` means *"clear it"* — see `core/types/edited.dart` for why
+  /// that distinction needs a wrapper.
+  ///
+  /// Writing a value identical to the stored one is **not** recorded as a
+  /// change and does not mark the field protected: the user opening the edit
+  /// form and pressing Save without typing has not expressed an intent about
+  /// anything, and treating that as ten permanent overrides would freeze the
+  /// row against all future enrichment for no reason.
+  Future<void> applyUserEdit({
+    required int id,
+    Edited<Money>? amount,
+    Edited<String?>? merchantRawText,
+    Edited<DateTime?>? occurredAt,
+    Edited<String>? direction,
+    Edited<String>? transactionType,
+    Edited<String?>? categoryId,
+    Edited<int?>? instrumentId,
+    Edited<String?>? referenceNumber,
+    Edited<String?>? counterpartyName,
+    String actor = 'user',
+    String? actorDetail,
+    DateTime? now,
+  }) {
+    if (amount != null) {
+      checkMovementAmount(amount.value, context: 'applyUserEdit');
+    }
+    final DateTime timestamp = now ?? DateTime.now();
+    return transaction<void>(() async {
+      final TransactionRow existing = await (select(
+        transactions,
+      )..where((Transactions t) => t.id.equals(id))).getSingle();
+
+      final List<AuditFieldChange> changes = <AuditFieldChange>[];
+      final Set<String> touched = <String>{};
+
+      // A tiny local helper so each field below is one line and the
+      // "did it actually change?" test cannot be forgotten on one of them.
+      void record(String field, String? from, String? to) {
+        if (from == to) {
+          return;
+        }
+        changes.add(AuditFieldChange(field: field, from: from, to: to));
+        touched.add(field);
+      }
+
+      TransactionsCompanion companion = TransactionsCompanion(
+        updatedAt: Value<DateTime>(timestamp),
+      );
+
+      if (amount != null) {
+        final Money next = amount.value;
+        record(
+          TransactionField.amount,
+          existing.amountAmount,
+          next.toCanonicalString(),
+        );
+        record(
+          TransactionField.currency,
+          existing.amountCurrency,
+          next.currencyCode,
+        );
+        companion = companion.copyWith(
+          amountAmount: Value<String>(next.toCanonicalString()),
+          amountCurrency: Value<String>(next.currencyCode),
+          amountMinor: Value<int>(_toMinorUnitsBestEffort(next)),
+        );
+      }
+      if (merchantRawText != null) {
+        record(
+          TransactionField.merchantRawText,
+          existing.merchantRawText,
+          merchantRawText.value,
+        );
+        companion = companion.copyWith(
+          merchantRawText: Value<String?>(merchantRawText.value),
+        );
+      }
+      if (occurredAt != null) {
+        record(
+          TransactionField.occurredAt,
+          existing.occurredAt?.toUtc().toIso8601String(),
+          occurredAt.value?.toUtc().toIso8601String(),
+        );
+        companion = companion.copyWith(
+          occurredAt: Value<DateTime?>(occurredAt.value),
+          // The user stated the time; the row must stop claiming the message
+          // did (architecture §7.4's `timeSource` vocabulary).
+          timeSource: const Value<String?>('user_stated'),
+        );
+      }
+      if (direction != null) {
+        record(TransactionField.direction, existing.direction, direction.value);
+        companion = companion.copyWith(
+          direction: Value<String>(direction.value),
+        );
+      }
+      if (transactionType != null) {
+        record(
+          TransactionField.transactionType,
+          existing.transactionType,
+          transactionType.value,
+        );
+        companion = companion.copyWith(
+          transactionType: Value<String>(transactionType.value),
+        );
+      }
+      if (categoryId != null) {
+        record(
+          TransactionField.categoryId,
+          existing.categoryId,
+          categoryId.value,
+        );
+        companion = companion.copyWith(
+          categoryId: Value<String?>(categoryId.value),
+        );
+      }
+      if (instrumentId != null) {
+        record(
+          TransactionField.instrumentId,
+          existing.instrumentId?.toString(),
+          instrumentId.value?.toString(),
+        );
+        companion = companion.copyWith(
+          instrumentId: Value<int?>(instrumentId.value),
+        );
+      }
+      if (referenceNumber != null) {
+        record(
+          TransactionField.referenceNumber,
+          existing.referenceNumber,
+          referenceNumber.value,
+        );
+        companion = companion.copyWith(
+          referenceNumber: Value<String?>(referenceNumber.value),
+        );
+      }
+      if (counterpartyName != null) {
+        record(
+          TransactionField.counterpartyName,
+          existing.counterpartyName,
+          counterpartyName.value,
+        );
+        companion = companion.copyWith(
+          counterpartyName: Value<String?>(counterpartyName.value),
+        );
+      }
+
+      if (changes.isEmpty) {
+        // Nothing changed. Writing an audit entry saying so would fill the
+        // change history with noise and make the entries that *do* record a
+        // change harder to find (US-F5 is read by a person).
+        return;
+      }
+
+      // A fresh set, not `decode(...)..addAll(...)`: the decoder returns a
+      // `const {}` for the "nobody has edited this" case, and mutating that
+      // throws. Copying is also simply the right shape here — the decoded set
+      // is a *reading* of stored state and should not be edited in place.
+      final Set<String> protectedFields = <String>{
+        ...decodeUserEditedFields(existing.userEditedFields),
+        ...touched,
+      };
+      companion = companion.copyWith(
+        userEditedFields: Value<String?>(
+          encodeUserEditedFields(protectedFields),
+        ),
+      );
+
+      await (update(
+        transactions,
+      )..where((Transactions t) => t.id.equals(id))).write(companion);
+
+      await auditLogDao.append(
+        entityType: 'transaction',
+        entityId: id.toString(),
+        action: 'update',
+        actor: actor,
+        actorDetail: actorDetail ?? 'manual_edit',
+        changedAt: timestamp,
+        fieldChanges: changes,
+      );
+    });
+  }
+
+  /// **KHA-78 / AC-B11.2 — the user rules on an internal-transfer candidate.**
+  ///
+  /// Writes `internal_transfer_state` (+ the group id) **and** the audit entry
+  /// in one database transaction, for both legs of the pair when both are
+  /// supplied. The atomicity is not ceremonial: a confirmation that persisted
+  /// on one leg only would exclude the outgoing side from spend while leaving
+  /// the incoming side classified as income, and the period figures would stop
+  /// reconciling with each other in a way nothing on screen could explain.
+  ///
+  /// [state] is an [InternalTransferState] value (`internal` | `candidate` |
+  /// `external`). Confirming writes `internal` and the pair leaves spend on
+  /// the next total; rejecting writes `external`, which the read-time detector
+  /// honours over its own derivation (`InternalTransferAnalysis.stateFor`), so
+  /// it stops re-proposing a pair the user has already dismissed.
+  ///
+  /// The decision also clears the review flag, because the thing that needed
+  /// reviewing has been reviewed — leaving it set would keep the item in the
+  /// inbox after the user acted on it, which reads as the app ignoring them.
+  Future<void> setInternalTransferDecision({
+    required List<int> transactionIds,
+    required String state,
+    String? groupId,
+    String actor = 'user',
+    String? actorDetail,
+    DateTime? now,
+  }) {
+    final DateTime timestamp = now ?? DateTime.now();
+    return transaction<void>(() async {
+      for (final int id in transactionIds) {
+        final TransactionRow existing = await (select(
+          transactions,
+        )..where((Transactions t) => t.id.equals(id))).getSingle();
+
+        await (update(
+          transactions,
+        )..where((Transactions t) => t.id.equals(id))).write(
+          TransactionsCompanion(
+            internalTransferState: Value<String?>(state),
+            internalTransferGroupId: Value<String?>(groupId),
+            // The user has ruled; the flag has served its purpose.
+            needsReview: const Value<bool>(false),
+            reviewReason: const Value<String?>(null),
+            updatedAt: Value<DateTime>(timestamp),
+          ),
+        );
+
+        await auditLogDao.append(
+          entityType: 'transaction',
+          entityId: id.toString(),
+          action: 'update',
+          actor: actor,
+          actorDetail: actorDetail ?? 'internal_transfer_decision',
+          changedAt: timestamp,
+          fieldChanges: <AuditFieldChange>[
+            AuditFieldChange(
+              field: 'internalTransferState',
+              from: existing.internalTransferState,
+              to: state,
+            ),
+            AuditFieldChange(
+              field: 'internalTransferGroupId',
+              from: existing.internalTransferGroupId,
+              to: groupId,
+            ),
+          ],
+        );
+      }
+    });
+  }
+
+  /// **ADR-017 D2's enrichment merge — KHA-64, and the single highest-risk
+  /// operation in P3.**
+  ///
+  /// Read `docs/architecture.md` risk R-8 before changing anything here:
+  /// *"silently deleting a real transaction is worse than an inflated
+  /// total"*. Three properties make that safe, and all three are structural
+  /// rather than a matter of care:
+  ///
+  ///  1. **Nothing is destroyed.** The merged-away row is soft-deleted and
+  ///     carries `mergedIntoId`; the survivor carries
+  ///     `mergedFromTransactionId`. Both source messages remain readable from
+  ///     their own rows, which is NFR-A6's traceability holding literally.
+  ///     `restore()` reverses the whole thing.
+  ///  2. **It is never automatic.** There is no caller of this method in the
+  ///     ingestion pipeline, and `DuplicateAction` still has no `delete` case,
+  ///     so dedup cannot reach it. The only caller is
+  ///     `TransactionMergeService`, which requires an explicit user action.
+  ///  3. **The enrichment is decided elsewhere and passed in.** This method
+  ///     applies [enrichment]; it does not compute it. The policy — never
+  ///     overwrite a non-null value, never overwrite a user-edited field — is
+  ///     a pure function in `features/ledger/transaction_merge.dart` with its
+  ///     own tests, because a policy tangled up with a database transaction is
+  ///     a policy nobody can exhaustively test.
+  ///
+  /// Both audit entries are written inside this one `transaction()` block, so
+  /// the merge is atomic across both rows and their history (KHA-64: *"a merge
+  /// that loses the merged-away side's history is a defect"*).
+  Future<void> mergeDuplicatePair({
+    required int survivorId,
+    required int mergedAwayId,
+    required MergeEnrichment enrichment,
+    String actor = 'user',
+    String? actorDetail,
+    DateTime? now,
+  }) {
+    final DateTime timestamp = now ?? DateTime.now();
+    return transaction<void>(() async {
+      final TransactionRow survivor = await (select(
+        transactions,
+      )..where((Transactions t) => t.id.equals(survivorId))).getSingle();
+      final TransactionRow mergedAway = await (select(
+        transactions,
+      )..where((Transactions t) => t.id.equals(mergedAwayId))).getSingle();
+
+      // --- 1. The survivor absorbs whatever it was missing -----------------
+      final List<AuditFieldChange> survivorChanges = <AuditFieldChange>[
+        AuditFieldChange(
+          field: 'mergedFromTransactionId',
+          from: survivor.mergedFromTransactionId?.toString(),
+          to: mergedAwayId.toString(),
+        ),
+        if (enrichment.merchantRawText != null)
+          AuditFieldChange(
+            field: TransactionField.merchantRawText,
+            from: survivor.merchantRawText,
+            to: enrichment.merchantRawText,
+          ),
+        if (enrichment.referenceNumber != null)
+          AuditFieldChange(
+            field: TransactionField.referenceNumber,
+            from: survivor.referenceNumber,
+            to: enrichment.referenceNumber,
+          ),
+        if (enrichment.counterpartyName != null)
+          AuditFieldChange(
+            field: TransactionField.counterpartyName,
+            from: survivor.counterpartyName,
+            to: enrichment.counterpartyName,
+          ),
+        if (enrichment.occurredAt != null)
+          AuditFieldChange(
+            field: TransactionField.occurredAt,
+            from: survivor.occurredAt?.toUtc().toIso8601String(),
+            to: enrichment.occurredAt!.toUtc().toIso8601String(),
+          ),
+        if (enrichment.instrumentId != null)
+          AuditFieldChange(
+            field: TransactionField.instrumentId,
+            from: survivor.instrumentId?.toString(),
+            to: enrichment.instrumentId.toString(),
+          ),
+      ];
+
+      await (update(
+        transactions,
+      )..where((Transactions t) => t.id.equals(survivorId))).write(
+        TransactionsCompanion(
+          merchantRawText: enrichment.merchantRawText == null
+              ? const Value<String?>.absent()
+              : Value<String?>(enrichment.merchantRawText),
+          referenceNumber: enrichment.referenceNumber == null
+              ? const Value<String?>.absent()
+              : Value<String?>(enrichment.referenceNumber),
+          counterpartyName: enrichment.counterpartyName == null
+              ? const Value<String?>.absent()
+              : Value<String?>(enrichment.counterpartyName),
+          occurredAt: enrichment.occurredAt == null
+              ? const Value<DateTime?>.absent()
+              : Value<DateTime?>(enrichment.occurredAt),
+          instrumentId: enrichment.instrumentId == null
+              ? const Value<int?>.absent()
+              : Value<int?>(enrichment.instrumentId),
+          mergedFromTransactionId: Value<int?>(mergedAwayId),
+          // The pair has been resolved by the user, so the duplicate flag that
+          // asked them to resolve it comes off.
+          needsReview: const Value<bool>(false),
+          reviewReason: const Value<String?>(null),
+          possibleDuplicateOfId: const Value<int?>(null),
+          updatedAt: Value<DateTime>(timestamp),
+        ),
+      );
+
+      await auditLogDao.append(
+        entityType: 'transaction',
+        entityId: survivorId.toString(),
+        action: 'merge',
+        actor: actor,
+        actorDetail: actorDetail ?? 'duplicate_merge_survivor',
+        changedAt: timestamp,
+        fieldChanges: survivorChanges,
+      );
+
+      // --- 2. The other row stops counting, without ceasing to exist -------
+      await (update(
+        transactions,
+      )..where((Transactions t) => t.id.equals(mergedAwayId))).write(
+        TransactionsCompanion(
+          isDeleted: const Value<bool>(true),
+          deletedAt: Value<DateTime?>(timestamp),
+          mergedIntoId: Value<int?>(survivorId),
+          needsReview: const Value<bool>(false),
+          reviewReason: const Value<String?>(null),
+          possibleDuplicateOfId: const Value<int?>(null),
+          updatedAt: Value<DateTime>(timestamp),
+        ),
+      );
+
+      await auditLogDao.append(
+        entityType: 'transaction',
+        entityId: mergedAwayId.toString(),
+        action: 'merge',
+        actor: actor,
+        actorDetail: actorDetail ?? 'duplicate_merge_absorbed',
+        changedAt: timestamp,
+        fieldChanges: <AuditFieldChange>[
+          AuditFieldChange(
+            field: 'isDeleted',
+            from: mergedAway.isDeleted.toString(),
+            to: 'true',
+          ),
+          AuditFieldChange(
+            field: 'mergedIntoId',
+            from: mergedAway.mergedIntoId?.toString(),
+            to: survivorId.toString(),
+          ),
+        ],
+      );
     });
   }
 

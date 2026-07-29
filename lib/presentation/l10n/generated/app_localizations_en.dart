@@ -530,4 +530,226 @@ class AppLocalizationsEn extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get manualEntryTitle => 'Add a transaction';
+
+  @override
+  String get manualEntryIntro =>
+      'For cash, or anything your bank did not send a message about.';
+
+  @override
+  String get manualEntrySave => 'Save transaction';
+
+  @override
+  String get manualEntryAmountLabel => 'Amount';
+
+  @override
+  String get manualEntryAmountMissing =>
+      'Enter an amount to save this transaction';
+
+  @override
+  String get manualEntryAmountUnparsable =>
+      'That is not an amount this app can read — use digits and at most one decimal separator';
+
+  @override
+  String get manualEntryCurrencyLabel => 'Currency';
+
+  @override
+  String get manualEntryCurrencyMissing =>
+      'Enter a three-letter currency code, such as SAR';
+
+  @override
+  String get manualEntryDateLabel => 'When it happened';
+
+  @override
+  String get manualEntryDateMissing => 'Choose the date and time this happened';
+
+  @override
+  String get manualEntryTypeLabel => 'What kind of transaction';
+
+  @override
+  String get manualEntryTypeMissing =>
+      'Choose what kind of transaction this was';
+
+  @override
+  String get manualEntryMerchantLabel => 'Merchant or description';
+
+  @override
+  String get manualEntrySourceLabel => 'Paid with';
+
+  @override
+  String get manualEntrySourceCash => 'Cash';
+
+  @override
+  String get manualEntryCashNote =>
+      'Cash transactions count toward your totals exactly like card ones.';
+
+  @override
+  String get manualEntrySaved => 'Transaction added';
+
+  @override
+  String get txnEditTitle => 'Edit transaction';
+
+  @override
+  String get txnEditSave => 'Save changes';
+
+  @override
+  String get txnEditSaved => 'Changes saved';
+
+  @override
+  String get txnEditNoChanges => 'Nothing was changed';
+
+  @override
+  String txnEditOriginalValue(String value) {
+    return 'Originally detected: $value';
+  }
+
+  @override
+  String get txnEditOriginalValueEmpty => 'Originally detected: nothing';
+
+  @override
+  String get txnEditProtectedFromRescan =>
+      'Your edit is kept — re-reading the message will not overwrite it';
+
+  @override
+  String get txnDeleteAction => 'Delete';
+
+  @override
+  String get txnDeleteConfirmTitle => 'Delete this transaction?';
+
+  @override
+  String get txnDeleteConfirmBody =>
+      'It will be removed from your lists and totals, and moved to Recently deleted. You can restore it from there.';
+
+  @override
+  String get txnDeleteConfirmCancel => 'Keep it';
+
+  @override
+  String get txnDeleteConfirmAccept => 'Delete';
+
+  @override
+  String get txnDeleted => 'Transaction deleted';
+
+  @override
+  String get txnDeletedUndo => 'Undo';
+
+  @override
+  String get txnRestoreAction => 'Restore';
+
+  @override
+  String get txnRestored => 'Transaction restored';
+
+  @override
+  String get recentlyDeletedTitle => 'Recently deleted';
+
+  @override
+  String get recentlyDeletedIntro =>
+      'Deleted transactions are kept here and are not counted in any total. Only Erase everything removes them permanently.';
+
+  @override
+  String get recentlyDeletedEmpty => 'Nothing has been deleted';
+
+  @override
+  String get recentlyDeletedEmptyBody =>
+      'Transactions you delete will appear here so you can bring them back.';
+
+  @override
+  String recentlyDeletedOn(String when) {
+    return 'Deleted $when';
+  }
+
+  @override
+  String recentlyDeletedMergedInto(int id) {
+    return 'Merged into transaction #$id';
+  }
+
+  @override
+  String get reviewTransferCandidateTitle =>
+      'Was this a transfer to your own account?';
+
+  @override
+  String get reviewTransferConfirm => 'Yes, my own account';
+
+  @override
+  String get reviewTransferReject => 'No, someone else';
+
+  @override
+  String get reviewTransferConfirmed =>
+      'Excluded from spend — both sides of the transfer';
+
+  @override
+  String get reviewTransferRejected =>
+      'Counted as a payment — we will not ask about this one again';
+
+  @override
+  String get reviewTransferCrossCurrency =>
+      'A transfer in another currency happened at about the same time. We cannot match them without inventing an exchange rate, so both are still counted.';
+
+  @override
+  String get reviewTransferUnresolvedInstrument =>
+      'A matching transfer arrived at about the same time, but we could not tell which account it reached, so this is still counted as spending.';
+
+  @override
+  String get reviewTransferDismiss => 'Not an internal transfer';
+
+  @override
+  String get reviewDuplicateTitle => 'Are these the same transaction?';
+
+  @override
+  String get reviewDuplicateBody =>
+      'Both are counted in your totals until you decide. Merging keeps one and files the other under Recently deleted — nothing is destroyed.';
+
+  @override
+  String get reviewDuplicateMerge => 'Yes, merge them';
+
+  @override
+  String get reviewDuplicateKeepBoth => 'No, keep both';
+
+  @override
+  String get reviewDuplicateMerged =>
+      'Merged — one transaction now, traceable to both messages';
+
+  @override
+  String get reviewDuplicateKeptBoth => 'Both kept';
+
+  @override
+  String get reviewMergeRefusedAmount =>
+      'These have different amounts, so they cannot be the same transaction';
+
+  @override
+  String get reviewMergeRefusedDirection =>
+      'One of these is money in and the other is money out, so they cannot be merged';
+
+  @override
+  String get reviewMergeRefusedType =>
+      'These are different kinds of transaction, so they cannot be merged';
+
+  @override
+  String get reviewMergeRefusedState =>
+      'One of these is no longer active, so there is nothing to merge';
+
+  @override
+  String get reviewDataProblemTitle => 'A transaction could not be read';
+
+  @override
+  String reviewDataProblemBody(int id) {
+    return 'Transaction #$id is stored with an amount this app cannot read, so it is missing from your totals. Nothing has been changed or removed. Restoring a backup is the safest way to recover it.';
+  }
+
+  @override
+  String reviewDataProblemCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count transactions are missing from your totals',
+      one: '1 transaction is missing from your totals',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String needsReviewTabTransfers(int count) {
+    return 'Transfers ($count)';
+  }
 }

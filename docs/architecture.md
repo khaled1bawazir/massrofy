@@ -2,8 +2,8 @@ STATUS: APPROVED
 
 # Massrofy — Architecture Decision Record
 
-**Version:** 1.1
-**Date:** 2026-07-28 (v1.0: 2026-07-27)
+**Version:** 1.2
+**Date:** 2026-07-29 (v1.1: 2026-07-28; v1.0: 2026-07-27)
 **Author:** solution-architect agent (phase 3 — architecture, human gate 2)
 **Sources of truth:** `docs/PRD.md` v0.3 (STATUS: Approved), `docs/build-plan.md` v1.0
 **Repository state at v1.0:** greenfield. **At v1.1:** P1 merged (`9d1487c`), P2 open as PR #2.
@@ -26,6 +26,7 @@ Every pattern in this document is established here, not inherited.
 
 | Version | Date | Change |
 |---|---|---|
+| **1.2** | 2026-07-29 | **KHA-69 decided and recorded** — the audit-chain timestamp fix is forward-only, and **option (a)** is taken: no install carrying pre-P3a audit rows exists, so no migration is written. Recorded as a dated subsection under ADR-010, with the evidence (ADR-005 gates the DB key behind the lock; KHA-75 showed the lock had never succeeded on hardware; the first real-device unlock was on `56e9cbaa`, which already contains the fix) and with the binding standing condition that the P10 staging APK goes onto a clean install. No ADR is amended; nothing else changes. |
 | **1.1** | 2026-07-28 | **ADR-018 added** — resolves the ADR-005 (cryptographic app lock) vs ADR-006 (background ingestion) conflict raised as **KHA-56**. Background ingestion is suspended while the app is locked; NFR-R1 is restated as an unlocked-window commitment. ADR-005 and ADR-006 amended in place; ADR-006's latency table replaced with one carrying a lock-state axis. **ADR-013 rewritten** to ratify and make normative the widened PAN/secret detection raised as **KHA-57** (originating defect KHA-54) — and to close two defects of the same class that KHA-54's fix did **not** close (the greedy grouped-PAN window, and grouped IBANs). §6.8, §8.1 (H-6, H-13, H-14), §8.2 (O-5, O-6), §8.3 (R-1) and §9 updated to match. |
 | 1.0 | 2026-07-27 | Initial ADR (ADR-001..ADR-017), written against a greenfield repository. |
 
@@ -640,6 +641,63 @@ plus `backup` and `erase` lifecycle events. Each entry records `actor`
 (`user` | `system_rule` | `parser` | `importer`), `actorDetail` (e.g. the `ruleId` that fired —
 satisfying AC-F5.2's "which rule applied"), timestamp, and a `fieldChanges` list of
 `{field, from, to}`.
+
+#### KHA-69 decision — the chain fix is forward-only, and that is accepted. **Option (a). Decided 2026-07-29.**
+
+**Status: DECIDED. Recorded by mobile-engineer during P3b-2, at the manager's instruction.
+Supersedes the "pick one" list in KHA-69's description.**
+
+**The defect.** `AuditLogDao.append` on `main@c6879f3` hashed the **untruncated** `changedAt`,
+while Drift persists a `DateTimeColumn` as whole Unix seconds. Every entry written with a real
+`DateTime.now()` therefore hashed a value that could never be read back, and
+`verifyChainIntegrity()` — which recomputes from the stored, truncated value — reported
+**tampering on intact history**. P3a fixed `append` (`_toWholeSecondsUtc`, applied once, before
+both the hash and the insert) but changed neither `verifyChainIntegrity()` nor `_canonicalize`.
+The fix is therefore **forward-only**: an entry written by any pre-P3a build would still
+recompute to a different hash, and because the chain is sequential the first bad entry poisons
+every entry after it — so the user would be told their *entire* history had been tampered with,
+permanently, on an otherwise fully patched install.
+
+**The decision: option (a) — confirm no install carrying pre-P3a audit rows exists, and state it
+here so the next person does not have to re-derive it.** No migration is written. Options (b) (a
+v3→v4 re-chaining migration) and (c) (a genesis marker) are **not** taken.
+
+**The evidence, which is now conclusive rather than merely plausible.** Three facts compose:
+
+1. **The DB Master Key is provisioned *behind* the app-lock gate** (ADR-005). No unlock means no
+   database, which means no `audit_entry` table, which means no audit rows. This is structural,
+   not a matter of usage patterns.
+2. **KHA-75 established that the app lock had never once succeeded on real hardware.** A correct
+   fingerprint *and* a correct device PIN both reported "auth failed", caused by a Keystore
+   channel byte-encoding defect. Nine merged PRs of product code had never been executed
+   end-to-end by a human.
+3. **The first successful real-device unlock in this app's history was on build `56e9cbaa`**,
+   confirmed 2026-07-28/29 — and that build **already contains P3a's timestamp fix.**
+
+Therefore every audit row that has ever existed on a real device was written by fixed code.
+There is nothing to re-chain.
+
+**Why (b) was rejected on principle as well as on cost.** A re-chaining migration would rewrite
+an append-only history — the precise operation the trail exists to make impossible — in order to
+repair rows that do not exist. Even done honestly (recording the re-chaining in the trail
+itself, as KHA-69 required), it would establish that this app is willing to rewrite history
+under some circumstances, which is a materially weaker property than never doing so. Paying that
+for a null set is a bad trade. **(c) remains the correct remedy if the evidence above is ever
+falsified** — it degrades verification to *"verified from &lt;date&gt;"* rather than "tampered", and
+it does not rewrite anything.
+
+**The standing condition this decision carries, and it is binding:** the **P10 staging APK must
+go onto a clean install.** If any device is ever found holding audit rows written before
+`56e9cbaa`, this decision is void and option (c) becomes the remedy. The window in which (a) is
+free closes the moment someone unlocks a pre-P3a build.
+
+**Where this is enforced and observed:**
+- The reasoning is repeated in the schema **v5** migration branch in
+  `lib/data/db/app_database.dart`, next to the code that would have carried a re-chaining step.
+- `test/data/db/schema_v5_migration_test.dart` pins the two consequences a test *can* pin: an
+  ordinary upgrade leaves `verifyChainIntegrity()` true, and the migration writes **no**
+  `audit_entry` row of its own. A test cannot prove "no device holds such a row"; it can prove
+  that we did not quietly take option (b), and it can act as the alarm if the assumption breaks.
 
 ---
 

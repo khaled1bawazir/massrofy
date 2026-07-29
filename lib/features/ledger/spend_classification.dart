@@ -99,10 +99,20 @@ final class SpendClassification {
   /// should be shown it. Drives AC-B11.2's flag.
   final bool needsReview;
 
+  /// **KHA-80** — set when [needsReview] was raised because a transfer could
+  /// not be *paired at all*, rather than because it was paired but unproven.
+  ///
+  /// Carried so the review inbox can say which of the two happened. "We found
+  /// a matching transfer in another currency" and "we could not tell which
+  /// account this reached" call for different sentences and, for the user,
+  /// different next actions.
+  final TransferReviewReason? transferReviewReason;
+
   const SpendClassification._(
     this.movementClass, {
     this.exclusionReason,
     this.needsReview = false,
+    this.transferReviewReason,
   });
 
   /// Classifies [transaction].
@@ -138,6 +148,17 @@ final class SpendClassification {
     final bool candidateTransfer =
         transferState == InternalTransferState.candidate;
 
+    // **KHA-80.** The other half of AC-B11.2's "flagged, not silently
+    // classified": a transfer the detector could not pair at all — a
+    // cross-currency near-match, or a leg whose instrument never resolved.
+    // Before this, such a transfer was counted as ordinary spend carrying no
+    // flag, which met the arithmetic half of the criterion (the figure is
+    // over-stated, never under-stated) and failed the honesty half completely.
+    final TransferReviewReason? unpairable = transfers.unpairableReasonFor(
+      transaction,
+    );
+    final bool needsTransferReview = candidateTransfer || unpairable != null;
+
     // --- 2. Direction has to be one of the two we understand --------------
     if (!MovementDirection.isKnown(transaction.direction)) {
       return const SpendClassification._(
@@ -166,7 +187,8 @@ final class SpendClassification {
       case TransactionType.transferIn:
         return SpendClassification._(
           MovementClass.income,
-          needsReview: candidateTransfer,
+          needsReview: needsTransferReview,
+          transferReviewReason: unpairable,
         );
 
       case TransactionType.withdrawal:
@@ -189,7 +211,8 @@ final class SpendClassification {
         return _spendOrVeto(
           transaction,
           isCredit: isCredit,
-          needsReview: candidateTransfer,
+          needsReview: needsTransferReview,
+          transferReviewReason: unpairable,
         );
 
       default:
@@ -214,6 +237,7 @@ final class SpendClassification {
     LedgerTransaction transaction, {
     required bool isCredit,
     required bool needsReview,
+    TransferReviewReason? transferReviewReason,
   }) {
     if (!transaction.affectsSpend) {
       return const SpendClassification._(
@@ -224,6 +248,7 @@ final class SpendClassification {
     return SpendClassification._(
       isCredit ? MovementClass.spendCredit : MovementClass.spend,
       needsReview: needsReview,
+      transferReviewReason: transferReviewReason,
     );
   }
 

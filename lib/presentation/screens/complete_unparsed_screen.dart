@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../core/money/sign_convention.dart';
 import '../../features/ingestion/review_queue.dart';
 import '../../features/ledger/bank_tree.dart';
+import '../../features/ledger/transaction_types.dart';
 import '../../features/ledger/unparsed_completion.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../theme/app_colors.dart';
@@ -127,21 +129,13 @@ class _CompleteUnparsedScreenState extends State<CompleteUnparsedScreen> {
   /// The form derives this from the chosen type rather than asking the user,
   /// because it is a property of the type, not a judgement.
   ///
-  /// **P3b-1 correction: `transfer_out` is no longer in this set.** It was,
-  /// on the reasoning that a transfer moves the user's own money — but that
-  /// is only true of an *internal* transfer, and whether a transfer is
-  /// internal is a property of the **pair**, which a form filling in one leg
-  /// cannot know (AC-B11.2, risk R-7). Keeping it here meant every
-  /// hand-completed outgoing transfer, including a genuine payment to a third
-  /// party, was silently dropped from spend. `internal_transfer.dart` decides
-  /// this now, from evidence, and flags what it cannot prove.
-  static const Set<String> _nonSpendTypes = <String>{
-    'card_repayment',
-    'transfer_in',
-    'salary_income',
-    // AC-B10.2 — cash out is not spend until the user records what it bought.
-    'withdrawal',
-  };
+  /// **P3b-2: this list now lives in `TransactionType.nonSpendTypes`** rather
+  /// than being duplicated here and in the manual-entry form (S-20). design.md
+  /// treats the two as one form, and a spend rule that existed in two copies
+  /// would eventually be corrected in one of them only — which is precisely
+  /// how `transfer_out` came to be wrongly listed here in P3a. See that
+  /// constant's doc comment for why it is absent.
+  static Set<String> get _nonSpendTypes => TransactionType.nonSpendTypes;
 
   @override
   void dispose() {
@@ -234,14 +228,9 @@ class _CompleteUnparsedScreenState extends State<CompleteUnparsedScreen> {
               // silently — and the direction is the ONLY place the sign
               // lives, so getting it wrong is getting the total wrong
               // (`lib/core/money/sign_convention.dart`).
-              _direction =
-                  const <String>{
-                    'refund',
-                    'transfer_in',
-                    'salary_income',
-                  }.contains(value)
-                  ? 'credit'
-                  : 'debit';
+              _direction = TransactionType.creditTypes.contains(value)
+                  ? MovementDirection.credit
+                  : MovementDirection.debit;
             }),
           ),
           const SizedBox(height: 16),

@@ -170,14 +170,38 @@ void main() {
       },
     );
 
-    test('a negative KWD amount preserves its sign correctly', () async {
-      final int id = await transactionDao.create(
-        amount: Money.parse('-1.500', currency: 'KWD'),
-        actor: 'user',
-      );
-      final TransactionRow row = await transactionDao.byId(id);
-      expect(row.amountMinor, -1500);
-    });
+    // ---------------------------------------------------------------------
+    // KHA-79 — this test used to read "a negative KWD amount preserves its
+    // sign correctly" and asserted `amountMinor == -1500`. It was green, and
+    // it pinned **the opposite of the app's sign convention**: that
+    // `create()` would accept, store and round-trip a negative magnitude.
+    //
+    // `lib/core/money/sign_convention.dart` is explicit that an amount is
+    // always a non-negative magnitude and the sign lives in `direction`, and
+    // P3b-1 guarded the two shipping write paths accordingly — but not
+    // `create()`, which had no production caller. P3b-2 adds callers, so the
+    // guard lands here, and this test now pins the rejection.
+    //
+    // Its real subject was always the KWD exponent, and that is covered
+    // immediately above by "KWD (3-decimal) does not truncate the third
+    // fractional digit" using a positive amount — so nothing is lost by
+    // inverting it.
+    // ---------------------------------------------------------------------
+    test(
+      'a negative KWD amount is REJECTED at the write boundary (KHA-79)',
+      () {
+        // `checkMovementAmount` throws synchronously, before the Future is
+        // constructed, so `expectLater(future, throwsA(...))` would not catch
+        // it. This form is required, not stylistic.
+        expect(
+          () => transactionDao.create(
+            amount: Money.parse('-1.500', currency: 'KWD'),
+            actor: 'user',
+          ),
+          throwsA(isA<ArgumentError>()),
+        );
+      },
+    );
   });
 
   test('the ledger row and its audit entry are written atomically — an error '

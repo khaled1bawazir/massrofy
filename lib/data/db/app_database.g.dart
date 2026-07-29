@@ -3479,6 +3479,39 @@ class $TransactionsTable extends Transactions
     type: DriftSqlType.int,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _userEditedFieldsMeta = const VerificationMeta(
+    'userEditedFields',
+  );
+  @override
+  late final GeneratedColumn<String> userEditedFields = GeneratedColumn<String>(
+    'user_edited_fields',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _mergedIntoIdMeta = const VerificationMeta(
+    'mergedIntoId',
+  );
+  @override
+  late final GeneratedColumn<int> mergedIntoId = GeneratedColumn<int>(
+    'merged_into_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _mergedFromTransactionIdMeta =
+      const VerificationMeta('mergedFromTransactionId');
+  @override
+  late final GeneratedColumn<int> mergedFromTransactionId =
+      GeneratedColumn<int>(
+        'merged_from_transaction_id',
+        aliasedName,
+        true,
+        type: DriftSqlType.int,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _isDeletedMeta = const VerificationMeta(
     'isDeleted',
   );
@@ -3572,6 +3605,9 @@ class $TransactionsTable extends Transactions
     needsReview,
     reviewReason,
     possibleDuplicateOfId,
+    userEditedFields,
+    mergedIntoId,
+    mergedFromTransactionId,
     isDeleted,
     deletedAt,
     createdAt,
@@ -3937,6 +3973,33 @@ class $TransactionsTable extends Transactions
         ),
       );
     }
+    if (data.containsKey('user_edited_fields')) {
+      context.handle(
+        _userEditedFieldsMeta,
+        userEditedFields.isAcceptableOrUnknown(
+          data['user_edited_fields']!,
+          _userEditedFieldsMeta,
+        ),
+      );
+    }
+    if (data.containsKey('merged_into_id')) {
+      context.handle(
+        _mergedIntoIdMeta,
+        mergedIntoId.isAcceptableOrUnknown(
+          data['merged_into_id']!,
+          _mergedIntoIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('merged_from_transaction_id')) {
+      context.handle(
+        _mergedFromTransactionIdMeta,
+        mergedFromTransactionId.isAcceptableOrUnknown(
+          data['merged_from_transaction_id']!,
+          _mergedFromTransactionIdMeta,
+        ),
+      );
+    }
     if (data.containsKey('is_deleted')) {
       context.handle(
         _isDeletedMeta,
@@ -4133,6 +4196,18 @@ class $TransactionsTable extends Transactions
       possibleDuplicateOfId: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}possible_duplicate_of_id'],
+      ),
+      userEditedFields: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}user_edited_fields'],
+      ),
+      mergedIntoId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}merged_into_id'],
+      ),
+      mergedFromTransactionId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}merged_from_transaction_id'],
       ),
       isDeleted: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
@@ -4344,6 +4419,51 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
   /// recoverable error.
   final int? possibleDuplicateOfId;
 
+  /// Which fields a **person** has edited, as a JSON array of field names,
+  /// e.g. `["merchantRawText","occurredAt"]`. NULL means "nobody has edited
+  /// this row".
+  ///
+  /// ## Why this is a column and not something derived from the audit trail
+  ///
+  /// The audit trail *does* record every edit, and `TransactionEditHistory`
+  /// reads it to satisfy AC-B5.2 ("show both the original auto-detected value
+  /// and the user-edited value"). But AC-B5.3 — *"a later re-scan must not
+  /// overwrite the user's edit"* — is a **precondition checked on every write
+  /// path**, including the enrichment merge (ADR-017 D2). Making a write path
+  /// scan, decode and fold the whole audit history of a row before it may
+  /// touch a field would be both slow and, much worse, easy to skip. A column
+  /// the write path reads in the same `SELECT` it already performs cannot be
+  /// skipped by accident.
+  ///
+  /// The two are not redundant: this column answers *"may I write here?"*, the
+  /// audit trail answers *"what was here before, and who changed it?"*. See
+  /// `lib/features/ledger/user_edited_fields.dart`.
+  final String? userEditedFields;
+
+  /// **ADR-017 D2's enrichment merge, non-destructive half.** Set on the row
+  /// that was merged *away*; points at the surviving transaction.
+  ///
+  /// A merged-away row is soft-deleted (`isDeleted = true`) rather than
+  /// removed, and this column is what makes that soft delete *explicable*: the
+  /// Recently Deleted list can say "merged into #41" instead of presenting it
+  /// as something the user deleted, and NFR-A6's traceability holds because
+  /// the merged-away row — including its own `sourceMessageId` — is still
+  /// there to be read.
+  ///
+  /// Risk R-8 is the reason this shape was chosen over actually deleting:
+  /// *"silently deleting a real transaction is worse than an inflated
+  /// total"*. Nothing is destroyed by a merge; one row simply stops counting.
+  final int? mergedIntoId;
+
+  /// The mirror of [mergedIntoId], set on the **surviving** row.
+  ///
+  /// Denormalised on purpose. Without it, "which messages does this figure
+  /// come from?" requires a reverse scan of the whole table for rows pointing
+  /// here — and NFR-A6 says a derived figure must be traceable to its
+  /// constituents, which is a property the *survivor* has to be able to state
+  /// about itself, not one a report has to go looking for.
+  final int? mergedFromTransactionId;
+
   /// Soft delete (US-B8) — hidden from normal lists/totals but retained and
   /// restorable. Only "erase everything" (ADR-011, P8) is a true hard
   /// delete.
@@ -4398,6 +4518,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     required this.needsReview,
     this.reviewReason,
     this.possibleDuplicateOfId,
+    this.userEditedFields,
+    this.mergedIntoId,
+    this.mergedFromTransactionId,
     required this.isDeleted,
     this.deletedAt,
     required this.createdAt,
@@ -4517,6 +4640,17 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     if (!nullToAbsent || possibleDuplicateOfId != null) {
       map['possible_duplicate_of_id'] = Variable<int>(possibleDuplicateOfId);
     }
+    if (!nullToAbsent || userEditedFields != null) {
+      map['user_edited_fields'] = Variable<String>(userEditedFields);
+    }
+    if (!nullToAbsent || mergedIntoId != null) {
+      map['merged_into_id'] = Variable<int>(mergedIntoId);
+    }
+    if (!nullToAbsent || mergedFromTransactionId != null) {
+      map['merged_from_transaction_id'] = Variable<int>(
+        mergedFromTransactionId,
+      );
+    }
     map['is_deleted'] = Variable<bool>(isDeleted);
     if (!nullToAbsent || deletedAt != null) {
       map['deleted_at'] = Variable<DateTime>(deletedAt);
@@ -4631,6 +4765,15 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       possibleDuplicateOfId: possibleDuplicateOfId == null && nullToAbsent
           ? const Value.absent()
           : Value(possibleDuplicateOfId),
+      userEditedFields: userEditedFields == null && nullToAbsent
+          ? const Value.absent()
+          : Value(userEditedFields),
+      mergedIntoId: mergedIntoId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(mergedIntoId),
+      mergedFromTransactionId: mergedFromTransactionId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(mergedFromTransactionId),
       isDeleted: Value(isDeleted),
       deletedAt: deletedAt == null && nullToAbsent
           ? const Value.absent()
@@ -4711,6 +4854,11 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       possibleDuplicateOfId: serializer.fromJson<int?>(
         json['possibleDuplicateOfId'],
       ),
+      userEditedFields: serializer.fromJson<String?>(json['userEditedFields']),
+      mergedIntoId: serializer.fromJson<int?>(json['mergedIntoId']),
+      mergedFromTransactionId: serializer.fromJson<int?>(
+        json['mergedFromTransactionId'],
+      ),
       isDeleted: serializer.fromJson<bool>(json['isDeleted']),
       deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
@@ -4774,6 +4922,11 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       'needsReview': serializer.toJson<bool>(needsReview),
       'reviewReason': serializer.toJson<String?>(reviewReason),
       'possibleDuplicateOfId': serializer.toJson<int?>(possibleDuplicateOfId),
+      'userEditedFields': serializer.toJson<String?>(userEditedFields),
+      'mergedIntoId': serializer.toJson<int?>(mergedIntoId),
+      'mergedFromTransactionId': serializer.toJson<int?>(
+        mergedFromTransactionId,
+      ),
       'isDeleted': serializer.toJson<bool>(isDeleted),
       'deletedAt': serializer.toJson<DateTime?>(deletedAt),
       'createdAt': serializer.toJson<DateTime>(createdAt),
@@ -4823,6 +4976,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     bool? needsReview,
     Value<String?> reviewReason = const Value.absent(),
     Value<int?> possibleDuplicateOfId = const Value.absent(),
+    Value<String?> userEditedFields = const Value.absent(),
+    Value<int?> mergedIntoId = const Value.absent(),
+    Value<int?> mergedFromTransactionId = const Value.absent(),
     bool? isDeleted,
     Value<DateTime?> deletedAt = const Value.absent(),
     DateTime? createdAt,
@@ -4911,6 +5067,13 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     possibleDuplicateOfId: possibleDuplicateOfId.present
         ? possibleDuplicateOfId.value
         : this.possibleDuplicateOfId,
+    userEditedFields: userEditedFields.present
+        ? userEditedFields.value
+        : this.userEditedFields,
+    mergedIntoId: mergedIntoId.present ? mergedIntoId.value : this.mergedIntoId,
+    mergedFromTransactionId: mergedFromTransactionId.present
+        ? mergedFromTransactionId.value
+        : this.mergedFromTransactionId,
     isDeleted: isDeleted ?? this.isDeleted,
     deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
     createdAt: createdAt ?? this.createdAt,
@@ -5033,6 +5196,15 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       possibleDuplicateOfId: data.possibleDuplicateOfId.present
           ? data.possibleDuplicateOfId.value
           : this.possibleDuplicateOfId,
+      userEditedFields: data.userEditedFields.present
+          ? data.userEditedFields.value
+          : this.userEditedFields,
+      mergedIntoId: data.mergedIntoId.present
+          ? data.mergedIntoId.value
+          : this.mergedIntoId,
+      mergedFromTransactionId: data.mergedFromTransactionId.present
+          ? data.mergedFromTransactionId.value
+          : this.mergedFromTransactionId,
       isDeleted: data.isDeleted.present ? data.isDeleted.value : this.isDeleted,
       deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
@@ -5084,6 +5256,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           ..write('needsReview: $needsReview, ')
           ..write('reviewReason: $reviewReason, ')
           ..write('possibleDuplicateOfId: $possibleDuplicateOfId, ')
+          ..write('userEditedFields: $userEditedFields, ')
+          ..write('mergedIntoId: $mergedIntoId, ')
+          ..write('mergedFromTransactionId: $mergedFromTransactionId, ')
           ..write('isDeleted: $isDeleted, ')
           ..write('deletedAt: $deletedAt, ')
           ..write('createdAt: $createdAt, ')
@@ -5135,6 +5310,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     needsReview,
     reviewReason,
     possibleDuplicateOfId,
+    userEditedFields,
+    mergedIntoId,
+    mergedFromTransactionId,
     isDeleted,
     deletedAt,
     createdAt,
@@ -5185,6 +5363,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           other.needsReview == this.needsReview &&
           other.reviewReason == this.reviewReason &&
           other.possibleDuplicateOfId == this.possibleDuplicateOfId &&
+          other.userEditedFields == this.userEditedFields &&
+          other.mergedIntoId == this.mergedIntoId &&
+          other.mergedFromTransactionId == this.mergedFromTransactionId &&
           other.isDeleted == this.isDeleted &&
           other.deletedAt == this.deletedAt &&
           other.createdAt == this.createdAt &&
@@ -5233,6 +5414,9 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
   final Value<bool> needsReview;
   final Value<String?> reviewReason;
   final Value<int?> possibleDuplicateOfId;
+  final Value<String?> userEditedFields;
+  final Value<int?> mergedIntoId;
+  final Value<int?> mergedFromTransactionId;
   final Value<bool> isDeleted;
   final Value<DateTime?> deletedAt;
   final Value<DateTime> createdAt;
@@ -5279,6 +5463,9 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     this.needsReview = const Value.absent(),
     this.reviewReason = const Value.absent(),
     this.possibleDuplicateOfId = const Value.absent(),
+    this.userEditedFields = const Value.absent(),
+    this.mergedIntoId = const Value.absent(),
+    this.mergedFromTransactionId = const Value.absent(),
     this.isDeleted = const Value.absent(),
     this.deletedAt = const Value.absent(),
     this.createdAt = const Value.absent(),
@@ -5326,6 +5513,9 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     this.needsReview = const Value.absent(),
     this.reviewReason = const Value.absent(),
     this.possibleDuplicateOfId = const Value.absent(),
+    this.userEditedFields = const Value.absent(),
+    this.mergedIntoId = const Value.absent(),
+    this.mergedFromTransactionId = const Value.absent(),
     this.isDeleted = const Value.absent(),
     this.deletedAt = const Value.absent(),
     this.createdAt = const Value.absent(),
@@ -5375,6 +5565,9 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     Expression<bool>? needsReview,
     Expression<String>? reviewReason,
     Expression<int>? possibleDuplicateOfId,
+    Expression<String>? userEditedFields,
+    Expression<int>? mergedIntoId,
+    Expression<int>? mergedFromTransactionId,
     Expression<bool>? isDeleted,
     Expression<DateTime>? deletedAt,
     Expression<DateTime>? createdAt,
@@ -5433,6 +5626,10 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
       if (reviewReason != null) 'review_reason': reviewReason,
       if (possibleDuplicateOfId != null)
         'possible_duplicate_of_id': possibleDuplicateOfId,
+      if (userEditedFields != null) 'user_edited_fields': userEditedFields,
+      if (mergedIntoId != null) 'merged_into_id': mergedIntoId,
+      if (mergedFromTransactionId != null)
+        'merged_from_transaction_id': mergedFromTransactionId,
       if (isDeleted != null) 'is_deleted': isDeleted,
       if (deletedAt != null) 'deleted_at': deletedAt,
       if (createdAt != null) 'created_at': createdAt,
@@ -5482,6 +5679,9 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     Value<bool>? needsReview,
     Value<String?>? reviewReason,
     Value<int?>? possibleDuplicateOfId,
+    Value<String?>? userEditedFields,
+    Value<int?>? mergedIntoId,
+    Value<int?>? mergedFromTransactionId,
     Value<bool>? isDeleted,
     Value<DateTime?>? deletedAt,
     Value<DateTime>? createdAt,
@@ -5537,6 +5737,10 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
       reviewReason: reviewReason ?? this.reviewReason,
       possibleDuplicateOfId:
           possibleDuplicateOfId ?? this.possibleDuplicateOfId,
+      userEditedFields: userEditedFields ?? this.userEditedFields,
+      mergedIntoId: mergedIntoId ?? this.mergedIntoId,
+      mergedFromTransactionId:
+          mergedFromTransactionId ?? this.mergedFromTransactionId,
       isDeleted: isDeleted ?? this.isDeleted,
       deletedAt: deletedAt ?? this.deletedAt,
       createdAt: createdAt ?? this.createdAt,
@@ -5690,6 +5894,17 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
         possibleDuplicateOfId.value,
       );
     }
+    if (userEditedFields.present) {
+      map['user_edited_fields'] = Variable<String>(userEditedFields.value);
+    }
+    if (mergedIntoId.present) {
+      map['merged_into_id'] = Variable<int>(mergedIntoId.value);
+    }
+    if (mergedFromTransactionId.present) {
+      map['merged_from_transaction_id'] = Variable<int>(
+        mergedFromTransactionId.value,
+      );
+    }
     if (isDeleted.present) {
       map['is_deleted'] = Variable<bool>(isDeleted.value);
     }
@@ -5749,6 +5964,9 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
           ..write('needsReview: $needsReview, ')
           ..write('reviewReason: $reviewReason, ')
           ..write('possibleDuplicateOfId: $possibleDuplicateOfId, ')
+          ..write('userEditedFields: $userEditedFields, ')
+          ..write('mergedIntoId: $mergedIntoId, ')
+          ..write('mergedFromTransactionId: $mergedFromTransactionId, ')
           ..write('isDeleted: $isDeleted, ')
           ..write('deletedAt: $deletedAt, ')
           ..write('createdAt: $createdAt, ')
@@ -8137,6 +8355,9 @@ typedef $$TransactionsTableCreateCompanionBuilder =
       Value<bool> needsReview,
       Value<String?> reviewReason,
       Value<int?> possibleDuplicateOfId,
+      Value<String?> userEditedFields,
+      Value<int?> mergedIntoId,
+      Value<int?> mergedFromTransactionId,
       Value<bool> isDeleted,
       Value<DateTime?> deletedAt,
       Value<DateTime> createdAt,
@@ -8185,6 +8406,9 @@ typedef $$TransactionsTableUpdateCompanionBuilder =
       Value<bool> needsReview,
       Value<String?> reviewReason,
       Value<int?> possibleDuplicateOfId,
+      Value<String?> userEditedFields,
+      Value<int?> mergedIntoId,
+      Value<int?> mergedFromTransactionId,
       Value<bool> isDeleted,
       Value<DateTime?> deletedAt,
       Value<DateTime> createdAt,
@@ -8402,6 +8626,21 @@ class $$TransactionsTableFilterComposer
 
   ColumnFilters<int> get possibleDuplicateOfId => $composableBuilder(
     column: $table.possibleDuplicateOfId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get userEditedFields => $composableBuilder(
+    column: $table.userEditedFields,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get mergedIntoId => $composableBuilder(
+    column: $table.mergedIntoId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get mergedFromTransactionId => $composableBuilder(
+    column: $table.mergedFromTransactionId,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -8640,6 +8879,21 @@ class $$TransactionsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get userEditedFields => $composableBuilder(
+    column: $table.userEditedFields,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get mergedIntoId => $composableBuilder(
+    column: $table.mergedIntoId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get mergedFromTransactionId => $composableBuilder(
+    column: $table.mergedFromTransactionId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<bool> get isDeleted => $composableBuilder(
     column: $table.isDeleted,
     builder: (column) => ColumnOrderings(column),
@@ -8867,6 +9121,21 @@ class $$TransactionsTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get userEditedFields => $composableBuilder(
+    column: $table.userEditedFields,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get mergedIntoId => $composableBuilder(
+    column: $table.mergedIntoId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get mergedFromTransactionId => $composableBuilder(
+    column: $table.mergedFromTransactionId,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<bool> get isDeleted =>
       $composableBuilder(column: $table.isDeleted, builder: (column) => column);
 
@@ -8952,6 +9221,9 @@ class $$TransactionsTableTableManager
                 Value<bool> needsReview = const Value.absent(),
                 Value<String?> reviewReason = const Value.absent(),
                 Value<int?> possibleDuplicateOfId = const Value.absent(),
+                Value<String?> userEditedFields = const Value.absent(),
+                Value<int?> mergedIntoId = const Value.absent(),
+                Value<int?> mergedFromTransactionId = const Value.absent(),
                 Value<bool> isDeleted = const Value.absent(),
                 Value<DateTime?> deletedAt = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
@@ -8998,6 +9270,9 @@ class $$TransactionsTableTableManager
                 needsReview: needsReview,
                 reviewReason: reviewReason,
                 possibleDuplicateOfId: possibleDuplicateOfId,
+                userEditedFields: userEditedFields,
+                mergedIntoId: mergedIntoId,
+                mergedFromTransactionId: mergedFromTransactionId,
                 isDeleted: isDeleted,
                 deletedAt: deletedAt,
                 createdAt: createdAt,
@@ -9046,6 +9321,9 @@ class $$TransactionsTableTableManager
                 Value<bool> needsReview = const Value.absent(),
                 Value<String?> reviewReason = const Value.absent(),
                 Value<int?> possibleDuplicateOfId = const Value.absent(),
+                Value<String?> userEditedFields = const Value.absent(),
+                Value<int?> mergedIntoId = const Value.absent(),
+                Value<int?> mergedFromTransactionId = const Value.absent(),
                 Value<bool> isDeleted = const Value.absent(),
                 Value<DateTime?> deletedAt = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
@@ -9092,6 +9370,9 @@ class $$TransactionsTableTableManager
                 needsReview: needsReview,
                 reviewReason: reviewReason,
                 possibleDuplicateOfId: possibleDuplicateOfId,
+                userEditedFields: userEditedFields,
+                mergedIntoId: mergedIntoId,
+                mergedFromTransactionId: mergedFromTransactionId,
                 isDeleted: isDeleted,
                 deletedAt: deletedAt,
                 createdAt: createdAt,

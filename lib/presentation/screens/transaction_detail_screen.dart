@@ -59,17 +59,41 @@ class TransactionDetailScreen extends StatefulWidget {
   /// persisted state is used.
   final String? internalTransferState;
 
-  /// **Not here, deliberately: Edit, Delete and Restore.** design.md's S-11
-  /// carries all three, and KHA-26 (P3b) implements them. Rendering buttons
-  /// now, wired to nothing, would be worse than their absence — a delete
-  /// affordance that silently does nothing in a banking app is a trust
-  /// failure, not a stub. The deleted-state banner *is* here, because a
-  /// transaction deleted by any path must never look live.
+  /// **KHA-26 / US-B5** — opens S-20 in edit mode. Null leaves the action off
+  /// the screen entirely; P3a's note below is why that is the right default.
+  final VoidCallback? onEdit;
+
+  /// **KHA-26 / US-B6** — soft-deletes, *after* this screen has obtained the
+  /// AC-B6.2 confirmation. The caller performs the write; this screen owns the
+  /// dialog, because the confirmation is a presentation obligation and putting
+  /// it in the service would make it skippable by any other caller.
+  final VoidCallback? onDelete;
+
+  /// **KHA-26 / US-B8** — restores a soft-deleted transaction (AC-B8.2).
+  /// Offered only when the transaction is actually deleted.
+  final VoidCallback? onRestore;
+
+  /// **Edit, Delete and Restore are absent unless a callback is supplied**,
+  /// and that rule is inherited from P3a rather than relaxed by P3b-2.
+  ///
+  /// P3a's note read: *"rendering buttons now, wired to nothing, would be
+  /// worse than their absence — a delete affordance that silently does
+  /// nothing in a banking app is a trust failure, not a stub."* That is still
+  /// true, so the actions are nullable and each one renders only when it has
+  /// somewhere to go. KHA-26 supplies all three from the ledger providers; a
+  /// context that legitimately has no write path (a future read-only preview,
+  /// say) still gets a screen with no dead buttons on it.
+  ///
+  /// The deleted-state banner is unconditional, because a transaction deleted
+  /// by any path must never look live.
   const TransactionDetailScreen({
     required this.transaction,
     this.bankDisplayName,
     this.originalMessageText,
     this.internalTransferState,
+    this.onEdit,
+    this.onDelete,
+    this.onRestore,
     super.key,
   });
 
@@ -111,8 +135,125 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
             onToggle: () =>
                 setState(() => _originalExpanded = !_originalExpanded),
           ),
+          const SizedBox(height: 20),
+          _Actions(
+            isDeleted: txn.isDeleted,
+            onEdit: widget.onEdit,
+            onRestore: widget.onRestore,
+            onDelete: widget.onDelete == null
+                ? null
+                : () => _confirmDelete(context),
+          ),
         ],
       ),
+    );
+  }
+
+  /// **AC-B6.2 — "after an explicit confirmation".**
+  ///
+  /// A modal the user has to answer, not a toast they can miss. Three details
+  /// are deliberate:
+  ///
+  ///  - The body says the transaction goes to Recently deleted and can be
+  ///    restored (AC-B8.1). Letting the user believe deletion is permanent
+  ///    would make them hesitate over correcting a wrong row, and a ledger
+  ///    people are afraid to correct drifts away from reality.
+  ///  - **Cancel is "Keep it"**, positively worded and first, so the safe
+  ///    choice is the easy one and the default focus is not destructive.
+  ///  - The dialog returning false or being dismissed writes **nothing**
+  ///    (AC-B6.2's cancel clause). `showDialog` returns null on a barrier
+  ///    dismiss, which `!= true` handles without a separate branch.
+  Future<void> _confirmDelete(BuildContext context) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: Text(l10n.txnDeleteConfirmTitle),
+        content: Text(l10n.txnDeleteConfirmBody),
+        actions: <Widget>[
+          TextButton(
+            key: const Key('txnDetail.deleteCancel'),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(l10n.txnDeleteConfirmCancel),
+          ),
+          FilledButton(
+            key: const Key('txnDetail.deleteConfirm'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(l10n.txnDeleteConfirmAccept),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      widget.onDelete?.call();
+    }
+  }
+}
+
+/// S-11's action row: Edit and Delete on a live transaction, Restore on a
+/// deleted one.
+///
+/// Delete and Restore are never both offered. A deleted transaction has
+/// nothing to delete, and showing a disabled Delete beside Restore would ask
+/// the user to work out which state they are in from a greyed-out button
+/// instead of from the banner that already says so.
+class _Actions extends StatelessWidget {
+  final bool isDeleted;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+  final VoidCallback? onRestore;
+
+  const _Actions({
+    required this.isDeleted,
+    this.onEdit,
+    this.onDelete,
+    this.onRestore,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+
+    if (isDeleted) {
+      if (onRestore == null) {
+        return const SizedBox.shrink();
+      }
+      return FilledButton.icon(
+        key: const Key('txnDetail.restore'),
+        onPressed: onRestore,
+        icon: const Icon(Icons.restore_from_trash_outlined),
+        label: Text(l10n.txnRestoreAction),
+      );
+    }
+
+    if (onEdit == null && onDelete == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Row(
+      children: <Widget>[
+        if (onEdit != null)
+          Expanded(
+            child: FilledButton.icon(
+              key: const Key('txnDetail.edit'),
+              onPressed: onEdit,
+              icon: const Icon(Icons.edit_outlined),
+              label: Text(l10n.txnEditTitle),
+            ),
+          ),
+        if (onEdit != null && onDelete != null) const SizedBox(width: 8),
+        if (onDelete != null)
+          Expanded(
+            child: OutlinedButton.icon(
+              key: const Key('txnDetail.delete'),
+              onPressed: onDelete,
+              // NFR-U4: an icon AND a word. The destructive action is never
+              // signalled by colour alone.
+              icon: const Icon(Icons.delete_outline),
+              label: Text(l10n.txnDeleteAction),
+            ),
+          ),
+      ],
     );
   }
 }

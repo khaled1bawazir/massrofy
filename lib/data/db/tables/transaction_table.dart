@@ -46,13 +46,19 @@ import 'package:drift/drift.dart';
 /// column at all — see the note on `direction` below and the full statement of
 /// the sign convention in `lib/core/money/sign_convention.dart`.
 ///
+/// **P3b-2 (KHA-26, KHA-64) adds the three columns the *mutation* surface
+/// needs** — every path by which an existing record is edited, merged or
+/// soft-deleted: `userEditedFields` (AC-B5.2/B5.3), and the merge pair
+/// `mergedIntoId` / `mergedFromTransactionId` (ADR-017 D2). See each column's
+/// own doc comment for why it exists rather than being derivable.
+///
 /// **Still not here, deliberately:** foreign keys to `Category` and
-/// `Merchant` (P4 owns those tables), `isExcluded` and the restore UX
-/// (KHA-26, P3b-2), the fee's `parentTransactionId` child-row form (ADR-009's
-/// stronger variant of PRD §3.4's "own field" — the field form ships now
-/// because the parser produces one row per message, and the child-row form is
-/// a P4 reporting decision) and categorisation confidence (P4). Each arrives
-/// with the behaviour that gives it meaning, rather than as an unused column.
+/// `Merchant` (P4 owns those tables), `isExcluded`, the fee's
+/// `parentTransactionId` child-row form (ADR-009's stronger variant of PRD
+/// §3.4's "own field" — the field form ships now because the parser produces
+/// one row per message, and the child-row form is a P4 reporting decision) and
+/// categorisation confidence (P4). Each arrives with the behaviour that gives
+/// it meaning, rather than as an unused column.
 ///
 /// The SQL table is named `transactions` (plural) rather than the singular
 /// domain word, specifically to avoid any ambiguity with SQLite's own
@@ -288,6 +294,53 @@ class Transactions extends Table {
   /// invisible and uncorrectable. Banking default — prefer the auditable,
   /// recoverable error.
   IntColumn get possibleDuplicateOfId => integer().nullable()();
+
+  // --- P3b-2: the mutation surface (KHA-26, KHA-64) -------------------------
+
+  /// Which fields a **person** has edited, as a JSON array of field names,
+  /// e.g. `["merchantRawText","occurredAt"]`. NULL means "nobody has edited
+  /// this row".
+  ///
+  /// ## Why this is a column and not something derived from the audit trail
+  ///
+  /// The audit trail *does* record every edit, and `TransactionEditHistory`
+  /// reads it to satisfy AC-B5.2 ("show both the original auto-detected value
+  /// and the user-edited value"). But AC-B5.3 — *"a later re-scan must not
+  /// overwrite the user's edit"* — is a **precondition checked on every write
+  /// path**, including the enrichment merge (ADR-017 D2). Making a write path
+  /// scan, decode and fold the whole audit history of a row before it may
+  /// touch a field would be both slow and, much worse, easy to skip. A column
+  /// the write path reads in the same `SELECT` it already performs cannot be
+  /// skipped by accident.
+  ///
+  /// The two are not redundant: this column answers *"may I write here?"*, the
+  /// audit trail answers *"what was here before, and who changed it?"*. See
+  /// `lib/features/ledger/user_edited_fields.dart`.
+  TextColumn get userEditedFields => text().nullable()();
+
+  /// **ADR-017 D2's enrichment merge, non-destructive half.** Set on the row
+  /// that was merged *away*; points at the surviving transaction.
+  ///
+  /// A merged-away row is soft-deleted (`isDeleted = true`) rather than
+  /// removed, and this column is what makes that soft delete *explicable*: the
+  /// Recently Deleted list can say "merged into #41" instead of presenting it
+  /// as something the user deleted, and NFR-A6's traceability holds because
+  /// the merged-away row — including its own `sourceMessageId` — is still
+  /// there to be read.
+  ///
+  /// Risk R-8 is the reason this shape was chosen over actually deleting:
+  /// *"silently deleting a real transaction is worse than an inflated
+  /// total"*. Nothing is destroyed by a merge; one row simply stops counting.
+  IntColumn get mergedIntoId => integer().nullable()();
+
+  /// The mirror of [mergedIntoId], set on the **surviving** row.
+  ///
+  /// Denormalised on purpose. Without it, "which messages does this figure
+  /// come from?" requires a reverse scan of the whole table for rows pointing
+  /// here — and NFR-A6 says a derived figure must be traceable to its
+  /// constituents, which is a property the *survivor* has to be able to state
+  /// about itself, not one a report has to go looking for.
+  IntColumn get mergedFromTransactionId => integer().nullable()();
 
   /// Soft delete (US-B8) — hidden from normal lists/totals but retained and
   /// restorable. Only "erase everything" (ADR-011, P8) is a true hard

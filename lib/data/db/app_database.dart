@@ -57,8 +57,9 @@ class AppDatabase extends _$AppDatabase {
   /// | 2 | P2 | ingest watermark; SMS provenance, FX and dedup columns on transactions; unparsed diagnostics on raw_message |
   /// | 3 | P3a | `bank` + `instrument` tables (KHA-23); instrument FK, counterparty, remaining balance, provenance detail and `deleted_at` on transactions (KHA-25) |
   /// | 4 | P3b-1 | FX rate date/source/pending (KHA-27, KHA-70) and internal-transfer link + state (KHA-29) on transactions |
+  /// | 5 | P3b-2 | the mutation surface: `user_edited_fields` (KHA-26) and the merge pair `merged_into_id` / `merged_from_transaction_id` (KHA-64) |
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -165,6 +166,64 @@ class AppDatabase extends _$AppDatabase {
         ]) {
           await m.addColumn(transactions, column);
         }
+      }
+
+      if (from < 5) {
+        // P3b-2 — the mutation surface (KHA-26, KHA-64).
+        //
+        // Three nullable columns, no backfill, and NULL is the correct and
+        // meaningful value for every pre-existing row: nobody had edited them
+        // (`user_edited_fields`), and nothing had been merged
+        // (`merged_*_id`). There is no honest non-null value to invent here.
+        for (final GeneratedColumn<Object> column in <GeneratedColumn<Object>>[
+          transactions.userEditedFields,
+          transactions.mergedIntoId,
+          transactions.mergedFromTransactionId,
+        ]) {
+          await m.addColumn(transactions, column);
+        }
+
+        // ------------------------------------------------------------------
+        // KHA-69 — the audit chain's forward-only fix. DECIDED: option (a).
+        // Recorded 2026-07-29; full reasoning in `docs/architecture.md` next
+        // to ADR-010, under "KHA-69 decision".
+        // ------------------------------------------------------------------
+        //
+        // P3a fixed `AuditLogDao.append` to hash the *truncated* timestamp it
+        // actually stores. That fix is **forward-only**: `verifyChainIntegrity`
+        // and `_canonicalize` were not touched, so an entry written by a
+        // pre-P3a build would still recompute to a different hash and would
+        // still report tampering — permanently, and (because the chain is
+        // sequential) poisoning every entry after it.
+        //
+        // We are deliberately **not** writing a re-chaining migration here,
+        // because there is nothing to re-chain. The evidence, which is
+        // stronger than "plausible":
+        //
+        //  - The DB Master Key is provisioned *behind* the app-lock gate
+        //    (ADR-005). No unlock means no database, which means no
+        //    `audit_entry` table and therefore no audit rows.
+        //  - KHA-75 established that the app lock had **never** succeeded on
+        //    real hardware — a correct fingerprint and a correct device PIN
+        //    both reported "auth failed" because of a Keystore channel
+        //    byte-encoding defect.
+        //  - The first successful real-device unlock in this app's history
+        //    happened on build `56e9cbaa` (confirmed 2026-07-28/29), and that
+        //    build **already contains P3a's timestamp fix**.
+        //
+        // So every audit row that has ever existed on a real device was
+        // written by fixed code. A re-chaining migration (option (b)) would
+        // rewrite an append-only history to repair rows that do not exist,
+        // which is precisely the operation the trail exists to make
+        // impossible — a worse trade than the problem it solves.
+        //
+        // **The standing condition this decision carries:** the P10 staging
+        // APK must go onto a *clean install*. If a device is ever found
+        // carrying audit rows written before `56e9cbaa`, this decision is void
+        // and option (c) — a genesis marker, so verification reports "verified
+        // from <date>" rather than "tampered" — becomes the remedy. See
+        // `test/data/db/schema_v5_migration_test.dart`, which pins the
+        // consequence: a v4 database upgraded to v5 verifies intact.
       }
     },
     beforeOpen: (OpeningDetails details) async {

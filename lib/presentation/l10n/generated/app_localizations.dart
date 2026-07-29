@@ -973,6 +973,372 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count, plural, one{1 transaction needs review before these figures are final} other{{count} transactions need review before these figures are final}}'**
   String spentVsKeptNeedsReview(int count);
+
+  /// S-20 title (US-B4). Cash spending is first-class here, not a fallback (OQ-19).
+  ///
+  /// In en, this message translates to:
+  /// **'Add a transaction'**
+  String get manualEntryTitle;
+
+  /// S-20 subtitle. Names the cash case explicitly so it reads as intended use rather than a workaround.
+  ///
+  /// In en, this message translates to:
+  /// **'For cash, or anything your bank did not send a message about.'**
+  String get manualEntryIntro;
+
+  /// S-20 confirm button.
+  ///
+  /// In en, this message translates to:
+  /// **'Save transaction'**
+  String get manualEntrySave;
+
+  /// S-20 amount field.
+  ///
+  /// In en, this message translates to:
+  /// **'Amount'**
+  String get manualEntryAmountLabel;
+
+  /// AC-B4.2 — the message names the field. Never 'invalid input'.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter an amount to save this transaction'**
+  String get manualEntryAmountMissing;
+
+  /// AC-B4.2. Distinguished from 'missing' because the user typed something and needs to know what was wrong with it.
+  ///
+  /// In en, this message translates to:
+  /// **'That is not an amount this app can read — use digits and at most one decimal separator'**
+  String get manualEntryAmountUnparsable;
+
+  /// S-20 currency field. Always explicit — NFR-A5 allows no amount without one.
+  ///
+  /// In en, this message translates to:
+  /// **'Currency'**
+  String get manualEntryCurrencyLabel;
+
+  /// AC-B4.2 — names the field and shows the expected shape.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a three-letter currency code, such as SAR'**
+  String get manualEntryCurrencyMissing;
+
+  /// S-20 date/time field.
+  ///
+  /// In en, this message translates to:
+  /// **'When it happened'**
+  String get manualEntryDateLabel;
+
+  /// AC-B4.2.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose the date and time this happened'**
+  String get manualEntryDateMissing;
+
+  /// S-20 type picker.
+  ///
+  /// In en, this message translates to:
+  /// **'What kind of transaction'**
+  String get manualEntryTypeLabel;
+
+  /// AC-B4.2.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose what kind of transaction this was'**
+  String get manualEntryTypeMissing;
+
+  /// S-20 merchant field. Optional — a cash purchase may genuinely have no name.
+  ///
+  /// In en, this message translates to:
+  /// **'Merchant or description'**
+  String get manualEntryMerchantLabel;
+
+  /// S-20 instrument picker label.
+  ///
+  /// In en, this message translates to:
+  /// **'Paid with'**
+  String get manualEntrySourceLabel;
+
+  /// OQ-19 — the no-instrument choice, named as a real payment method rather than shown as an absence.
+  ///
+  /// In en, this message translates to:
+  /// **'Cash'**
+  String get manualEntrySourceCash;
+
+  /// AC-B4.1 reassurance — the whole point of manual entry is that the figure stays true.
+  ///
+  /// In en, this message translates to:
+  /// **'Cash transactions count toward your totals exactly like card ones.'**
+  String get manualEntryCashNote;
+
+  /// S-20 success confirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'Transaction added'**
+  String get manualEntrySaved;
+
+  /// S-20 in edit mode (US-B5).
+  ///
+  /// In en, this message translates to:
+  /// **'Edit transaction'**
+  String get txnEditTitle;
+
+  /// S-20 edit confirm button.
+  ///
+  /// In en, this message translates to:
+  /// **'Save changes'**
+  String get txnEditSave;
+
+  /// US-B5 success confirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'Changes saved'**
+  String get txnEditSaved;
+
+  /// Shown when Save was pressed with no field altered. Nothing is written and no history entry is created.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was changed'**
+  String get txnEditNoChanges;
+
+  /// AC-B5.2 — the detail view shows BOTH the auto-detected value and the user's. Read from the audit trail, not a duplicate column.
+  ///
+  /// In en, this message translates to:
+  /// **'Originally detected: {value}'**
+  String txnEditOriginalValue(String value);
+
+  /// AC-B5.2 where the parser produced no value at all — distinct from an empty string, per AC-B1.3.
+  ///
+  /// In en, this message translates to:
+  /// **'Originally detected: nothing'**
+  String get txnEditOriginalValueEmpty;
+
+  /// AC-B5.3 made visible. User intent outranks the parser, and the user is told so.
+  ///
+  /// In en, this message translates to:
+  /// **'Your edit is kept — re-reading the message will not overwrite it'**
+  String get txnEditProtectedFromRescan;
+
+  /// S-11 delete affordance (US-B6).
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get txnDeleteAction;
+
+  /// AC-B6.2 — deletion requires an explicit confirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete this transaction?'**
+  String get txnDeleteConfirmTitle;
+
+  /// AC-B6.1 + AC-B8.1 — states the effect on totals AND that this is reversible, so the user is not deciding under a false impression of permanence.
+  ///
+  /// In en, this message translates to:
+  /// **'It will be removed from your lists and totals, and moved to Recently deleted. You can restore it from there.'**
+  String get txnDeleteConfirmBody;
+
+  /// AC-B6.2 cancel. Positively worded so the safe choice is the easy one.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep it'**
+  String get txnDeleteConfirmCancel;
+
+  /// AC-B6.2 confirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get txnDeleteConfirmAccept;
+
+  /// Toast after a soft delete (design.md flow H).
+  ///
+  /// In en, this message translates to:
+  /// **'Transaction deleted'**
+  String get txnDeleted;
+
+  /// Immediate undo on the delete toast (design.md flow H).
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get txnDeletedUndo;
+
+  /// US-B8 restore affordance.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore'**
+  String get txnRestoreAction;
+
+  /// AC-B8.2 confirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'Transaction restored'**
+  String get txnRestored;
+
+  /// S-44 title (US-B8).
+  ///
+  /// In en, this message translates to:
+  /// **'Recently deleted'**
+  String get recentlyDeletedTitle;
+
+  /// AC-B8.1 + AC-B8.3 — states plainly what a soft delete is and what the one true hard delete is.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted transactions are kept here and are not counted in any total. Only Erase everything removes them permanently.'**
+  String get recentlyDeletedIntro;
+
+  /// S-44 empty state.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing has been deleted'**
+  String get recentlyDeletedEmpty;
+
+  /// S-44 empty state body.
+  ///
+  /// In en, this message translates to:
+  /// **'Transactions you delete will appear here so you can bring them back.'**
+  String get recentlyDeletedEmptyBody;
+
+  /// AC-B6.4 — deletion is shown with its timestamp.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted {when}'**
+  String recentlyDeletedOn(String when);
+
+  /// ADR-017 D2 — a row that stopped counting because the user merged it, not because they deleted it. Saying so stops a merge looking like data loss.
+  ///
+  /// In en, this message translates to:
+  /// **'Merged into transaction #{id}'**
+  String recentlyDeletedMergedInto(int id);
+
+  /// AC-B11.2 review card in S-18. A question, because the app genuinely does not know.
+  ///
+  /// In en, this message translates to:
+  /// **'Was this a transfer to your own account?'**
+  String get reviewTransferCandidateTitle;
+
+  /// KHA-78 — writes internal_transfer_state = internal on both legs; the pair leaves spend on the next total.
+  ///
+  /// In en, this message translates to:
+  /// **'Yes, my own account'**
+  String get reviewTransferConfirm;
+
+  /// KHA-78 — writes external so the detector stops re-proposing this pair.
+  ///
+  /// In en, this message translates to:
+  /// **'No, someone else'**
+  String get reviewTransferReject;
+
+  /// Confirmation after AC-B11.1's exclusion is applied.
+  ///
+  /// In en, this message translates to:
+  /// **'Excluded from spend — both sides of the transfer'**
+  String get reviewTransferConfirmed;
+
+  /// Confirmation after a rejection. Names the durability explicitly, because a decision that did not stick would be worse than no decision.
+  ///
+  /// In en, this message translates to:
+  /// **'Counted as a payment — we will not ask about this one again'**
+  String get reviewTransferRejected;
+
+  /// KHA-80 TransferReviewReason.crossCurrencyNearMatch. ADR-009 forbids inventing a rate, so the app explains rather than guesses.
+  ///
+  /// In en, this message translates to:
+  /// **'A transfer in another currency happened at about the same time. We cannot match them without inventing an exchange rate, so both are still counted.'**
+  String get reviewTransferCrossCurrency;
+
+  /// KHA-80 TransferReviewReason.unresolvedInstrument — risk R-7's bootstrapping problem, stated plainly.
+  ///
+  /// In en, this message translates to:
+  /// **'A matching transfer arrived at about the same time, but we could not tell which account it reached, so this is still counted as spending.'**
+  String get reviewTransferUnresolvedInstrument;
+
+  /// KHA-80 — the only verdict offered on an unpairable transfer. Deliberately direction-neutral: a near-match flags BOTH legs, and the incoming one is counted as income, not spending, so 'count it as spending' would be wrong on half the cards. This wording is also exactly what the write does — internal_transfer_state = external. There is no 'yes, my own account' here because with no second leg to exclude, confirming one alone would produce figures that reconcile with nothing.
+  ///
+  /// In en, this message translates to:
+  /// **'Not an internal transfer'**
+  String get reviewTransferDismiss;
+
+  /// AC-A5.2 merge card in S-18 (ADR-017 D2/D3).
+  ///
+  /// In en, this message translates to:
+  /// **'Are these the same transaction?'**
+  String get reviewDuplicateTitle;
+
+  /// Risk R-8 stated to the user: the app never removes a transaction, and the user is told what merging actually does before they do it.
+  ///
+  /// In en, this message translates to:
+  /// **'Both are counted in your totals until you decide. Merging keeps one and files the other under Recently deleted — nothing is destroyed.'**
+  String get reviewDuplicateBody;
+
+  /// KHA-64 — the explicit user confirmation ADR-017 D2 requires. Merging is never automatic.
+  ///
+  /// In en, this message translates to:
+  /// **'Yes, merge them'**
+  String get reviewDuplicateMerge;
+
+  /// AC-A5.3 — two genuine same-amount purchases on the same day must both survive.
+  ///
+  /// In en, this message translates to:
+  /// **'No, keep both'**
+  String get reviewDuplicateKeepBoth;
+
+  /// NFR-A6 confirmation: the merged figure still traces to both sources.
+  ///
+  /// In en, this message translates to:
+  /// **'Merged — one transaction now, traceable to both messages'**
+  String get reviewDuplicateMerged;
+
+  /// Confirmation after AC-A5.3's keep-both choice.
+  ///
+  /// In en, this message translates to:
+  /// **'Both kept'**
+  String get reviewDuplicateKeptBoth;
+
+  /// MergeRefusal.amountDiffers — states the fact, does not judge the user.
+  ///
+  /// In en, this message translates to:
+  /// **'These have different amounts, so they cannot be the same transaction'**
+  String get reviewMergeRefusedAmount;
+
+  /// MergeRefusal.directionDiffers — a purchase and its refund are not duplicates (US-B7).
+  ///
+  /// In en, this message translates to:
+  /// **'One of these is money in and the other is money out, so they cannot be merged'**
+  String get reviewMergeRefusedDirection;
+
+  /// MergeRefusal.typeDiffers.
+  ///
+  /// In en, this message translates to:
+  /// **'These are different kinds of transaction, so they cannot be merged'**
+  String get reviewMergeRefusedType;
+
+  /// MergeRefusal.notLive / sameTransaction — reachable from a stale screen.
+  ///
+  /// In en, this message translates to:
+  /// **'One of these is no longer active, so there is nothing to merge'**
+  String get reviewMergeRefusedState;
+
+  /// KHA-74 — an unreadable stored amount is surfaced instead of vanishing from every list and total.
+  ///
+  /// In en, this message translates to:
+  /// **'A transaction could not be read'**
+  String get reviewDataProblemTitle;
+
+  /// KHA-74 / NFR-A6. States the consequence (the total is incomplete), reassures that nothing was destroyed, and gives one concrete next step. The unreadable value itself is never shown (NFR-S4).
+  ///
+  /// In en, this message translates to:
+  /// **'Transaction #{id} is stored with an amount this app cannot read, so it is missing from your totals. Nothing has been changed or removed. Restoring a backup is the safest way to recover it.'**
+  String reviewDataProblemBody(int id);
+
+  /// KHA-74 — the headline count, so an incomplete total is visibly incomplete.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{1 transaction is missing from your totals} other{{count} transactions are missing from your totals}}'**
+  String reviewDataProblemCount(int count);
+
+  /// S-18 gains an AC-B11.2 tab: transfers awaiting the user's judgement, kept apart from unparsed messages and duplicate flags because the question is a different one.
+  ///
+  /// In en, this message translates to:
+  /// **'Transfers ({count})'**
+  String needsReviewTabTransfers(int count);
 }
 
 class _AppLocalizationsDelegate

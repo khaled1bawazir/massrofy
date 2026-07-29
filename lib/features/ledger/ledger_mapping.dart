@@ -19,16 +19,106 @@
 ///
 /// Money is read from the **authoritative `_amount` TEXT column**, never from
 /// the `_minor` integer (ADR-002). `Money.tryParse` returns null rather than
-/// throwing on a malformed value, and a transaction whose amount will not
-/// parse is skipped by [toLedgerTransactionOrNull] rather than rendered as
-/// zero — a zero-amount row in a list is invisible and wrong; an absent row is
-/// at least honestly absent, and the underlying data is untouched.
+/// throwing on a malformed value, so a row whose amount will not parse cannot
+/// be turned into a [LedgerTransaction] at all.
+///
+/// ## KHA-74 — what happens to that row, and why the old answer was wrong
+///
+/// It used to be dropped, silently. The reasoning at the time was defensible
+/// as far as it went — *"a zero-amount row in a list is invisible and wrong;
+/// an absent row is at least honestly absent"* — and both halves of that are
+/// true. What it missed is that **an absent row is not honestly absent to the
+/// person reading the total.** The row vanished from every list and every
+/// figure with no error, no flag and no count. A user whose ledger contained
+/// one would be shown a smaller number than their real spending and would have
+/// no way to discover it.
+///
+/// That is the failure mode this product exists to *not* have. `docs/PRD.md`'s
+/// whole proposition is "trust the numbers", and NFR-A6 requires every derived
+/// figure to trace back to its constituent transactions — a total that quietly
+/// excludes one of its constituents does not trace to them, it traces to *most
+/// of* them. A visibly broken total beats an invisibly wrong one.
+///
+/// So mapping now returns a [LedgerMappingOutcome]: the transactions it could
+/// read, **and** a list of the rows it could not, as [UnreadableTransaction]
+/// records carrying the row id and the reason. The presentation layer surfaces
+/// them in the Needs Review inbox (design.md S-18) as a data-integrity item.
+/// The underlying row is still untouched — nothing here repairs or deletes
+/// anything, because guessing at what a corrupted amount was meant to say
+/// would be inventing money.
+///
+/// **How reachable is this?** Today, only by editing the database outside the
+/// app: every write path stores `Money.toCanonicalString()`, and P3b-2 adds
+/// `checkMovementAmount` to the last unguarded one (KHA-79). The gap is closed
+/// now precisely *because* this phase adds write paths — manual entry, the
+/// enrichment merge, transfer confirmation — and because P7's statement import
+/// will add more. A silent-drop behaviour is cheap to fix while it is
+/// unreachable and expensive to discover once it is not.
 library;
 
 import '../../core/money/money.dart';
 import '../../data/db/app_database.dart';
 import 'ledger_transaction.dart';
 import 'bank_tree.dart';
+
+/// A stored transaction the app **cannot read**, surfaced rather than dropped.
+///
+/// Deliberately carries no amount text: the value is unparseable, so quoting
+/// it back would put an arbitrary string from the database onto a screen and
+/// into an accessibility tree, and NFR-S4 does not make an exception for
+/// strings that happen to be broken.
+final class UnreadableTransaction {
+  /// `transactions.id`. Enough for the user to be told *"transaction #41 could
+  /// not be read"* and for a future repair tool to find it, and nothing more.
+  final int transactionId;
+
+  /// Which part of the money triple failed. A closed vocabulary so the UI
+  /// renders localised copy rather than an English diagnostic string.
+  final UnreadableReason reason;
+
+  const UnreadableTransaction({
+    required this.transactionId,
+    required this.reason,
+  });
+
+  @override
+  String toString() => 'UnreadableTransaction(#$transactionId, ${reason.name})';
+}
+
+/// Why a stored row could not become a [LedgerTransaction].
+enum UnreadableReason {
+  /// The authoritative `amount_amount` column is not a valid exact decimal, or
+  /// `amount_currency` is not a currency code this build understands. Either
+  /// way there is no honest [Money] to be had from the row.
+  unparsableAmount,
+}
+
+/// The result of mapping a set of stored rows: what could be read, and what
+/// could not.
+///
+/// A dedicated type rather than a `(List, List)` record so callers must name
+/// what they are ignoring. A caller that only wants [transactions] says so out
+/// loud, which is a much better failure mode than a second return value nobody
+/// notices — the shape of the KHA-74 bug in the first place.
+final class LedgerMappingOutcome {
+  final List<LedgerTransaction> transactions;
+
+  /// Empty in every normal install. Non-empty means the ledger on disk holds
+  /// something this build cannot represent, and the user must be told.
+  final List<UnreadableTransaction> unreadable;
+
+  const LedgerMappingOutcome({
+    required this.transactions,
+    required this.unreadable,
+  });
+
+  static const LedgerMappingOutcome empty = LedgerMappingOutcome(
+    transactions: <LedgerTransaction>[],
+    unreadable: <UnreadableTransaction>[],
+  );
+
+  bool get hasUnreadable => unreadable.isNotEmpty;
+}
 
 LedgerBank toLedgerBank(BankRow row) => LedgerBank(
   id: row.id,
@@ -113,14 +203,51 @@ LedgerTransaction? toLedgerTransactionOrNull(
   );
 }
 
-/// Maps a whole list, dropping only rows whose amount will not parse.
+/// Maps a whole list, **reporting** rather than discarding the rows whose
+/// amount will not parse (KHA-74).
+///
+/// This is the mapping entry point new code should use. [toLedgerTransactions]
+/// remains for the many call sites that legitimately only want the readable
+/// transactions — a period total cannot include a row it cannot read — but
+/// those call sites are now *choosing* to ignore the defect list rather than
+/// being unaware one exists.
+LedgerMappingOutcome mapLedgerTransactions(
+  Iterable<TransactionRow> rows, {
+  Map<int, LedgerInstrument> instrumentsById = const <int, LedgerInstrument>{},
+}) {
+  final List<LedgerTransaction> mapped = <LedgerTransaction>[];
+  final List<UnreadableTransaction> unreadable = <UnreadableTransaction>[];
+
+  for (final TransactionRow row in rows) {
+    final LedgerTransaction? transaction = toLedgerTransactionOrNull(
+      row,
+      instrumentsById: instrumentsById,
+    );
+    if (transaction == null) {
+      unreadable.add(
+        UnreadableTransaction(
+          transactionId: row.id,
+          reason: UnreadableReason.unparsableAmount,
+        ),
+      );
+      continue;
+    }
+    mapped.add(transaction);
+  }
+
+  return LedgerMappingOutcome(transactions: mapped, unreadable: unreadable);
+}
+
+/// Maps a whole list, keeping only the rows that could be read.
+///
+/// Use [mapLedgerTransactions] when the caller can surface a data problem;
+/// this shorthand is for the arithmetic paths, which genuinely have nothing
+/// they can do with an unreadable row except leave it out.
 List<LedgerTransaction> toLedgerTransactions(
   Iterable<TransactionRow> rows, {
   Map<int, LedgerInstrument> instrumentsById = const <int, LedgerInstrument>{},
-}) => <LedgerTransaction>[
-  for (final TransactionRow row in rows)
-    ?toLedgerTransactionOrNull(row, instrumentsById: instrumentsById),
-];
+}) =>
+    mapLedgerTransactions(rows, instrumentsById: instrumentsById).transactions;
 
 /// Both halves of a money triple must be present, or the value is unknown.
 ///
