@@ -762,6 +762,118 @@ No test rows are invented for them.
 
 ---
 
+## 7d. Epics C and D — the P4a categorization spine (PR #27, head `10df548`)
+
+**Scope:** KHA-30 (category model, AC-C1.1/C1.2/C1.3, AC-C3.1-4) and KHA-31
+(merchant→category rule store, AC-D1.1/D1.2, AC-D2.1-4, AC-D3.1/D3.2 + the
+NFR-A2/AC-F5.2 audit obligation). The user-facing halves of Epics C and D are
+KHA-32/33/34/97 and are **not** in this PR.
+
+**Gates re-run by QA on head `10df548`** (not cited from the PR body — the
+`docs/lessons.md` rule that a claim is evidence only for the tree it was
+measured on):
+
+| Gate | Command | Result on `10df548` |
+|---|---|---|
+| Static analysis | `flutter analyze` | **No issues found** (5.4s) |
+| Format | `dart format --output=none --set-exit-if-changed .` | **207 files, 0 changed** (PR body says 204 — count differs, result does not) |
+| Unit/widget suite | `flutter test` | **1190 pass / 3 skip / 1 fail** |
+| The 1 failure | `flutter test test/features/security/privacy_overlay_release_mode_test.dart --dart-define=dart.vm.product=true` | **passes** — pre-existing, environmental, CI owns it as its own step |
+| ADR-002 money-type guard | `bash .github/scripts/check_money_type_ban.sh` | **clean** |
+| QA probe suite (new) | `flutter test test/security/qa_pr27_probe_test.dart` | **35 pass / 0 fail** |
+
+Toolchain: Flutter 3.44.8 · Dart 3.12.2. Evidence: `docs/evidence/qa-pr27/`.
+
+### 7d.1 Traceability matrix
+
+`RUNTIME` here means "executed against a real SQLite database through the real
+DAOs / the real `IngestionPipeline`", which is the highest fidelity available
+for a data-and-domain PR that routes no screen. No emulator run was performed
+for this PR and none is claimed — P4a adds no UI, and the app shell still routes
+only `HomePlaceholderScreen`.
+
+| AC | Test(s) | Level | Status |
+|---|---|---|---|
+| **AC-C1.1** every transaction shows a category, never a blank | `default_categories_test.dart`; QA PROBE O (hand-corrupted id → resolves to Uncategorized, still in the sum) | RUNTIME | **PASS** (data half; the *display* half is KHA-97) |
+| **AC-C1.2** low-confidence → Uncategorized + counted in review queue | `electric_bill_test.dart`; QA PROBE E (novel merchant → `flaggedUnknownMerchant`, `needs_review = 1`, `review_reason = 'unknown_merchant'`) | RUNTIME | **PASS** (data half; the count on the main screen is KHA-32) |
+| **AC-C1.3** category totals incl. Uncategorized == period total | `category_sum_invariant_test.dart`; QA PROBES K, L, M, N, O, P — refund in a different category, transfer legs split across categories, unconverted-only category, empty-legend rows over an all-unconverted period, all four ops in sequence, 10 concurrent creates, corrupted id. Each asserted twice: `reconciles`, **and** an independent QA re-sum against a category-blind `LedgerTotals.spend` | RUNTIME | **PASS** |
+| **AC-C2.1** change saved and reflected in breakdowns immediately | `categoriesProvider` / `categoryResolverProvider` are streams; QA PROBE O re-derives the breakdown after each write | RUNTIME | **PASS (partial)** — the "immediately on screen" half is KHA-33 |
+| AC-C2.2 picker within two screens | — | — | **N/A this PR** — KHA-33 (and gated on KHA-87/88) |
+| AC-C2.3 offer to apply to other transactions from the merchant | `applyUserCategory(learnRule:)` exists; QA PROBE AB verifies the `false` branch | RUNTIME (data half) | **PASS (partial)** — the offer itself is KHA-33 |
+| **AC-C3.1** custom category, unique name, in every picker | `category_dao_test.dart`; QA PROBE I | RUNTIME | **PASS (partial)** — picker is KHA-97 |
+| **AC-C3.2** duplicate names rejected | QA PROBE I — folded case/padding duplicate of the English seed, folded Arabic-orthography duplicate of the Arabic seed, and an injection-shaped name accepted as data then rejected as a duplicate | RUNTIME | **PASS** (message is KHA-97) |
+| **AC-C3.3** delete requires a decision; no orphan reachable | `schema_v7_migration_test.dart`; QA PROBES H1–H5 — raw SQL, unfiltered bulk `DELETE`, soft-deleted referrer, `merchant_rule` referrer, protected row, and a delete→restore round trip | RUNTIME | **PASS** |
+| **AC-C3.4** rename preserves historical links + history | QA PROBE J — `category_id` unchanged, `updated_at` on the transaction unchanged, exactly **one** new audit row (the category's own), not one per transaction | RUNTIME | **PASS** |
+| AC-C4.1 visible needs-review indicator | data written (`needs_review`, `review_reason`); no UI | — | **N/A this PR** — KHA-32 |
+| AC-C4.2 review count on the main screen | — | — | **N/A this PR** — KHA-32 |
+| **AC-C4.3** confirming/correcting clears the flag | QA PROBE U | RUNTIME | **FAIL (partial)** — holds via `setUserCategory`, **not** via the already-shipped edit form → **D-QA-27-4 / KHA-101** |
+| **AC-D1.1** rule M→C exists after categorizing | `merchant_dao_test.dart`; QA PROBE AA | RUNTIME | **PASS (partial)** — the visible rules list is KHA-34; the edit-form path teaches no rule (D-QA-27-4) |
+| **AC-D1.2** re-categorizing updates the rule, no rival | QA PROBE AA — one rule row after two corrections | RUNTIME | **PASS** |
+| **AC-D2.1** the electric-bill case, end to end | `electric_bill_test.dart` (last group — through the **real `IngestionPipeline`** with the bundled rule pack, verified by QA to be the real pipeline and not a stub); QA PROBE W | RUNTIME | **PASS** |
+| **AC-D2.2** auto-categorized rows say so, and why | QA PROBE AA (`category_source = 'rule'`, `category_rule_id` set) + PROBE W (audit entry) | RUNTIME | **PASS** — with the caveat in D-QA-27-5 (the "why" can dangle after a category delete) |
+| **AC-D2.3** cosmetic variants match; unrelated merchants must NOT | QA PROBES B, C, D (attack) and E, F (defence) | RUNTIME | **FAIL** — cosmetic variants and partial overlap behave correctly, but three shapes merge unrelated merchants: **D-QA-27-1 (High), D-QA-27-2, D-QA-27-3**, plus **D-QA-27-7** |
+| **AC-D2.4** never-before-seen merchant is not confidently categorized | QA PROBE E; PROBE A2 (T4 refused at every confidence up to 1.0, `MerchantMatch.none` carries no category) | RUNTIME | **PASS** |
+| **AC-D3.1** user's C2 wins for the next transaction | QA PROBE AA (read literally, as three transactions), PROBE Q (DAO boundary bypassing the service), PROBE R (each of the two protection signals alone), PROBE T (a seed rule cannot demote a user rule) | RUNTIME | **PASS** |
+| **AC-D3.2** automatic re-learning never silently overrides | QA PROBES Q, R, S, V — including an explicit user "Uncategorized" (protected, and not learned as a rule) and a re-run of the categorizer (no double-count, no second audit entry) | RUNTIME | **PASS** |
+| AC-D4.1/4.2/4.3 rules screen | `allRules` / `watchAllRules` / `deleteRule` exist; no UI | — | **N/A this PR** — KHA-34 |
+| AC-D4.4 re-apply to history | deliberately **not** done by the v7 migration (asserted in `schema_v7_migration_test.dart`) | RUNTIME (the negative) | **N/A this PR** — KHA-34 |
+| AC-D5.1/5.3 scope choice UI | `learnRule` parameter exists | — | **N/A this PR** — KHA-33 |
+| **AC-D5.2** "this transaction only" does not become the rule | QA PROBE AB | RUNTIME | **PASS** (data half) |
+| **NFR-A2 / AC-F5.2** every automatic categorization writes a SYSTEM entry naming the rule | QA PROBE W — `actor = 'system_rule'`, `action = 'categorize'`, `actor_detail = 'merchant_rule:<id>'`, before/after category and confidence in `field_changes_json`, and the named rule still resolves to its merchant and category | RUNTIME | **PASS** |
+| **ADR-002** no double/num in a money path | `check_money_type_ban.sh`; QA PROBE Z | RUNTIME | **PASS** — `categoryConfidence` as `REAL` is explicitly sanctioned by architecture §4.2 and cannot reach an amount |
+| **ADR-008** `autoApplyThreshold` boundary behaviour | QA PROBES A1, A2 — the IEEE-754 identity `0.60 + 0.25 == 0.85` that makes the T3 tier reachable at all, and the gate probed directly at 0.84 / 0.85 / 0.86 | RUNTIME | **PASS** |
+
+### 7d.2 Adversarial security pass — attacks attempted, including the ones that failed
+
+Recorded per this role's audit rule: an attack that failed is evidence, not a
+non-event.
+
+| Attack | Probe | Outcome |
+|---|---|---|
+| SQL injection via a category name | I | **Repelled** — stored as data; the named table survives; still counted as a duplicate on retry |
+| SQL injection via merchant text into the key pipeline | I | **Repelled** — 14 categories still present after ingesting `QANDA'); DELETE FROM category;--` |
+| Bypass the category-delete guard with raw SQL | H1 | **Repelled** (live, soft-deleted and rule referrers) |
+| Bypass it with an unfiltered bulk `DELETE` | H2 | **Repelled**, and the abort rolled back completely |
+| Destroy AC-C1.1's fallback (`Uncategorized`) | H3 | **Repelled** via DAO **and** raw SQL |
+| Mass-assignment: write a category straight at the DAO over a user's choice | Q | **Repelled**; nothing written, not even the merchant link |
+| Defeat protection by scrubbing one of the two signals | R | **Repelled** — each defends alone |
+| Demote a user rule to a seed rule | T | **Repelled** |
+| Get T4 to auto-apply by pushing its confidence over the threshold | A2 | **Repelled** — the tier is refused structurally, at 0.84/0.85/0.86/0.99/1.0 |
+| Concurrency: 10 simultaneous creates of one category name | P | **Repelled** — exactly one row, no raw constraint error escaping the DAO contract |
+| Concurrency/ordering: delete a category while a transaction points at it | P, H5 | **Repelled** — repointed inside one transaction, including soft-deleted rows |
+| Break the sum invariant with a cross-category refund | K | **Repelled** |
+| Break it by splitting a transfer's legs across categories | L | **Repelled** |
+| Break it with an unconvertible-only category / all-unconvertible period | M, N | **Repelled** |
+| Break it with a dangling `category_id` written behind the DAO | O | **Repelled** |
+| Make one merchant identity swallow every transaction with no merchant | G1 | **Repelled** for null/blank… |
+| …the same, using a punctuation-only placeholder | G2 | **SUCCEEDED → D-QA-27-7** |
+| Merge two unrelated merchants at auto-apply confidence | B, C, D | **SUCCEEDED → D-QA-27-1, D-QA-27-2, D-QA-27-3** |
+| Get an automatic path to overwrite a user's category | Q, R, S, V, AA | **Repelled on every path found** |
+| Unlink a merchant through the automatic write path | AC | **SUCCEEDED → D-QA-27-8** (no caller today) |
+| Apply a category that does not exist | Y | **SUCCEEDED → D-QA-27-6** (money-safe) |
+
+### 7d.3 Tracking check (the `docs/lessons.md` "deferred work does not exist" rule)
+
+- **KHA-97 exists, and is correct.** P4 milestone, `blockedBy` KHA-30,
+  `owner-mobile-engineer`, `epic-C-categorization`, scoped to exactly the three
+  surfaces (S-14, S-15, inline "+ New category") and to AC-C3.2's message, and
+  it explicitly checks that KHA-32/33/34 do not already own them. This is the
+  behaviour the lesson asked for, done unprompted.
+- **Nothing else in KHA-30/KHA-31 was found deferred without a ticket.** QA
+  walked both issues' ACs independently (matrix above); every "N/A this PR" row
+  lands on an existing P4 issue.
+- **One thing for the reviewer to confirm rather than assume:** the PR body says
+  *"Closes KHA-30"*, so the GitHub↔Linear integration will auto-close KHA-30 on
+  merge while its UI half lives on in KHA-97. That is the KHA-64 failure mode
+  from `docs/lessons.md` — with the mitigation already in place (KHA-97 exists
+  and is linked), so QA reads it as acceptable rather than as a defect, but it
+  should be a conscious decision at merge, not a surprise afterwards.
+- **All eight new defects were filed with a milestone at creation** (P4 — KHA-98 through KHA-105), per
+  the standing reconciliation lesson, and the four conditional ones carry
+  `blocks` links onto KHA-32/33/97 rather than living only in this document.
+
+---
+
 ## 8. Untestable-as-written criteria
 
 None found in Epic 0, Epic A, or the Epic B slice built by P3a. Every AC in the
@@ -788,7 +900,29 @@ already does.
 | B — **P3b-1 slice** (KHA-27/28/29/70) | 15 AC/invariant rows | 9 | 6 (P4 categories, P5 income view, KHA-26, KHA-78, D-QA-4) | 0 | Merged (PR #18) — verified against head `3ba320d` |
 | B — **P3b-2 mutation surface** (KHA-26/64/66/74/78/79/80 + KHA-69) | 25 AC/invariant rows | 17 | 6 | 1 not tested (AC-B8.3, disclosed → KHA-86) | Merged (PR #20) — verified against head `61efd7b` |
 | B — **P3b-3 merge-safety gate** (KHA-87/88/89 + KHA-90 O-QA-5/7/8) | 22 AC/invariant rows | 16 | 5 | 0 | **PR #24 open** — verified against head `8761e3e` |
-| B — remainder + C–I | ~124 ACs | — | — | — | Not yet built |
+| **C + D — the P4a categorization spine** (KHA-30, KHA-31) | 27 AC/invariant rows | 15 | 9 (each waiting on KHA-32/33/34/97, not on P4a) | 2 FAIL (AC-D2.3, AC-C4.3 — both non-blocking, both ticketed) | **PR #27 open** — verified against head `10df548` |
+| B — remainder + C–I remainder | ~110 ACs | — | — | — | Not yet built |
+
+**Overall (pass 6, PR #27): `QA: PASS 27`.** Every gate re-run by QA on head
+`10df548` itself (§7d): analyze clean, format clean at **207** files, **1190
+passing / 3 skipped / 1 failing** — the failure pre-existing and proven so by
+re-running it green with the `--dart-define` it requires — money-type guard
+clean. A 35-probe adversarial suite
+(`test/security/qa_pr27_probe_test.dart`, all passing) found **eight defects,
+none merge-blocking for this PR and four merge-blocking for the P4b surfaces**.
+The two invariants this phase actually risks both held under every attack QA
+could construct: **AC-C1.3's category-sum reconciliation** (eleven adversarial
+compositions, each cross-checked independently of the type's own `reconciles`)
+and **AC-D3.1's "user correction always wins"** (repelled on every write path
+found, including at the DAO boundary with the service bypassed, and with either
+protection signal scrubbed). What did **not** hold is **AC-D2.3's "never
+silently merge unrelated merchants"**: normalisation can collapse two unrelated
+businesses into one merchant identity at confidence 1.00, which sits above every
+tier gate and above any value `autoApplyThreshold` could take (D-QA-27-1,
+D-QA-27-7). Because P4a routes no surface that can create a rule, none of it can
+fire in a build of this branch — but the *merchant rows* are already being
+created from live ingestion, so this is a data-shape decision that P4b inherits
+and it is escalated to solution-architect now rather than at P4b.
 
 **Overall (pass 5, PR #24): `QA: PASS 24`.** All five claimed local gates were
 reproduced on head `8761e3e` (analyze clean, format clean at 183 files, **1040
