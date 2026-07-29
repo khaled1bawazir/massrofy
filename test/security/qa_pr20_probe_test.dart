@@ -557,9 +557,9 @@ void main() {
       expect((await dao.byId(b)).mergedIntoId, a);
     });
 
-    test('B2 ACCEPTED AND DOCUMENTED — a survivor that absorbs a SECOND '
-        'duplicate keeps only the latest pointer; the first stays reachable '
-        'from its own row and from the audit trail', () async {
+    test('B2 FIXED (KHA-88, D-QA-7) — a survivor that absorbs a SECOND '
+        'duplicate holds BOTH, as a set; the scalar column is the most-recent '
+        'entry in it', () async {
       // Three alerts for one purchase is not exotic — a bank sending a POS
       // alert, a "card used" alert and a settlement alert produces exactly
       // this, and the D2 reference-number tier flags all of them.
@@ -580,14 +580,24 @@ void main() {
         confirmedByUser: true,
       );
 
-      // The behaviour is unchanged and the DOC is what moved (D-QA-7):
-      // `transaction_merge.dart` no longer claims "pointers both ways" per
-      // survivor, it claims it per merge, and names where the earlier link
-      // remains readable. A set-valued link is tracked on KHA-88.
-      //
-      // These assertions are the guard on that reachability claim, which is
-      // the thing that makes the degradation acceptable. If any of them
-      // breaks, the survivor's earlier merge really has become unrecoverable.
+      // INVERTED (was: "the behaviour is unchanged and the DOC is what
+      // moved"). KHA-88 closes D-QA-7, and it needed no new column: each
+      // absorbed row already carries `merged_into_id`, so the complete set was
+      // in the schema all along and merely never asked for.
+      // `TransactionDao.absorbedTransactionIds` asks it, and is now the
+      // **authoritative** link — `merged_from_transaction_id` is documented as
+      // a cache of its most recent entry.
+      expect(
+        await dao.absorbedTransactionIds(survivor),
+        <int>[second, first],
+        reason:
+            'the survivor must be able to name EVERY row it absorbed, newest '
+            'first — not only the latest',
+      );
+
+      // The scalar still names the most recent, which is what the merge audit
+      // entry's before/after is written against and what the pure
+      // `MergePlan.between` can consult without a database.
       expect((await dao.byId(survivor)).mergedFromTransactionId, second);
       expect(
         (await dao.byId(first)).mergedIntoId,

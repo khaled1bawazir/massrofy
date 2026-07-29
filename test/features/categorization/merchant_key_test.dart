@@ -6,6 +6,7 @@
 library;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:massrofy/core/config/categorization_config.dart';
 import 'package:massrofy/core/text/canonical_text.dart';
 import 'package:massrofy/features/categorization/merchant_key.dart';
 
@@ -85,6 +86,15 @@ void main() {
     test('the cosmetic-variant corpus all produces one key (AC-D2.3)', () {
       // Every row here is the same shop as far as the user is concerned:
       // spacing, case, punctuation, a till number and a branch word.
+      //
+      // **`PANDA FOODS RIYADH` left this list at ADR-008 v1.3 (KHA-98).** A
+      // city name is a proper noun: it can be the *distinguishing* token of two
+      // unrelated businesses, so removing it is not absorbing cosmetic variance
+      // — it is the machine asserting that two shops are one. The cost is that
+      // a chain's branches key separately and the user links them once with a
+      // `MerchantAlias`; the alternative was `MAKKAH BAKERY` and
+      // `MADINAH BAKERY` becoming a single merchant row at confidence 1.00.
+      // Pinned as its own case below.
       const List<String> variants = <String>[
         'PANDA FOODS',
         'panda foods',
@@ -93,7 +103,6 @@ void main() {
         'PANDA-FOODS-1420',
         'PANDA FOODS STORE 1420',
         'PANDA FOODS BRANCH',
-        'PANDA FOODS RIYADH',
         'PANDA*FOODS#0042',
       ];
       final Set<String> keys = variants.map(MerchantKey.of).toSet();
@@ -103,6 +112,106 @@ void main() {
         reason: 'produced ${keys.toList()} — every variant must key the same',
       );
       expect(keys.single, 'PANDA FOODS');
+    });
+
+    test('KHA-98 — a city name is a proper noun and is never stripped', () {
+      // The regression table from ADR-008 v1.3's KHA-98 subsection, verbatim.
+      // Two unrelated local businesses whose only distinguishing token is a
+      // city name must not become one identity.
+      expect(
+        MerchantKey.of('MAKKAH BAKERY'),
+        isNot(MerchantKey.of('MADINAH BAKERY')),
+      );
+      expect(MerchantKey.of('MAKKAH BAKERY'), 'MAKKAH BAKERY');
+
+      // Two branches of one chain now key separately too. That is the stated
+      // cost, and it is the recoverable direction: one `MerchantAlias` link
+      // fixes it, whereas one row that should have been two cannot be unpicked
+      // without re-attributing history.
+      expect(
+        MerchantKey.of('PANDA RIYADH'),
+        isNot(MerchantKey.of('PANDA JEDDAH')),
+      );
+
+      // Arabic city names went with them.
+      expect(MerchantKey.of('فرع QANDA الرياض'), 'QANDA الرياض');
+    });
+
+    test('KHA-98 — the noise list contains only STRUCTURAL words, enforced '
+        'against an explicit allow-list', () {
+      // ADR-008 v1.3: *"no proper noun may ever be added to it. A test must pin
+      // that: the noise list is asserted against an explicit allow-list of
+      // structural words, so a future 'helpful' addition fails CI rather than
+      // silently merging two shops."*
+      //
+      // This is the forcing function, and it is deliberately a *equality*
+      // check rather than a subset check: adding a word to `noiseTokens`
+      // without adding it here fails, and so does removing one, so both
+      // directions of drift are caught. Every entry below names a kind of
+      // business (an outlet, a legal form, a terminal) and none names a
+      // particular one.
+      const Set<String> structuralAllowList = <String>{
+        // Outlet / branch vocabulary.
+        'BRANCH', 'STORE', 'STORES', 'BR', 'FRC', 'TERMINAL', 'TERM', 'POS',
+        // Legal-form vocabulary.
+        'CO', 'LLC', 'LTD',
+        // The Arabic equivalents, in folded form.
+        'فرع', 'محل', 'شركه', 'موسسه',
+      };
+      expect(
+        MerchantKey.noiseTokens,
+        structuralAllowList,
+        reason:
+            'the noise list has drifted from the structural allow-list. If an '
+            'entry here is a PROPER NOUN — a city, a district, a mall, a '
+            'person — it can be the distinguishing token of two unrelated '
+            'businesses, and stripping it merges them at confidence 1.00 '
+            '(KHA-98). Read the corroboration rule in merchant_key.dart first.',
+      );
+
+      // The reference markers are a subset of the noise list by construction:
+      // adjacency corroboration only makes sense for a word this pipeline is
+      // also removing.
+      expect(
+        MerchantKey.referenceMarkerTokens.difference(MerchantKey.noiseTokens),
+        isEmpty,
+      );
+    });
+
+    test('KHA-99 — a trailing digit run is stripped only when CORROBORATED, '
+        'and at most one of them', () {
+      // ADR-008 v1.3 settled answer 2, as a table.
+
+      // Corroborated by ADJACENCY to a structural marker — PRD §3.4's own
+      // observed shape. Preserved exactly as before.
+      expect(MerchantKey.of('PANDA STORE 1234'), 'PANDA');
+      expect(MerchantKey.of('PANDA BRANCH 7'), 'PANDA');
+
+      // Corroborated by LENGTH: four or more digits is a till/terminal/
+      // reference id, not a branch number a human says out loud.
+      expect(MerchantKey.of('PANDA 1234'), 'PANDA');
+      expect(MerchantKey.of('QANDA-9021'), 'QANDA');
+
+      // NOT corroborated: a short bare number is part of the name, so two
+      // numbered outlets stay two identities. This is the KHA-99 defect.
+      expect(MerchantKey.of('QAMART 100'), 'QAMART 100');
+      expect(MerchantKey.of('QAMART 200'), 'QAMART 200');
+      expect(MerchantKey.of('QAMART 100'), isNot(MerchantKey.of('QAMART 200')));
+      expect(MerchantKey.of('CAFE 1'), isNot(MerchantKey.of('CAFE 2')));
+
+      // Rule 1 — at most ONE run. Two digit runs in a row are not a reference.
+      expect(MerchantKey.of('QAMART 100 200 300'), 'QAMART 100 200 300');
+
+      // Rule 2 — never strip the last non-digit-bearing thing. A bare number
+      // keeps whatever identity it has rather than becoming no merchant.
+      expect(MerchantKey.of('4321'), '4321');
+
+      // Rule 4 — leading digits keep their existing protection, unchanged.
+      expect(MerchantKey.of('7 ELEVEN'), '7 ELEVEN');
+      expect(MerchantKey.of('7 ELEVEN 1234'), '7 ELEVEN');
+
+      // The tunable is the length, not the bar.
+      expect(CategorizationConfig.referenceDigitRunMinLength, 4);
     });
 
     test(
@@ -126,24 +235,46 @@ void main() {
       expect(MerchantKey.of('7 ELEVEN 1234'), '7 ELEVEN');
     });
 
-    test('a merchant made entirely of noise words keeps a usable key', () {
-      // "Riyadh Store" is a plausible shop name. Falling through to the folded
-      // string keeps it distinct instead of collapsing every such merchant
-      // into one empty key — the worst silent merge available in this design.
-      expect(MerchantKey.of('RIYADH STORE'), isNotEmpty);
+    test('a merchant with a real name beside a noise word keeps a usable key', () {
+      // "Riyadh Store" is a plausible shop name, and after KHA-98 it keeps a
+      // *genuine* key rather than a fallback one: `RIYADH` is a proper noun, so
+      // it is no longer stripped and survives as the identity. Two such shops
+      // stay two merchants, which is what the old fallback was reaching for and
+      // could not reliably deliver.
+      expect(MerchantKey.of('RIYADH STORE'), 'RIYADH');
       expect(
         MerchantKey.of('RIYADH STORE'),
         isNot(MerchantKey.of('JEDDAH STORE')),
       );
     });
 
-    test('null and blank merchant text produce no key at all', () {
+    test('KHA-102 — a string with NO surviving token yields no key at all', () {
       // A transfer or an ATM withdrawal names no merchant. An empty-string key
       // would make every one of them "the same merchant", and a single rule
       // would then categorise the lot.
       expect(MerchantKey.ofOrNull(null), isNull);
       expect(MerchantKey.ofOrNull(''), isNull);
       expect(MerchantKey.ofOrNull('   '), isNull);
+
+      // The guard used to be defeated by its own implementation: `of` fell back
+      // to the folded string when every token was stripped, and a
+      // punctuation-only string (acquirers send these where the merchant name
+      // was masked) tokenises to nothing while folding to itself. Non-empty, so
+      // the `isEmpty` test missed it, and one rule then categorised every
+      // masked-merchant message from every bank.
+      expect(MerchantKey.ofOrNull('***'), isNull);
+      expect(MerchantKey.ofOrNull('-*-'), isNull);
+
+      // And the general form, which is why the fallback was REMOVED rather than
+      // patched to "require a letter or digit": a string made only of tokens we
+      // have declared incapable of distinguishing two businesses cannot
+      // distinguish two businesses.
+      expect(MerchantKey.ofOrNull('STORE'), isNull);
+      expect(MerchantKey.ofOrNull('محل'), isNull);
+      expect(MerchantKey.ofOrNull('BRANCH STORE'), isNull);
+
+      // Still idempotent across the new empty answer.
+      expect(MerchantKey.of(MerchantKey.of('***')), MerchantKey.of('***'));
     });
 
     test('every noise token is stored in already-folded form', () {

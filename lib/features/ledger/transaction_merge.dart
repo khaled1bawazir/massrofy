@@ -33,15 +33,19 @@
 /// Two precise statements this property does **not** make, both of which the
 /// P3b-2 prose implied and QA falsified by execution (D-QA-7, D-QA-12):
 ///
-///  - **"Pointers both ways" holds per merge, not per survivor.**
-///    `merged_from_transaction_id` is a single scalar, so a survivor that
-///    absorbs a *second* duplicate overwrites its pointer to the first. The
-///    first is still reachable — from its own `mergedIntoId`, and from the
-///    survivor's `merge` audit entry, which records `from → to` — so this is
-///    reduced convenience, not lost traceability. A set-valued link stays open
-///    on KHA-88. What is fixed here is the far worse consequence: undoing one
-///    merge no longer clears a *different* merge's pointer (see
-///    `TransactionDao.restore`).
+///  - **"Pointers both ways" is set-valued on the survivor's side, and the
+///    scalar column is a cache of it (KHA-88 / D-QA-7, closed).** A survivor
+///    can absorb more than one duplicate — three alerts for one purchase is
+///    ordinary — and `merged_from_transaction_id` is a single scalar, so it can
+///    name only the most recent. The complete set was never missing from the
+///    schema, only never asked for: each absorbed row carries `merged_into_id`,
+///    so **`TransactionDao.absorbedTransactionIds` is the authoritative link**
+///    and the scalar is the most-recent entry in it. `TransactionDao.restore`
+///    maintains the invariant *"the scalar is null iff the set is empty"* by
+///    re-pointing rather than blanking, and [TransactionMergeService.merge]
+///    asks the set directly rather than trusting the cache — because the
+///    composition of "lossy scalar" with "correct undo" was exactly how QA
+///    defeated [MergeRefusal.chainWouldForm] (KHA-94 / D-QA-17).
 ///  - **An undo does not un-enrich.** [TransactionMergeService.undo] reverses
 ///    the soft delete and the link; it deliberately leaves the copied fields
 ///    on the survivor. This is a decision, not an oversight (D-QA-12): a
@@ -50,6 +54,17 @@
 ///    on top of, and stripping it would be the merge deleting information on
 ///    the way out — the exact thing property 3 exists to prevent. Both rows
 ///    keep the value; neither is wrong.
+///
+///    **This now covers money, not only descriptive fields (O-QA-10).** KHA-87
+///    made the enrichment carry reported money figures, so after an undo a fee
+///    the survivor absorbed sits on *both* live rows and `report.fees.base`
+///    doubles — exactly as the amount itself does, because both rows are live
+///    duplicates again and the user is looking at precisely what they saw
+///    before the merge. R-8 prefers an inflated total to a lost one and this is
+///    the inflating direction, one tap from being re-merged. Stated explicitly
+///    because the sentence above was written when "information" meant a
+///    merchant name, and the next reader deserves to know it now also means a
+///    number on the fees line.
 ///
 /// ### 2. It is never automatic
 ///
@@ -188,6 +203,13 @@ enum MergeRefusal {
   /// merging it again would build a chain `a → b → c` and orphan `a`
   /// (D-QA-9). The mirror of [notLive], which closes the same door from the
   /// other side.
+  ///
+  /// Raised from two places, deliberately: the pure
+  /// [MergePlan.between] reads the survivor's scalar pointer, and
+  /// [TransactionMergeService.merge] additionally asks
+  /// `TransactionDao.absorbedTransactionIds` — the authoritative set. KHA-94
+  /// showed that the scalar alone can be made to lie by an undo, so the guard
+  /// no longer depends on it being right.
   chainWouldForm,
 }
 
@@ -621,6 +643,40 @@ final class TransactionMergeService {
       );
       if (survivor == null || mergedAway == null) {
         return const MergeTargetMissing();
+      }
+
+      // **KHA-94 / D-QA-17 — the chain guard, asked authoritatively.**
+      //
+      // `MergePlan.between` also checks this, from
+      // `mergedAway.mergedFromTransactionId`. That check is correct and stays:
+      // it is what makes the refusal exhaustively testable in a pure function
+      // with no database. But it reads a **cache**, and a guard that trusts a
+      // cache is only as good as the invariant behind it.
+      //
+      // QA composed two individually-correct behaviours into a defeat: the
+      // scalar records only the most recent merge into a survivor (D-QA-7), and
+      // `restore()` clears it when that merge is undone (D-QA-8's fix). So
+      // undoing the most recent merge left a survivor still holding an earlier
+      // absorbed row while claiming to hold nothing, and the guard permitted
+      // exactly the `first -> survivor -> newSurvivor` chain its own doc
+      // comment says cannot exist.
+      //
+      // `TransactionDao.restore` now maintains the invariant (it re-points the
+      // scalar rather than blanking it), so the pure check is sound again. This
+      // asks the question directly anyway — `merged_into_id` back-pointers are
+      // the set itself, not a summary of it — so the guard survives a raw-SQL
+      // edit, a partially-applied migration, or a future writer that maintains
+      // the cache badly. Two independent guards on one property, which is the
+      // same belt-and-braces shape AC-D3.1's protection uses.
+      //
+      // Checked before `MergePlan.between` so a chain is refused for the chain
+      // reason rather than for whichever field comparison happens to fire
+      // first: `MergeRefusal` values are shown to the user, so the *right*
+      // refusal is not a cosmetic concern.
+      if ((await transactionDao.absorbedTransactionIds(
+        mergedAwayId,
+      )).isNotEmpty) {
+        return const MergeRejected(MergeRefusal.chainWouldForm);
       }
 
       final MergeAssessment assessment = MergePlan.between(

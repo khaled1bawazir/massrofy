@@ -24,6 +24,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/dao/bank_dao.dart';
 import '../../data/dao/instrument_dao.dart';
 import '../../data/db/app_database.dart';
+import '../../features/categorization/categorization_service.dart';
 import '../../features/ingestion/review_queue.dart';
 import '../../features/ledger/bank_directory.dart';
 import '../../features/ledger/bank_tree.dart';
@@ -39,6 +40,7 @@ import '../../features/ledger/transaction_merge.dart';
 import '../../features/ledger/unparsed_completion.dart';
 import '../../features/parsing/rule_pack.dart';
 import 'app_providers.dart';
+import 'categorization_providers.dart';
 import 'ingestion_providers.dart';
 
 /// The active packs' banks, adapted into the ledger's own [BankProfile]
@@ -267,17 +269,50 @@ final FutureProvider<ManualEntryService?> manualEntryServiceProvider =
     });
 
 /// **US-B5/B6/B8** — edit, soft delete and restore (KHA-26).
+///
+/// ## The `learnCategoryRule` binding (KHA-101)
+///
+/// This is the composition root for the seam described on [LearnCategoryRule]:
+/// `features/ledger` may not import `features/categorization` (the arrow
+/// already runs the other way, via `category_breakdown.dart`), so the two are
+/// joined *here*, in the presentation layer that already depends on both. It is
+/// the same technique `categorization_providers.dart` uses to bind the
+/// categorizer into `IngestionPipeline`.
+///
+/// The effect: correcting a category from the transaction detail form now
+/// teaches the same `merchant → category` rule that correcting it from the
+/// categorization surface does. Without this line the edit form would keep the
+/// half of KHA-101 that lives above the DAO.
 final FutureProvider<TransactionEditService?> transactionEditServiceProvider =
     FutureProvider<TransactionEditService?>((Ref ref) async {
       final UnlockedDatabaseSession? session = await ref.watch(
         unlockedDatabaseSessionProvider.future,
       );
-      return session == null
-          ? null
-          : TransactionEditService(
-              database: session.database,
-              transactionDao: session.transactionDao,
-            );
+      if (session == null) {
+        return null;
+      }
+      // Null while locked. Also null if the categorization service failed to
+      // build — and **that fallback is the point of the `?` on the seam**:
+      // learning a rule is an enhancement to an edit, so a categorization
+      // failure must degrade the edit form to "correct this one transaction"
+      // rather than make US-B5 unavailable. Editing money is the more
+      // important of the two capabilities and it must not depend on the less
+      // important one.
+      CategorizationService? categorization;
+      try {
+        categorization = await ref.watch(categorizationServiceProvider.future);
+      } on Object {
+        // Deliberately swallowed and not logged: the failure is already
+        // surfaced by `categorizationServiceProvider` itself to anything that
+        // watches it directly, and NFR-S4 keeps this layer out of the business
+        // of writing diagnostics that could carry a merchant name.
+        categorization = null;
+      }
+      return TransactionEditService(
+        database: session.database,
+        transactionDao: session.transactionDao,
+        learnCategoryRule: categorization?.learnRuleFromCorrection,
+      );
     });
 
 /// **ADR-017 D2** — the enrichment merge (KHA-64).

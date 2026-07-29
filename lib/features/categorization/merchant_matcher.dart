@@ -4,7 +4,7 @@
 /// |---|---|---|---|
 /// | T1 | exact `merchantKey` match on a **user-created** rule | 1.00 | auto-apply |
 /// | T2 | exact `merchantKey` match on a **seed** rule | 0.90 | auto-apply |
-/// | T3 | token-set Jaccard ≥ 0.80 against a known merchant | 0.60–0.85 | apply **only if ≥ threshold**, else flag |
+/// | T3 | token-**multiset** Jaccard ≥ 0.80 against a known merchant | 0.60–0.85 | apply **only if ≥ threshold**, else flag |
 /// | T4 | normalised Damerau-Levenshtein ratio ≥ 0.90 | ≤ 0.60 | **never** auto-apply — surface as "did you mean…" |
 /// | — | no match | 0.00 | Uncategorized + `needsReview` (AC-D2.4) |
 ///
@@ -52,7 +52,8 @@ enum MatchTier {
   /// T2 — exact key (or user-linked alias) on a rule shipped with the app.
   seedRule,
 
-  /// T3 — the same set of significant tokens, in any order.
+  /// T3 — the same *multiset* of significant tokens, in any order (KHA-100).
+  /// A repeated token is a real difference, not a rearrangement.
   tokenSet,
 
   /// T4 — a near-miss spelling. **Suggestion only, never applied.**
@@ -242,8 +243,8 @@ abstract final class MerchantMatcher {
       return MerchantMatch.none;
     }
 
-    // --- T3: token-set Jaccard --------------------------------------------
-    final Set<String> keyTokens = MerchantKey.tokensOf(key);
+    // --- T3: token-MULTISET Jaccard (KHA-100) ------------------------------
+    final Map<String, int> keyTokens = MerchantKey.tokenMultisetOf(key);
     MerchantCandidate? bestTokenSet;
     double bestJaccard = 0.0;
 
@@ -255,7 +256,7 @@ abstract final class MerchantMatcher {
       }
       final double jaccard = _jaccard(
         keyTokens,
-        MerchantKey.tokensOf(candidate.merchantKey),
+        MerchantKey.tokenMultisetOf(candidate.merchantKey),
       );
       if (jaccard < CategorizationConfig.tokenSetJaccardFloor) {
         continue;
@@ -331,12 +332,13 @@ abstract final class MerchantMatcher {
   ///
   /// The consequence at the shipped threshold (0.85) is worth stating plainly,
   /// because it *is* the tuning decision: only a Jaccard of **1.0** reaches
-  /// 0.85. So a token-set match auto-applies exactly when the two strings
-  /// contain the same significant tokens and differ only in order, spacing,
-  /// case, store number or noise words — i.e. when they are cosmetic variants
-  /// (AC-D2.3's first requirement). Any *partial* overlap — `PANDA FRESH` vs
-  /// `PANDA EXPRESS` — lands below and is surfaced for review instead of
-  /// merging two shops (AC-D2.3's second requirement).
+  /// 0.85. So a T3 match auto-applies exactly when the two strings contain the
+  /// same significant tokens **with the same multiplicities** and differ only
+  /// in order, spacing, case, store number or noise words — i.e. when they are
+  /// cosmetic variants (AC-D2.3's first requirement). Any *partial* overlap —
+  /// `PANDA FRESH` vs `PANDA EXPRESS` — lands below and is surfaced for review
+  /// instead of merging two shops (AC-D2.3's second requirement), and so does a
+  /// repeated-token name like `QAFE QAFE` against `QAFE` (KHA-100).
   static double _tokenSetConfidence(double jaccard) {
     const double floor = CategorizationConfig.tokenSetJaccardFloor;
     const double low = CategorizationConfig.tokenSetConfidenceFloor;
@@ -345,14 +347,37 @@ abstract final class MerchantMatcher {
     return low + (high - low) * position;
   }
 
-  /// |A ∩ B| / |A ∪ B|. Zero for two empty sets — not 1.0, which would call
-  /// two merchants with no significant tokens identical.
-  static double _jaccard(Set<String> a, Set<String> b) {
+  /// **Multiset** Jaccard — `|A ∩ B| / |A ∪ B|` where the intersection takes
+  /// the `min` of each token's two counts and the union takes the `max`
+  /// (KHA-100, ADR-008 v1.3 settled answer 4).
+  ///
+  /// Zero for two empty multisets — not 1.0, which would call two merchants
+  /// with no significant tokens identical.
+  ///
+  /// Worked example, because this is the change and it is one line of
+  /// arithmetic: `QAFE QAFE` is `{QAFE: 2}`, `QAFE` is `{QAFE: 1}`. Intersection
+  /// `min(2, 1) = 1`; union `max(2, 1) = 2`; Jaccard `0.5`. Under the previous
+  /// set implementation both sides were `{QAFE}` and the answer was `1.0`,
+  /// which mapped to exactly [CategorizationConfig.autoApplyThreshold] and
+  /// applied another brand's rule. Two distinct brand names are a genuine
+  /// difference, and no step of `MerchantKey.of` produces or removes a repeated
+  /// token, so the multiplicity is signal rather than noise.
+  ///
+  /// Note this is a strict generalisation: for two multisets in which every
+  /// count is 1 it returns exactly what the set version did, so nothing else in
+  /// the corpus moves.
+  static double _jaccard(Map<String, int> a, Map<String, int> b) {
     if (a.isEmpty || b.isEmpty) {
       return 0.0;
     }
-    final int intersection = a.where(b.contains).length;
-    final int union = <String>{...a, ...b}.length;
+    int intersection = 0;
+    int union = 0;
+    for (final String token in <String>{...a.keys, ...b.keys}) {
+      final int inA = a[token] ?? 0;
+      final int inB = b[token] ?? 0;
+      intersection += inA < inB ? inA : inB;
+      union += inA > inB ? inA : inB;
+    }
     return intersection / union;
   }
 

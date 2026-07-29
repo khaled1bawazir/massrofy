@@ -49,16 +49,39 @@ abstract final class CategorizationConfig {
   ///   is refused — the "PANDA STORE 1234" ↔ "PANDA" class of cosmetic
   ///   variant would need re-tagging forever, and the learning loop never pays
   ///   off (the "too strict" failure KHA-31 names). |
-  /// | **0.85** | Exact and alias matches apply. A token-set match applies
-  ///   only at Jaccard `1.0` — i.e. the two strings contain *the same tokens*
-  ///   and differ only in order, spacing, case, store number or noise words.
-  ///   Every partial-overlap match is surfaced for review instead. |
+  /// | **0.85** | Exact and alias matches apply. A token-**multiset** match
+  ///   applies only at Jaccard `1.0` — i.e. the two strings contain *the same
+  ///   tokens with the same multiplicities* and differ only in order, spacing,
+  ///   case, store number or noise words. Every partial-overlap match is
+  ///   surfaced for review instead. |
   /// | 0.60 | Every T3 match applies, including `PANDA FRESH` ↔ `PANDA
   ///   EXPRESS`-shaped partial overlaps. That is the "silently merge unrelated
   ///   merchants" failure AC-D2.3 forbids. |
   ///
   /// So 0.85 is not inherited unexamined: it is the only value in the band
   /// that admits pure cosmetic variance and refuses partial overlap.
+  ///
+  /// ## The multiset correction (KHA-100), and a corrected number (KHA-98)
+  ///
+  /// The "same tokens, different arrangement" sentence above is a
+  /// **permutation** claim, and until ADR-008 v1.3 the code compared Dart
+  /// `Set`s — so multiplicity was invisible and `QAFE QAFE` reached Jaccard 1.0
+  /// against `QAFE`, auto-applying another brand's rule at exactly this
+  /// threshold. The **code moved to meet the rationale**, not the other way
+  /// round: `MerchantMatcher` now compares
+  /// [MerchantKey.tokenMultisetOf](../../features/categorization/merchant_key.dart),
+  /// so `{QAFE, QAFE}` vs `{QAFE}` is 1/2 = 0.5, below
+  /// [tokenSetJaccardFloor], and the pair falls through to T4 where it can
+  /// never auto-apply. The sentence above is now literally true.
+  ///
+  /// One figure a future tuner will look for, recorded correctly here because
+  /// QA's report and this file both once had it wrong. After KHA-98 dropped
+  /// city names from the noise list, `PANDA RIYADH` and `PANDA JEDDAH` are two
+  /// keys rather than one. **Their Jaccard is 1/3 ≈ 0.33, not 0.5** —
+  /// `|A ∩ B| / |A ∪ B|` over `{PANDA, RIYADH}` and `{PANDA, JEDDAH}` is
+  /// 1 shared over 3 distinct. Either figure is far below the 0.80 floor, so
+  /// the conclusion (flagged for review, never merged) is unchanged — but the
+  /// number itself is what a tuner would reason from.
   static const double autoApplyThreshold = 0.85;
 
   /// Confidence for **T1** — an exact merchant-key (or user-linked alias)
@@ -75,9 +98,25 @@ abstract final class CategorizationConfig {
   /// not a guess.
   static const double seedRuleConfidence = 0.90;
 
-  /// **T3 gate.** Token-set Jaccard similarity must reach this before a
-  /// token-set match is even considered.
+  /// **T3 gate.** Token-**multiset** Jaccard similarity must reach this before
+  /// a T3 match is even considered (KHA-100 — see [autoApplyThreshold]).
   static const double tokenSetJaccardFloor = 0.80;
+
+  /// **KHA-99 — corroboration signal (ii) for a trailing digit run.**
+  ///
+  /// A trailing all-digit token is stripped from a merchant string only when it
+  /// is corroborated as a store/terminal/reference number. One of the two
+  /// signals is length: a run of at least this many digits is a till, terminal
+  /// or reference id, not a branch number a human says out loud. (The other
+  /// signal is adjacency to a structural word — `PANDA STORE 1234`. See
+  /// `MerchantKey.referenceMarkerTokens`.)
+  ///
+  /// **A tunable with O-1's posture, not a safety rule.** The *value* is tuned
+  /// against the corpus; the *bar* — that a strip must be corroborated at all —
+  /// is architecture (ADR-008 v1.3) and is not tunable from here. Lowering this
+  /// to 1 would restore the KHA-99 defect for `QAMART 100` / `QAMART 200`;
+  /// raising it only makes the pipeline more conservative.
+  static const int referenceDigitRunMinLength = 4;
 
   /// **T3 output band.** Jaccard [tokenSetJaccardFloor] maps to
   /// [tokenSetConfidenceFloor]; Jaccard `1.0` maps to

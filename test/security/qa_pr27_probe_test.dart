@@ -49,6 +49,7 @@ import 'package:massrofy/features/categorization/merchant_key.dart';
 import 'package:massrofy/features/categorization/merchant_matcher.dart';
 import 'package:massrofy/features/ledger/ledger_mapping.dart';
 import 'package:massrofy/features/ledger/period_totals.dart';
+import 'package:massrofy/features/ledger/transaction_edit.dart';
 
 import '../support/plain_test_database.dart';
 
@@ -233,19 +234,29 @@ void main() {
       expect(MerchantMatch.none.canAutoApply, isFalse);
     });
 
-    test('PROBE B (DEFECT D-QA-27-1) — the city-name noise list collapses two '
-        'genuinely different businesses into ONE merchant identity, and then '
-        'auto-categorizes the second at confidence 1.00', () async {
-      // ADR-008's noise list includes city names, and the implementation's
-      // own comment defends that as "a chain's branches are the chain".
+    test('PROBE B FIXED (KHA-98, HIGH) — a city name is a proper noun, so two '
+        'genuinely different businesses keep two identities and the second is '
+        'NOT auto-categorized', () async {
+      // ADR-008 v1.0's noise list included city names, and the implementation's
+      // own comment defended that as "a chain's branches are the chain".
       // That reasoning holds for `PANDA RIYADH` / `PANDA JEDDAH`. It does
       // NOT hold when the city name is the *distinguishing* token of two
       // unrelated local businesses — a shape that is entirely ordinary in
       // Saudi retail naming.
       //
-      // Two independent bakeries:
-      expect(MerchantKey.of('MAKKAH BAKERY'), equals('BAKERY'));
-      expect(MerchantKey.of('MADINAH BAKERY'), equals('BAKERY'));
+      // ADR-008 v1.3 decided option (b): drop city names from the list
+      // entirely, and let the tiers handle chain branches. The corroboration
+      // rule states why in general — *a token may be removed only if it is
+      // incapable, by its kind, of distinguishing one business from another*,
+      // and a proper noun names **which** one.
+      //
+      // Two independent bakeries. INVERTED (was: both `equals('BAKERY')`).
+      expect(MerchantKey.of('MAKKAH BAKERY'), equals('MAKKAH BAKERY'));
+      expect(MerchantKey.of('MADINAH BAKERY'), equals('MADINAH BAKERY'));
+      expect(
+        MerchantKey.of('MAKKAH BAKERY'),
+        isNot(MerchantKey.of('MADINAH BAKERY')),
+      );
 
       // The user teaches the app about the first one.
       final int first = await sms(merchant: 'MAKKAH BAKERY');
@@ -260,44 +271,62 @@ void main() {
         transactionId: second,
       );
 
-      // It is auto-applied at T1 with confidence 1.00 — no flag, no review,
-      // no "did you mean". AC-D2.3's *"unrelated merchants must NOT be
-      // matched"* is not met, and this is not a fuzzy guess that a threshold
-      // could catch: it is an exact key collision manufactured by
-      // normalisation, so it sits above every tier gate.
-      expect(outcome.result, CategorizationResult.applied);
-      expect(outcome.match.tier, MatchTier.userRule);
-      expect(outcome.match.confidence, 1.00);
-      expect(outcome.categoryId, 'dining');
+      // INVERTED (was: `applied` at T1, confidence 1.00, category 'dining').
+      // The keys differ, so no exact tier fires; multiset Jaccard is 1/3 = 0.33
+      // against the 0.80 floor, and the Damerau-Levenshtein ratio ≈ 0.79
+      // against the 0.90 floor. Nothing reaches a tier, so AC-D2.4's landing
+      // place applies: Uncategorized and flagged.
+      expect(outcome.result, isNot(CategorizationResult.applied));
+      expect(outcome.categoryId, isNull);
+      expect(outcome.match.canAutoApply, isFalse);
+      expect(
+        (await transactionDao.byIdOrNull(second))!.categoryId,
+        isNull,
+        reason: 'the second bakery inherited the first one\'s category',
+      );
+      expect((await transactionDao.byIdOrNull(second))!.needsReview, isTrue);
 
-      // Worse than the category: the *identity* is merged permanently.
-      // `merchant.merchant_key` is UNIQUE, so both businesses are now one
-      // row, and the row's display name is the first one's raw text — the
-      // user will be shown "MAKKAH BAKERY" for money spent at the other.
+      // And the *identity* is no longer merged. INVERTED (was: one row keyed
+      // `BAKERY`, canonical name `MAKKAH BAKERY`, both transactions on it).
       final List<MerchantRow> merchants = await merchantDao.allMerchants();
       expect(
-        merchants.where((MerchantRow m) => m.merchantKey == 'BAKERY').length,
-        1,
-        reason: 'two businesses collapsed into one merchant row',
+        merchants.map((MerchantRow m) => m.merchantKey).toSet(),
+        <String>{'MAKKAH BAKERY', 'MADINAH BAKERY'},
+        reason: 'two businesses must be two merchant rows',
       );
-      expect(merchants.single.canonicalName, 'MAKKAH BAKERY');
+      final TransactionRow firstRow = (await transactionDao.byIdOrNull(first))!;
       final TransactionRow secondRow = (await transactionDao.byIdOrNull(
         second,
       ))!;
-      expect(secondRow.merchantId, merchants.single.id);
+      expect(secondRow.merchantId, isNot(firstRow.merchantId));
+
+      // The pipeline's own motivating case from PRD §3.4 is untouched — the
+      // fix deletes a behaviour, it does not weaken the normaliser generally.
+      expect(MerchantKey.of('PANDA STORE 1234'), MerchantKey.of('Panda'));
     });
 
-    test('PROBE C (DEFECT D-QA-27-2) — unconditional trailing-digit stripping '
-        'merges numbered sibling merchants at confidence 1.00', () async {
+    test('PROBE C FIXED (KHA-99) — trailing-digit stripping is BOUNDED and '
+        'CORROBORATED, so numbered sibling merchants stay two identities', () async {
       // ADR-008 step 6 strips *trailing* digit runs so `PANDA STORE 1234`
-      // and `Panda` are one shop. The implementation strips them in a
+      // and `Panda` are one shop. v1.0's implementation stripped them in a
       // `while` loop with no length or context check, so any merchant whose
-      // identity IS its trailing number becomes indistinguishable from its
+      // identity IS its trailing number became indistinguishable from its
       // siblings. Numbered outlets that are separately owned franchises, and
       // numbered service lines from one telecom brand, both have this shape.
-      expect(MerchantKey.of('QAMART 100'), equals('QAMART'));
-      expect(MerchantKey.of('QAMART 200'), equals('QAMART'));
-      expect(MerchantKey.of('QAMART 100 200 300'), equals('QAMART'));
+      //
+      // v1.3 bounds it: at most ONE run, only when a non-digit token survives,
+      // and only when corroborated as a reference — by adjacency to a
+      // structural word (`PANDA STORE 1234`) or by length (≥ 4 digits, which is
+      // a till/terminal id rather than a branch number a human says out loud).
+      //
+      // INVERTED (was: all three `equals('QAMART')`).
+      expect(MerchantKey.of('QAMART 100'), equals('QAMART 100'));
+      expect(MerchantKey.of('QAMART 200'), equals('QAMART 200'));
+      expect(
+        MerchantKey.of('QAMART 100 200 300'),
+        equals('QAMART 100 200 300'),
+        reason: 'rule 1: two digit runs in a row are not a reference',
+      );
 
       final int taught = await sms(merchant: 'QAMART 100');
       await service.applyUserCategory(
@@ -310,22 +339,40 @@ void main() {
         transactionId: other,
       );
 
-      expect(outcome.result, CategorizationResult.applied);
-      expect(outcome.match.confidence, 1.00);
-      expect(outcome.categoryId, 'groceries');
+      // INVERTED (was: `applied` at 1.00 into 'groceries'). The two keys differ
+      // by one character, so the Damerau-Levenshtein ratio is 1 − 1/10 = 0.90 —
+      // exactly the T4 floor. That is the *ideal* outcome and not a
+      // consolation: the app says what it noticed ("did you mean QAMART 100?")
+      // and `canAutoApply` refuses the tier structurally, at any confidence.
+      expect(outcome.result, isNot(CategorizationResult.applied));
+      expect(outcome.categoryId, isNull);
+      expect(outcome.match.canAutoApply, isFalse);
+      expect((await transactionDao.byIdOrNull(other))!.categoryId, isNull);
+      expect((await transactionDao.byIdOrNull(other))!.needsReview, isTrue);
+
+      // The corroborated shapes are preserved — this bounds the strip, it does
+      // not remove it. PRD §3.4's motivating case still works.
+      expect(MerchantKey.of('PANDA STORE 1234'), 'PANDA');
+      expect(MerchantKey.of('PANDA 1234'), 'PANDA');
+      // ...and the leading-digit protection is untouched.
+      expect(MerchantKey.of('7 ELEVEN'), '7 ELEVEN');
     });
 
-    test('PROBE D (DEFECT D-QA-27-3) — a token-set match auto-applies across a '
-        'repeated-token name, which is not "the same tokens in a different '
-        'arrangement"', () async {
+    test('PROBE D FIXED (KHA-100) — T3 is the token MULTISET, so a '
+        'repeated-token name is a real difference and falls to T4', () async {
       // The PR defends 0.85 with: at that value a T3 match applies "only at
       // Jaccard 1.0 — i.e. the two strings contain the same tokens and
       // differ only in order, spacing, case, store number or noise words".
+      // That is a **permutation** claim, and Jaccard was computed over *sets*,
+      // so token multiplicity was invisible to it. A brand whose name repeats a
+      // word therefore reached Jaccard 1.0 against the single-word brand —
+      // different names, different shops, confidence landing exactly on the
+      // auto-apply line.
       //
-      // Jaccard is computed over *sets*, so token multiplicity is invisible
-      // to it. A brand whose name repeats a word therefore reaches Jaccard
-      // 1.0 against the single-word brand — different names, different
-      // shops, and the confidence lands exactly on the auto-apply line.
+      // ADR-008 v1.3 settled it by moving the **code** to meet the rationale
+      // rather than weakening the rationale to match the code: T3 is defined
+      // over the token multiset, so `{QAFE: 2}` vs `{QAFE: 1}` is
+      // min/max = 1/2 = 0.5, below the 0.80 floor.
       final MerchantMatch match =
           MerchantMatcher.match('QAFE QAFE', <MerchantCandidate>[
             const MerchantCandidate(
@@ -338,15 +385,50 @@ void main() {
           ]);
 
       expect(MerchantKey.of('QAFE QAFE'), equals('QAFE QAFE'));
-      expect(match.tier, MatchTier.tokenSet);
-      expect(match.confidence, CategorizationConfig.autoApplyThreshold);
+      // INVERTED (was: `MatchTier.tokenSet` at exactly the threshold, applying).
+      expect(
+        match.tier,
+        isNot(MatchTier.tokenSet),
+        reason: 'T3 must not admit a repeated-token name as a permutation',
+      );
       expect(
         match.canAutoApply,
-        isTrue,
+        isFalse,
         reason:
-            'a repeated-token brand name auto-applies another brand\'s rule '
-            'at exactly the threshold',
+            'a repeated-token brand name must not auto-apply another brand\'s '
+            'rule',
       );
+      // It lands at `none`, not T4. **Worth recording precisely, because the
+      // ADR-008 v1.3 text says "falls through to T4 and becomes a suggestion"
+      // and that is one tier optimistic:** the Damerau-Levenshtein ratio for
+      // `QAFE QAFE` against `QAFE` is 1 − 5/9 ≈ 0.44, well under the 0.90 T4
+      // floor, so the matcher does not even offer a "did you mean". The
+      // *decision* the ADR made is unaffected — both `none` and T4 are refusals
+      // and neither can auto-apply — but a tuner reading "it becomes a
+      // suggestion" would be surprised, so the executed answer is pinned here.
+      expect(match.tier, MatchTier.none);
+      expect(
+        match.confidence,
+        lessThan(CategorizationConfig.autoApplyThreshold),
+      );
+      expect(match.needsReview, isTrue);
+
+      // The multiset change is a strict generalisation: a genuine permutation,
+      // where every token appears once on both sides, still reaches 1.0 and
+      // still applies. This is the assertion that stops the fix from being
+      // "disable T3".
+      final MerchantMatch permutation =
+          MerchantMatcher.match('FOODS QANDA', <MerchantCandidate>[
+            const MerchantCandidate(
+              merchantId: 8,
+              merchantKey: 'QANDA FOODS',
+              categoryId: 'groceries',
+              ruleId: 4,
+              ruleSource: 'user',
+            ),
+          ]);
+      expect(permutation.tier, MatchTier.tokenSet);
+      expect(permutation.canAutoApply, isTrue);
     });
 
     test(
@@ -398,15 +480,28 @@ void main() {
           isNot(equals(MerchantKey.of('AL BAIK'))),
         );
 
-        // The three renderings PRD §3.4 shows for one shop must produce one
-        // key — including the Latin name embedded in Arabic branch/city noise,
-        // which is the case the PRD calls out and the one a single-script
-        // assumption would break.
+        // The renderings PRD §3.4 shows for one shop must produce one key —
+        // including the Latin name embedded in an Arabic *branch* word, which
+        // is the case the PRD calls out and the one a single-script assumption
+        // would break.
         const String expected = 'QANDA';
         expect(MerchantKey.of('QANDA STORE 1234'), expected);
         expect(MerchantKey.of('  qanda  '), expected);
-        expect(MerchantKey.of('فرع QANDA الرياض'), expected);
+        expect(MerchantKey.of('فرع QANDA'), expected);
         expect(MerchantKey.of('QANDA-9021'), expected);
+
+        // AMENDED AT KHA-98, not weakened. `فرع QANDA الرياض` used to key as
+        // `QANDA` too, because `الرياض` was on the noise list. It is a city —
+        // a proper noun — so ADR-008 v1.3 stops stripping it and this is now a
+        // *branch* key rather than the chain key. The Arabic structural word
+        // `فرع` still goes, which is the half of this assertion that was ever
+        // about cross-script handling; the half that went was the half that
+        // could merge two unrelated shops.
+        expect(MerchantKey.of('فرع QANDA الرياض'), 'QANDA الرياض');
+        expect(
+          MerchantKey.of('فرع QANDA الرياض'),
+          isNot(MerchantKey.of('فرع QANDA جده')),
+        );
 
         // Arabic orthographic variance must fold (the user should not have to
         // teach the app twice).
@@ -451,24 +546,35 @@ void main() {
     });
 
     test(
-      'PROBE G2 (DEFECT D-QA-27-7) — a PUNCTUATION-ONLY merchant string does '
-      'become a merchant identity, so every masked-merchant message from a '
-      'bank collapses onto one rule',
+      'PROBE G2 FIXED (KHA-102) — a PUNCTUATION-ONLY merchant string forms NO '
+      'identity, so masked-merchant messages never collapse onto one rule',
       () async {
         // `MerchantKey.ofOrNull` documents itself as the guard against
         // "inventing an empty-string key [which] would make every such
         // transaction the same merchant — the single most damaging silent
         // merge available in this design".
         //
-        // The guard is `key.isEmpty`, but `of()` falls back to the *folded
+        // The guard is `key.isEmpty`, but `of()` fell back to the *folded
         // string* when every token was noise or digits — and a string made
         // only of separator characters tokenises to nothing while folding to
-        // itself. So it is non-empty, and the guard misses it.
+        // itself. So it was non-empty, and the guard missed it.
         //
         // This is not hypothetical input: acquirer strings routinely carry a
         // placeholder where the merchant name was masked or absent.
-        expect(MerchantKey.ofOrNull('***'), '***');
-        expect(MerchantKey.ofOrNull('-*-'), '-*-');
+        //
+        // ADR-008 v1.3 settled answer 3 REMOVED the fallback rather than
+        // patching it to "require a letter or digit", and deliberately went
+        // further than the reported fix direction: an all-noise string is by
+        // construction made only of tokens declared incapable of distinguishing
+        // two businesses, so a key built from it is by construction incapable
+        // of distinguishing two businesses.
+        //
+        // INVERTED (was: `'***'` and `'-*-'` returned themselves).
+        expect(MerchantKey.ofOrNull('***'), isNull);
+        expect(MerchantKey.ofOrNull('-*-'), isNull);
+        // The class, not just the reported instance.
+        expect(MerchantKey.ofOrNull('STORE'), isNull);
+        expect(MerchantKey.ofOrNull('فرع محل'), isNull);
 
         final int taught = await sms(merchant: '***');
         await service.applyUserCategory(
@@ -482,19 +588,31 @@ void main() {
         final CategorizationOutcome outcome = await service
             .categorizeTransaction(transactionId: unrelated);
 
+        // INVERTED (was: `applied` at confidence 1.00). Treated exactly like a
+        // transaction that carried no merchant text at all, which is what
+        // `ofOrNull` already promised.
+        expect(outcome.result, CategorizationResult.skippedNoMerchant);
+        expect(outcome.categoryId, isNull);
         expect(
-          outcome.result,
-          CategorizationResult.applied,
-          reason:
-              'if this now fails, the defect is fixed — a placeholder merchant '
-              'string no longer forms an identity',
+          await merchantDao.allMerchants(),
+          isEmpty,
+          reason: 'a placeholder merchant string must form no identity at all',
         );
-        expect(outcome.match.confidence, 1.00);
+        expect(await merchantDao.allRules(), isEmpty);
+
+        // **Nothing is lost or hidden** — the decline is to *identify*, never
+        // to discard. Both transactions are still stored, still carry their
+        // raw text, and still count.
         expect(
-          (await merchantDao.allMerchants()).length,
-          1,
-          reason: 'every masked-merchant transaction is now one merchant',
+          (await transactionDao.byIdOrNull(unrelated))!.merchantRawText,
+          '***',
         );
+        await expectReconciles('two masked-merchant transactions');
+
+        // And a merchant with real letters beside noise still gets a usable
+        // key — the guard closes the all-noise class, not the noisy class.
+        expect(MerchantKey.ofOrNull('Riyadh Store'), isNotNull);
+        expect(MerchantKey.ofOrNull('Riyadh Store'), 'RIYADH');
       },
     );
   });
@@ -1077,13 +1195,20 @@ void main() {
       expect(match.confidence, CategorizationConfig.userRuleConfidence);
     });
 
-    test('PROBE U (DEFECT D-QA-27-4) — categorizing through the edit form '
-        '(`applyUserEdit`) leaves the categorizer\'s review flag raised, and '
-        'teaches no rule', () async {
+    test('PROBE U FIXED (KHA-101) — categorizing through the edit form clears '
+        'the categorizer\'s review flag and teaches a rule, so the two '
+        'correction surfaces agree', () async {
       // Two user-facing writes can set a category: `setUserCategory` (the
-      // categorization surface) and `applyUserEdit` (P3b-2's edit form,
-      // already shipped and already routed in S-16). They do NOT behave the
-      // same way, and both differences are user-visible.
+      // categorization surface, via `CategorizationService.applyUserCategory`)
+      // and `applyUserEdit` (P3b-2's edit form). They did NOT behave the same
+      // way, and both differences were user-visible.
+      //
+      // Note on reachability, corrected at review: `TransactionDetailScreen` is
+      // shipped but **not routed** — `lib/app.dart` reaches only
+      // `HomePlaceholderScreen`, and KHA-36 is the issue that routes it. So
+      // this had no live UI impact; the DAO-level behaviour still had to be
+      // right before that lands, which is why it is fixed here rather than
+      // there.
       final int txn = await sms(merchant: 'QANDA');
       await service.categorizeTransaction(transactionId: txn);
       final TransactionRow flagged = (await transactionDao.byIdOrNull(txn))!;
@@ -1096,31 +1221,86 @@ void main() {
       );
 
       final TransactionRow after = (await transactionDao.byIdOrNull(txn))!;
-      // The provenance columns DO move correctly — that half is right.
+      // The provenance columns move correctly — that half was always right.
       expect(after.categoryId, 'dining');
       expect(after.categorySource, StoredCategorySource.user);
 
-      // 1. The row is answered but still sits in the review inbox asking
-      //    "is this a shop you know?" — `_clearCategoryReviewFlag` is only
-      //    called from `setUserCategory`.
+      // 1. INVERTED (was: `needsReview` still true). AC-C4.3 — *"when the user
+      //    confirms or corrects the category, the flag is cleared."* Fixed at
+      //    the DAO write boundary, so it holds for every caller including one
+      //    that never reaches a service.
       expect(
         after.needsReview,
+        isFalse,
+        reason: 'the row is answered and must leave the review inbox',
+      );
+      expect(after.reviewReason, isNull);
+
+      // 2. The sibling assertion KHA-101's done check names explicitly: a flag
+      //    raised by a DIFFERENT question is still not cleared. Answering
+      //    "where does this belong" does not answer "is this a duplicate".
+      final int other = await sms(merchant: 'QANDA', day: 20);
+      await transactionDao.flagAsPossibleDuplicate(
+        id: other,
+        otherId: txn,
+        reviewReason: 'possible_duplicate',
+      );
+      await transactionDao.applyUserEdit(
+        id: other,
+        categoryId: const Edited<String?>('groceries'),
+      );
+      final TransactionRow stillFlagged = (await transactionDao.byIdOrNull(
+        other,
+      ))!;
+      expect(stillFlagged.categoryId, 'groceries');
+      expect(
+        stillFlagged.needsReview,
         isTrue,
         reason:
-            'if this now fails, the defect has been fixed — the review flag '
-            'is cleared on the edit-form path too',
+            'a duplicate flag is a different, still-open question about the '
+            'user\'s money and must survive a category correction',
       );
-      expect(after.reviewReason, CategoryReviewReason.unknownMerchant);
+      expect(stillFlagged.reviewReason, 'possible_duplicate');
 
-      // 2. No rule was learned, so AC-D1.1/AC-D2.1 do not hold for a user
-      //    who corrects the category from the detail screen.
-      expect(
-        await merchantDao.allRules(),
-        isEmpty,
-        reason:
-            'if this now fails, the edit-form path learns a rule and the '
-            'two correction surfaces agree',
+      // 3. INVERTED (was: `allRules()` isEmpty). The rule half is routed
+      //    through `CategorizationService.learnRuleFromCorrection`, bound to
+      //    `TransactionEditService` by the presentation layer — because
+      //    `features/ledger` may not import `features/categorization` (the
+      //    dependency already runs the other way). Exercised here through the
+      //    same seam production uses, rather than through the DAO, since a DAO
+      //    cannot compute a merchant key without importing the feature layer.
+      final int third = await sms(merchant: 'QAWIDGET', day: 21);
+      await service.categorizeTransaction(transactionId: third);
+      final TransactionEditService editService = TransactionEditService(
+        database: db,
+        transactionDao: transactionDao,
+        learnCategoryRule: service.learnRuleFromCorrection,
       );
+      await editService.edit(
+        third,
+        const TransactionEditDraft(
+          categoryId: Edited<String?>('utilities_bills'),
+        ),
+      );
+
+      final List<MerchantRuleRow> rules = await merchantDao.allRules();
+      expect(
+        rules.where((MerchantRuleRow r) => r.categoryId == 'utilities_bills'),
+        hasLength(1),
+        reason:
+            'the edit-form path must teach the same rule the categorization '
+            'surface does, or AC-D2.1\'s electric-bill promise is false for '
+            'anyone who corrects from the detail screen',
+      );
+
+      // ...and the rule actually fires on the NEXT message from that merchant,
+      // which is the acceptance criterion rather than the mechanism.
+      final int next = await sms(merchant: 'QAWIDGET', day: 22);
+      final CategorizationOutcome outcome = await service.categorizeTransaction(
+        transactionId: next,
+      );
+      expect(outcome.result, CategorizationResult.applied);
+      expect(outcome.categoryId, 'utilities_bills');
     });
 
     test(
@@ -1225,68 +1405,138 @@ void main() {
       // The rule is gone (documented and defensible).
       expect(await merchantDao.ruleById(ruleId), isNull);
 
-      // But the transaction still claims that rule as its provenance. A
-      // detail screen answering "why is this categorized this way" from
-      // `category_rule_id` now dereferences a rule that does not exist,
-      // and the audit trail's `merchant_rule:$ruleId` is likewise
-      // unresolvable. `category_source` also still says `rule` while
-      // `category_id` is NULL — a row that says "a rule put nothing here".
-      final TransactionRow orphaned = (await transactionDao.byIdOrNull(auto))!;
+      // INVERTED (was: the transaction still claimed the destroyed rule as its
+      // provenance, and `category_source` still said `rule` while `category_id`
+      // was NULL — a row saying "a rule put nothing here"). KHA-103 clears the
+      // provenance with the thing it described, so a detail screen answering
+      // "why is this categorized this way" cannot dereference a missing rule
+      // and the trail's `merchant_rule:$ruleId` is no longer claimed.
+      final TransactionRow repaired = (await transactionDao.byIdOrNull(auto))!;
+      expect(repaired.categoryRuleId, isNull);
+      expect(repaired.categoryId, isNull);
       expect(
-        orphaned.categoryRuleId,
-        ruleId,
+        repaired.categorySource,
+        StoredCategorySource.none,
         reason:
-            'if this now fails, the defect is fixed — the delete clears the '
-            'provenance it invalidated',
+            'architecture §4.2\'s word for "the app looked and could not '
+            'decide", which is now literally true of this row',
       );
-      expect(orphaned.categoryId, isNull);
-      expect(orphaned.categorySource, StoredCategorySource.rule);
+      expect(repaired.categoryConfidence, isNull);
 
-      // Money is untouched, which is why this is not merge-blocking.
+      // The asymmetry is deliberate: on the REASSIGN branch the rule is
+      // repointed rather than destroyed, so it still explains the transaction
+      // and its provenance must survive. Asserted here so a future change
+      // cannot "simplify" the two branches into one.
+      final CategoryRow? second = await categoryDao.createCustom(
+        name: 'QA Doomed Two',
+        iconToken: 'label',
+        groupKey: 'spending',
+      );
+      final int taught2 = await sms(merchant: 'QAWIDGET', day: 17);
+      await service.applyUserCategory(
+        transactionId: taught2,
+        categoryId: second!.id,
+      );
+      final int auto2 = await sms(merchant: 'QAWIDGET', day: 18);
+      await service.categorizeTransaction(transactionId: auto2);
+      final int ruleId2 = (await transactionDao.byIdOrNull(
+        auto2,
+      ))!.categoryRuleId!;
+
+      await categoryDao.deleteCategory(
+        id: second.id,
+        decision: const ReassignTo('dining'),
+      );
+      final TransactionRow reassigned = (await transactionDao.byIdOrNull(
+        auto2,
+      ))!;
+      expect(reassigned.categoryId, 'dining');
+      expect(
+        reassigned.categoryRuleId,
+        ruleId2,
+        reason: 'the rule was repointed, not destroyed — it still explains it',
+      );
+      expect(reassigned.categorySource, StoredCategorySource.rule);
+      expect((await merchantDao.ruleById(ruleId2))!.categoryId, 'dining');
+
+      // A category a PERSON chose keeps `category_source = 'user'` even when
+      // their category is deleted: that column is one of AC-D3.1's two
+      // independent protection signals, and downgrading it here would leave the
+      // user's choice defended by only one of the two.
+      final TransactionRow userOwned = (await transactionDao.byIdOrNull(
+        taught,
+      ))!;
+      expect(userOwned.categorySource, StoredCategorySource.user);
+
+      // Money is untouched, which is why this was not merge-blocking.
       await expectReconciles('a rule-destroying category delete');
     });
 
     test(
-      'PROBE Y (DEFECT D-QA-27-6) — a merchant rule may name a category that '
-      'does not exist, and the matcher will then auto-apply it',
+      'PROBE Y FIXED (KHA-104) — a merchant rule naming a category that does '
+      'not exist is refused on write AND ignored on read',
       () async {
-        // Nothing validates `merchant_rule.category_id` against `category`,
+        // Nothing validated `merchant_rule.category_id` against `category`,
         // and the delete trigger only guards the delete direction. So a rule
-        // can be written for a category id that was never created, and the
-        // learning loop will confidently stamp it onto real transactions.
+        // could be written for a category id that was never created, and the
+        // learning loop confidently stamped it onto real transactions: the row
+        // said "categorized" while every screen rendered "Uncategorized" —
+        // AC-C1.1's explicit fallback reached by accident, not by decision.
+        //
+        // Both sides are defended now, deliberately, in the belt-and-braces
+        // shape AC-D3.1's own protection uses.
         final int merchantId = await merchantDao.ensureMerchant(
           merchantKey: 'QANDA',
           canonicalName: 'QANDA',
         );
+
+        // --- The WRITE side ------------------------------------------------
         await merchantDao.upsertRule(
           merchantId: merchantId,
           categoryId: 'no_such_category',
           source: 'user',
           actor: 'user',
         );
+        expect(
+          await merchantDao.allRules(),
+          isEmpty,
+          reason: 'a rule naming an unknown category must not be stored',
+        );
+
+        // --- The READ side -------------------------------------------------
+        // A rule already in the table from before that check existed, or
+        // written by raw SQL, must not fire either. Inserted behind the DAO's
+        // back precisely because the DAO now refuses it.
+        await db.customStatement(
+          'INSERT INTO merchant_rule (merchant_id, category_id, source, '
+          'match_type, is_enabled, applied_count, created_at, updated_at) '
+          "VALUES ($merchantId, 'no_such_category', 'user', 'exact_key', 1, 0, "
+          '0, 0)',
+        );
+        expect(await merchantDao.allRules(), hasLength(1));
+        expect(
+          (await service.loadCandidates()).single.categoryId,
+          isNull,
+          reason: 'the dangling rule must not reach the matcher',
+        );
 
         final int txn = await sms(merchant: 'QANDA');
         final CategorizationOutcome outcome = await service
             .categorizeTransaction(transactionId: txn);
+        // INVERTED (was: `applied`, stamping `no_such_category` onto the row).
+        expect(outcome.result, isNot(CategorizationResult.applied));
+        expect((await transactionDao.byIdOrNull(txn))!.categoryId, isNull);
+        // The shop is still *identified* — dropping the rule must not cost the
+        // merchant row, or the next message would mint a second one — so the
+        // user is asked the narrower question.
+        expect((await transactionDao.byIdOrNull(txn))!.merchantId, merchantId);
         expect(
-          outcome.result,
-          CategorizationResult.applied,
-          reason:
-              'if this now fails, the defect is fixed — a rule naming an '
-              'unknown category no longer auto-applies',
-        );
-        expect(
-          (await transactionDao.byIdOrNull(txn))!.categoryId,
-          'no_such_category',
+          (await transactionDao.byIdOrNull(txn))!.reviewReason,
+          CategoryReviewReason.noRuleForMerchant,
         );
 
-        // The graceful-degradation claim holds: it renders as Uncategorized
-        // and the money stays in the sum. This is why it is Medium and not
-        // High — but the row now says "categorized" while showing
-        // "Uncategorized", which is AC-C1.1's *explicit* state reached by
-        // accident rather than by decision.
         final CategoryResolver resolver = await service.resolver();
-        expect(resolver.resolve('no_such_category').isUncategorized, isTrue);
+        expect(resolver.isKnown('no_such_category'), isFalse);
         await expectReconciles('a dangling rule target');
       },
     );
@@ -1375,21 +1625,22 @@ void main() {
     );
 
     test(
-      'PROBE AC (DEFECT D-QA-27-8) — `applyAutomaticCategory` will UNLINK an '
-      'existing merchant when a caller omits `merchantId`',
+      'PROBE AC FIXED (KHA-105) — `applyAutomaticCategory` leaves an existing '
+      'merchant link alone when a caller omits `merchantId`',
       () async {
         // `setUserCategory` is careful here — it uses `Value.absent()` when
         // `merchantId` is null, "so a caller with no merchant cannot
         // accidentally unlink one that is already there". The automatic
-        // sibling writes `Value<int?>(merchantId)` unconditionally, so the
-        // same omission silently clears the link instead.
+        // sibling wrote `Value<int?>(merchantId)` unconditionally, so the
+        // same omission silently cleared the link instead.
         //
-        // No caller does this today; this is the "unguarded path with no
-        // caller yet" shape that KHA-79 was about, recorded now rather than
-        // after P4b adds the second caller.
+        // No caller did this; it was the "unguarded path with no caller yet"
+        // shape KHA-79 was about, recorded before P4b adds the second caller
+        // rather than after.
         final int txn = await sms(merchant: 'QANDA');
         await service.categorizeTransaction(transactionId: txn);
-        expect((await transactionDao.byIdOrNull(txn))!.merchantId, isNotNull);
+        final int? linked = (await transactionDao.byIdOrNull(txn))!.merchantId;
+        expect(linked, isNotNull);
 
         await transactionDao.applyAutomaticCategory(
           id: txn,
@@ -1398,12 +1649,31 @@ void main() {
           actorDetail: 'no_rule_matched',
         );
 
+        // INVERTED (was: `isNull`). Unlinking is not a small error — the next
+        // message from that shop would create a second `merchant` row and the
+        // learned rule would stop applying to this one.
         expect(
           (await transactionDao.byIdOrNull(txn))!.merchantId,
-          isNull,
-          reason:
-              'if this now fails, the defect is fixed — an omitted merchantId '
-              'no longer unlinks',
+          linked,
+          reason: 'an omitted merchantId must not clear an existing link',
+        );
+
+        // ...and a caller that DOES supply one still writes it, so the fix is
+        // not "stop writing the column".
+        final int otherMerchant = await merchantDao.ensureMerchant(
+          merchantKey: 'QAWIDGET',
+          canonicalName: 'QAWIDGET',
+        );
+        await transactionDao.applyAutomaticCategory(
+          id: txn,
+          categoryId: null,
+          confidence: 0.0,
+          merchantId: otherMerchant,
+          actorDetail: 'no_rule_matched',
+        );
+        expect(
+          (await transactionDao.byIdOrNull(txn))!.merchantId,
+          otherMerchant,
         );
       },
     );

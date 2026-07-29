@@ -770,8 +770,17 @@ another merchant's rule at exactly the threshold.
 
 **Decision: T3 is defined over the token multiset, and the code moves to meet the rationale — not
 the other way round.** Jaccard is computed with multiplicities, so `{QAFE, QAFE}` vs `{QAFE}` is
-1/2 = 0.5, below the 0.80 floor; the pair falls through to T4 and becomes a suggestion that can
-never auto-apply.
+1/2 = 0.5, below the 0.80 floor; the pair falls through and can never auto-apply.
+
+> **Correction recorded at implementation (2026-07-29, mobile-engineer), factual only — the
+> decision above is unchanged.** This paragraph originally said the pair *"falls through to T4 and
+> becomes a suggestion"*. It falls through **past** T4 as well: the Damerau-Levenshtein ratio for
+> `QAFE QAFE` against `QAFE` is 1 − 5/9 ≈ **0.44**, well under the 0.90 T4 floor, so the matcher
+> returns `MerchantMatch.none` and does not offer a "did you mean" either. Both outcomes are
+> refusals and neither can auto-apply, so nothing about the decision or its safety argument moves —
+> but a future tuner reading "it becomes a suggestion" would be surprised by the observed
+> behaviour, so the executed answer is recorded here and pinned by PROBE D in
+> `test/security/qa_pr27_probe_test.dart`.
 
 Two reasons, in order of weight. **First, it is what the corroboration rule requires:** no
 normalisation step in this pipeline produces or removes a repeated token, so a duplicated token is

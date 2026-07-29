@@ -6,6 +6,7 @@ import '../db/tables/category_table.dart';
 import '../db/tables/merchant_table.dart';
 import '../db/tables/transaction_table.dart';
 import 'audit_log_dao.dart';
+import 'category_fields.dart';
 
 part 'category_dao.g.dart';
 
@@ -260,6 +261,13 @@ class CategoryDao extends DatabaseAccessor<AppDatabase>
   ///     whose action);
   ///  4. only then is the row deleted.
   ///
+  /// **KHA-103.** Step 1 also clears `category_rule_id` / `category_source` /
+  /// `category_confidence` on the uncategorize branch, because that branch
+  /// *deletes* the rules naming this category and a row must not keep claiming
+  /// provenance from a rule that no longer exists. The reassign branch
+  /// deliberately does not: there, the rule is repointed and its explanation is
+  /// still true. See the comment at the write itself.
+  ///
   /// If step 1 or 2 missed anything, step 4 aborts: the
   /// `category_no_delete_while_in_use` trigger raises and the whole
   /// transaction rolls back. There is no ordering of these steps that leaves
@@ -323,11 +331,50 @@ class CategoryDao extends DatabaseAccessor<AppDatabase>
       )..where((Transactions t) => t.categoryId.equals(id))).get();
 
       for (final TransactionRow row in affected) {
+        // **KHA-103 / D-QA-27-5 — the provenance follows the category.**
+        //
+        // The two branches are deliberately asymmetric, and the asymmetry is
+        // the whole decision:
+        //
+        //  - **Reassign** (`replacementId != null`): the rule that categorised
+        //    this row is *repointed* below, not destroyed. It still exists,
+        //    still names a real category, and still explains this transaction.
+        //    Its provenance stays exactly as it is — clearing it would erase a
+        //    true answer to "why is this categorized this way".
+        //  - **Uncategorize** (`replacementId == null`): the rules naming this
+        //    category are **deleted** below. A row left pointing at one says
+        //    "rule #7 put nothing here" about a rule that no longer exists —
+        //    the detail screen dereferences a missing rule, and the audit
+        //    trail's `merchant_rule:7` is unresolvable.
+        //
+        // Two conditions, and they are deliberately not the same one.
+        final bool rulesAreBeingDestroyed = replacementId == null;
+        // A row whose category a **person** chose keeps
+        // `category_source = 'user'` even when their chosen category is
+        // deleted: that column is one of AC-D3.1's two independent protection
+        // signals, and quietly downgrading it here would leave the user's
+        // choice defended by only one of the two mechanisms that were made
+        // redundant on purpose. `category_rule_id` is cleared for such a row
+        // anyway — a dangling rule id explains nothing whoever set the
+        // category.
+        final bool userOwnsCategory = isUserOwnedCategory(row);
+
         await (update(
           transactions,
         )..where((Transactions t) => t.id.equals(row.id))).write(
           TransactionsCompanion(
             categoryId: Value<String?>(replacementId),
+            categoryRuleId: rulesAreBeingDestroyed
+                ? const Value<int?>(null)
+                : const Value<int?>.absent(),
+            // `'none'` rather than null: architecture §4.2's word for *"the app
+            // looked and could not decide"*, which is now literally true.
+            categorySource: rulesAreBeingDestroyed && !userOwnsCategory
+                ? const Value<String?>(StoredCategorySource.none)
+                : const Value<String?>.absent(),
+            categoryConfidence: rulesAreBeingDestroyed && !userOwnsCategory
+                ? const Value<double?>(null)
+                : const Value<double?>.absent(),
             updatedAt: Value<DateTime>(timestamp),
           ),
         );
