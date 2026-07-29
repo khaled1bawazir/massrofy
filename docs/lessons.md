@@ -135,3 +135,41 @@ Format per entry:
   standing reconciliation step: at every supervision turn, the manager queries Linear for issues
   with no milestone and files them before doing anything else. Authoring discipline is still
   requested, but the manager is the backstop and should assume the rule was missed.**
+
+- **[2026-07-29] [process] RESULT of the QA-PR base change above: it worked, first try, and it is
+  now the standard.** PR #28 (QA artifacts for P4a) was opened against
+  `feature/p4a-categorization-spine` instead of `main`, merged into that branch, and PR #27 then
+  squash-merged to `main` carrying both. **No rescue, no conflict, no orphan** — the first QA
+  artifact PR in six to need none. The property that makes it safe rather than merely convenient:
+  the QA branch is a *direct descendant* of the code branch's head, so
+  `git merge-base --is-ancestor` holds and the merge is a fast-forward — a conflict is not just
+  absent, it is structurally impossible, which is a stronger guarantee than reading
+  `mergeable_state: clean`. And QA's "zero production diff" property survived the move intact:
+  `git rev-parse 'HEAD^{tree}:lib'` was byte-identical on both heads (`b57828345bd6cfa9…`), so it
+  is still fully machine-verifiable, just at a commit boundary instead of a PR boundary.
+  **-> Standing rule, not an experiment: QA opens the artifact PR against the CODE BRANCH, and the
+  reviewer merges it there before merging the code PR to `main`.** Two obligations the pattern
+  *moves onto the reviewer* rather than removing: (1) **re-run CI on the post-QA-merge head** — the
+  code PR's head changes when the QA PR lands, so every gate measured on the pre-merge SHA is stale
+  by construction (PR #27: engineer and QA both measured `10df548`; the merge to `main` happened on
+  `c9715a5`, re-verified 6/6 green); and (2) confirm the QA diff is genuinely artifacts-only
+  *before* merging it, since it now lands on the branch that is about to reach `main`. KHA-85
+  tracks the tooling-level fix; this is the process-level one, and it is cheap enough that KHA-85
+  is no longer urgent.
+
+- **[2026-07-29] [process] A conditional gate can be correctly expressed as `blocks` links and
+  still be drawn around the wrong precondition.** The gates-must-be-tracker-links lesson above was
+  followed properly on P4a: QA filed KHA-98/99/101/102 with real `blocks` links onto KHA-32/33/97.
+  But KHA-101 ("categorizing via the edit form leaves the review flag raised") has two halves, and
+  only one of them needs a categorization surface. The stuck-flag half needs just a routed
+  `TransactionDetailScreen` — which **KHA-36**, a P5 issue nobody had connected to it, ships, along
+  with the very needs-review indicator (AC-C4.1) the defect leaves stuck. The gate had been drawn
+  around *the symptom the finder was looking at* rather than *the precondition that actually
+  triggers it*; the reviewer added `KHA-101 blocks KHA-36` at the merge. Separately, that issue
+  asserted the edit form was "already shipped and already routed" — it is shipped but **not
+  routed** (`lib/app.dart` routes only `HomePlaceholderScreen`; `TransactionDetailScreen` is never
+  instantiated), and that premise was load-bearing for a merge decision. **-> When filing or
+  accepting a conditional gate, state the *precondition* in one sentence ("this fires as soon as X
+  is routed / Y exists"), then find every issue that satisfies it — do not enumerate gated issues
+  from the feature area you happened to be testing. And verify a reachability claim by grepping for
+  the construction site, never from the fact that the widget exists in the tree.**
