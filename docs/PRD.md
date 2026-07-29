@@ -211,7 +211,7 @@ Written as Given/When/Then so QA can automate them directly. Each criterion is s
 ### Epic A — SMS ingestion
 
 **US-A1 — Read incoming SMS**
-- AC-A1.1 — **Given** the app has been granted SMS access, **when** a new SMS arrives from a configured financial sender, **then** the app processes it and a corresponding transaction appears in the transaction list without any user action.
+- AC-A1.1 — **Given** the app has been granted SMS access and is open, unlocked, and in the foreground, **when** a new SMS arrives from a configured financial sender, **then** the app processes it and a corresponding transaction appears in the transaction list within single-digit seconds and without any user action — **including when the app simply stays open and is never backgrounded and resumed.** *(Clarification added 2026-07-30 after a device-found gap — KHA-122. This is not a scope change: NFR-R1's human-approved "single-digit seconds while unlocked" already required it. The app-not-in-foreground and locked cases remain AC-A1.4 / NFR-R1.)*
 - AC-A1.2 — **Given** the app has NOT been granted SMS access, **when** the user opens the app, **then** the app shows a clear explanation of why access is needed and a way to grant it, and does not show an empty state with no explanation.
 - AC-A1.3 — **Given** SMS access was granted and then revoked in device settings, **when** the user opens the app, **then** the app warns that ingestion has stopped and previously captured data is still intact.
 - AC-A1.4 — **Given** a new SMS arrives while the app is not in the foreground, **when** the user next opens the app, **then** that transaction is already present. *(Background-processing feasibility depends on OQ-3.)*
