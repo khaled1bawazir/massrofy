@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../../features/categorization/learned_rules.dart';
 import '../../features/ledger/base_currency.dart';
 import '../../features/ledger/internal_transfer.dart';
 import '../../features/ledger/ledger_transaction.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../theme/app_colors.dart';
+import '../widgets/category_widgets.dart';
 import '../widgets/ledger_widgets.dart';
 
 /// **S-11 — Transaction Detail.** Mockup: `docs/mockups/transaction-detail.html`.
@@ -73,6 +75,27 @@ class TransactionDetailScreen extends StatefulWidget {
   /// Offered only when the transaction is actually deleted.
   final VoidCallback? onRestore;
 
+  /// **KHA-32/33** — this transaction's category and how sure the app was.
+  ///
+  /// Null renders no category section at all, which is the right behaviour for
+  /// a caller that has not loaded categories: an invented *Uncategorized* chip
+  /// would be a claim about the data rather than a statement about this
+  /// screen's inputs.
+  final CategoryAssignment? categoryAssignment;
+
+  /// **§6.1's second entry point** — tapping the category field opens the
+  /// S-12 correction sheet. Null renders the chip read-only.
+  final VoidCallback? onEditCategory;
+
+  /// **KHA-31 — "why is this categorized this way?"**
+  ///
+  /// Loaded lazily, when the user asks, because it is a database read (the
+  /// rule row plus the audit trail) that nobody needs on a screen they are
+  /// only glancing at. Null leaves the affordance off entirely rather than
+  /// offering an expander that opens onto nothing — the same rule the original
+  /// SMS panel follows for a manual entry.
+  final Future<CategoryProvenance> Function()? loadCategoryProvenance;
+
   /// **Edit, Delete and Restore are absent unless a callback is supplied**,
   /// and that rule is inherited from P3a rather than relaxed by P3b-2.
   ///
@@ -94,6 +117,9 @@ class TransactionDetailScreen extends StatefulWidget {
     this.onEdit,
     this.onDelete,
     this.onRestore,
+    this.categoryAssignment,
+    this.onEditCategory,
+    this.loadCategoryProvenance,
     super.key,
   });
 
@@ -122,7 +148,20 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
         padding: const EdgeInsetsDirectional.all(16),
         children: <Widget>[
           if (txn.isDeleted) const _DeletedBanner(),
-          _Header(transaction: txn, internalTransferState: transferState),
+          _Header(
+            transaction: txn,
+            internalTransferState: transferState,
+            categoryAssignment: widget.categoryAssignment,
+            // A deleted transaction's category is read-only: it counts toward
+            // nothing, so correcting it would train the learning loop on a row
+            // the user has already said should not exist. Restore first.
+            onEditCategory: txn.isDeleted ? null : widget.onEditCategory,
+          ),
+          if (widget.loadCategoryProvenance != null)
+            _CategoryProvenancePanel(
+              load: widget.loadCategoryProvenance!,
+              assignment: widget.categoryAssignment,
+            ),
           const SizedBox(height: 16),
           _Fields(
             transaction: txn,
@@ -293,8 +332,15 @@ class _DeletedBanner extends StatelessWidget {
 class _Header extends StatelessWidget {
   final LedgerTransaction transaction;
   final String? internalTransferState;
+  final CategoryAssignment? categoryAssignment;
+  final VoidCallback? onEditCategory;
 
-  const _Header({required this.transaction, this.internalTransferState});
+  const _Header({
+    required this.transaction,
+    this.internalTransferState,
+    this.categoryAssignment,
+    this.onEditCategory,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -357,6 +403,34 @@ class _Header extends StatelessWidget {
                   ? l10n.txnInternalTransferExcludedNote
                   : l10n.txnInternalTransferCandidateNote,
               style: text.bodySmall?.copyWith(color: AppColors.ink500),
+            ),
+          ],
+          // **design.md S-11's header `CategoryChip`, and §6.1's entry point.**
+          // Placed with the amount rather than down in the field list on
+          // purpose: the correction flow's whole premise (NFR-U7) is that the
+          // chip is the first thing a person reaches for when a category looks
+          // wrong, and burying it under eight rows would add a scroll to the
+          // product's highest-frequency interaction.
+          if (categoryAssignment != null) ...<Widget>[
+            const SizedBox(height: 10),
+            Row(
+              children: <Widget>[
+                Flexible(
+                  child: CategoryChip(
+                    key: const Key('txnDetail.categoryChip'),
+                    category: categoryAssignment!.category,
+                    band: categoryAssignment!.band,
+                    onTap: onEditCategory,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: ConfidenceIndicator(
+                    band: categoryAssignment!.band,
+                    confidence: categoryAssignment!.confidence,
+                  ),
+                ),
+              ],
             ),
           ],
           const SizedBox(height: 10),
@@ -660,6 +734,231 @@ class _Fields extends StatelessWidget {
       _ => l10n.txnSourceSms(bankDisplayName),
     };
   }
+}
+
+/// **KHA-31's promise, made answerable: "why is this categorized this way?"**
+///
+/// The requirement is that *every automatic categorization action shown in the
+/// UI remains traceable to its audit entry*. A screen that rendered
+/// `category_source` alone would answer *"rule"*, which is a label, not a
+/// reason. This panel answers with the three things a person would actually
+/// ask for:
+///
+///  1. **Who decided** — you, a rule, or nobody yet (ADR-010's actor
+///     vocabulary, which exists precisely to keep those apart).
+///  2. **Which rule**, when one fired, named as `{Merchant} → {Category}` and
+///     resolved from the live rule row — so a rule the user has since deleted
+///     shows as *"the rule that did this no longer exists"* rather than as a
+///     dangling id (KHA-103 clears `category_rule_id` with the rule, so this
+///     is a genuine "no longer exists", not a lookup failure).
+///  3. **The audit entries themselves**, verbatim, newest last. Summarising
+///     them would be the app telling the user what its own history says; NFR-A2
+///     is worth more when the trail is shown rather than paraphrased.
+///
+/// ## Loaded on demand, and why that is not laziness
+///
+/// The trail is a second query and it is the kind of thing a user asks for once
+/// a month. Loading it eagerly on every detail open would put a database read
+/// on the path of a screen people mostly glance at. `FutureBuilder` renders all
+/// three of design.md §3.4's states for this section — loading, error, data —
+/// and the error arm says so instead of rendering an empty history, because an
+/// empty history is a *claim* ("nothing ever categorised this") that a failed
+/// read has not established.
+class _CategoryProvenancePanel extends StatefulWidget {
+  final Future<CategoryProvenance> Function() load;
+  final CategoryAssignment? assignment;
+
+  const _CategoryProvenancePanel({required this.load, this.assignment});
+
+  @override
+  State<_CategoryProvenancePanel> createState() =>
+      _CategoryProvenancePanelState();
+}
+
+class _CategoryProvenancePanelState extends State<_CategoryProvenancePanel> {
+  /// The future is held in State rather than created in `build`, because
+  /// `FutureBuilder` re-subscribes on every rebuild and a future created inline
+  /// would re-run the query on each one. Standard Flutter trap, worth naming.
+  /// Null while nothing has been asked for; completes with **null** when the
+  /// read failed.
+  ///
+  /// A nullable *result* rather than a rejected `Future`, deliberately. A
+  /// rejected future has to have a listener attached in the same microtask or
+  /// Dart reports it as an unhandled asynchronous error — and the listener here
+  /// is attached by `FutureBuilder` during the *next* build, a frame later.
+  /// Catching inside [_load] means there is never a rejected future in flight,
+  /// so the failure becomes this panel's error state (which is the panel's
+  /// whole purpose) instead of an error escaping to the zone.
+  Future<CategoryProvenance?>? _pending;
+
+  /// Runs the loader and converts **any** failure — synchronous or
+  /// asynchronous — into a null result.
+  ///
+  /// The error object itself is deliberately not surfaced or logged: NFR-S4
+  /// keeps this layer out of the business of writing diagnostics that could
+  /// carry a merchant name, and the user-facing answer is the same whatever
+  /// went wrong ("this could not be loaded"), which is more useful to them than
+  /// a stack trace would be.
+  Future<CategoryProvenance?> _load() async {
+    try {
+      return await widget.load();
+    } on Object {
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final TextTheme text = Theme.of(context).textTheme;
+
+    if (_pending == null) {
+      return Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: TextButton.icon(
+          key: const Key('txnDetail.whyCategorized'),
+          // A **block** body, not an arrow: `setState(() => _pending = ...)`
+          // makes the closure *return* the assigned Future, which Flutter
+          // asserts on ("setState() callback argument returned a Future").
+          // The work is started outside the callback and only the field
+          // assignment is inside it, which is what the framework asks for.
+          onPressed: () {
+            // Wrapped so a loader that fails — synchronously or otherwise —
+            // becomes this panel's ERROR state rather than an unhandled
+            // asynchronous error escaping to the zone. A read that cannot
+            // complete must render "the history could not be loaded", never
+            // an empty history and never a crash: an empty history is a claim
+            // ("nothing ever categorised this") that a failed read has not
+            // established.
+            final Future<CategoryProvenance?> started = _load();
+            setState(() {
+              _pending = started;
+            });
+          },
+          icon: const Icon(Icons.history, size: 18),
+          label: Text(l10n.categoryWhyThisCategory),
+        ),
+      );
+    }
+
+    return FutureBuilder<CategoryProvenance?>(
+      future: _pending,
+      builder:
+          (BuildContext context, AsyncSnapshot<CategoryProvenance?> snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Padding(
+                key: Key('txnDetail.provenanceLoading'),
+                padding: EdgeInsetsDirectional.symmetric(vertical: 12),
+                child: SizedBox(
+                  height: 16,
+                  width: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              );
+            }
+            if (snapshot.hasError || !snapshot.hasData) {
+              return Padding(
+                key: const Key('txnDetail.provenanceError'),
+                padding: const EdgeInsetsDirectional.symmetric(vertical: 12),
+                child: Text(
+                  l10n.categoryProvenanceUnavailable,
+                  style: text.bodySmall?.copyWith(color: AppColors.error),
+                ),
+              );
+            }
+
+            final CategoryProvenance provenance = snapshot.data!;
+            return Container(
+              key: const Key('txnDetail.provenancePanel'),
+              margin: const EdgeInsetsDirectional.only(top: 12),
+              padding: const EdgeInsetsDirectional.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.ink100),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    l10n.categoryWhyThisCategory,
+                    style: text.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(_summary(l10n, provenance), style: text.bodyMedium),
+                  if (provenance.rule != null) ...<Widget>[
+                    const SizedBox(height: 4),
+                    Text(
+                      l10n.categoryProvenanceRule(
+                        provenance.rule!.merchantName,
+                      ),
+                      style: text.bodySmall?.copyWith(color: AppColors.ink700),
+                    ),
+                  ] else if (provenance.isAutomatic) ...<Widget>[
+                    const SizedBox(height: 4),
+                    Text(
+                      l10n.categoryProvenanceRuleGone,
+                      style: text.bodySmall?.copyWith(color: AppColors.ink700),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  if (provenance.auditTrail.isEmpty)
+                    Text(
+                      l10n.categoryProvenanceNoHistory,
+                      style: text.bodySmall?.copyWith(color: AppColors.ink500),
+                    )
+                  else
+                    for (final CategoryAuditEntry entry
+                        in provenance.auditTrail)
+                      Padding(
+                        padding: const EdgeInsetsDirectional.only(bottom: 4),
+                        child: Text(
+                          l10n.categoryProvenanceEntry(
+                            formatShortDateTime(entry.changedAt),
+                            _actorLabel(l10n, entry.actor),
+                          ),
+                          style: text.bodySmall?.copyWith(
+                            color: AppColors.ink700,
+                          ),
+                        ),
+                      ),
+                ],
+              ),
+            );
+          },
+    );
+  }
+
+  /// The one-sentence answer. Four genuinely different facts, four sentences —
+  /// a single "Categorized" would collapse the distinction the audit trail
+  /// exists to preserve.
+  String _summary(AppLocalizations l10n, CategoryProvenance provenance) {
+    if (provenance.isUserChosen) {
+      return l10n.categoryProvenanceUser;
+    }
+    if (provenance.isAutomatic) {
+      return l10n.categoryProvenanceAutomatic(
+        ((provenance.confidence ?? 0) * 100).round(),
+      );
+    }
+    if (provenance.isUndecided) {
+      return l10n.categoryProvenanceUndecided;
+    }
+    return l10n.categoryProvenanceUnknownSource;
+  }
+
+  /// ADR-010's actor strings in plain language. An unrecognised actor falls
+  /// through to the raw value rather than to a guess — §5.2's
+  /// forward-compatibility rule applied to a stored vocabulary, the same way
+  /// `_fxSourceLabel` handles an unknown rate source.
+  String _actorLabel(AppLocalizations l10n, String actor) => switch (actor) {
+    'user' => l10n.categoryActorUser,
+    'system_rule' => l10n.categoryActorRule,
+    'system' => l10n.categoryActorSystem,
+    _ => actor,
+  };
 }
 
 /// **AC-B1.2** — the collapsible original-message panel (design.md's

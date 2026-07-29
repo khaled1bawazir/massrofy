@@ -45,7 +45,11 @@ import '../../data/dao/category_fields.dart';
 /// Defined in `data/` because the DAO enforces AC-D3.1 against it and
 /// architecture §3 forbids `data → features` — see that file's own note.
 export '../../data/dao/category_fields.dart'
-    show CategoryReviewReason, StoredCategorySource, uncategorizedCategoryId;
+    show
+        CategoryReviewReason,
+        StoredCategorySource,
+        categoryReviewReasons,
+        uncategorizedCategoryId;
 
 /// Design §4's two buckets. This is a behavioural distinction, not a heading.
 enum CategoryGroup {

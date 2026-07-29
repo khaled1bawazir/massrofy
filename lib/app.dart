@@ -60,6 +60,21 @@ class MassrofyApp extends ConsumerWidget {
 /// re-locks on background (ADR-005) and obscures the app-switcher snapshot
 /// (ADR-014).
 ///
+/// ## Where the rest of the navigation lives (P4b)
+///
+/// This gateway is still the app's only *root*: everything a user can reach
+/// hangs off [HomePlaceholderScreen], which is what keeps ADR-005's guarantee
+/// checkable — no screen exists above the lock gate.
+///
+/// The **navigation graph itself** is
+/// `presentation/screens/categorization_routes.dart`, which is the single
+/// construction site for every P4b route (the needs-review inbox, category
+/// management, learned rules, transaction detail, the correction sheet). It is
+/// one file on purpose: `docs/lessons.md` records that *"'unreachable today' is
+/// a claim about **navigation**, not about code"* and that a reachability
+/// question must be answered *"by grepping for the construction site, never
+/// from the fact that the widget exists in the tree."* Grep there.
+///
 /// Kept as its own tiny widget (rather than inlined into [MassrofyApp])
 /// specifically so it can host a [WidgetsBindingObserver] with the
 /// `State` object's own lifecycle — `MassrofyApp` itself has no reason to

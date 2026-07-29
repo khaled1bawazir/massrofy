@@ -791,4 +791,450 @@ class AppLocalizationsAr extends AppLocalizations {
   String needsReviewTabTransfers(int count) {
     return 'تحويلات ($count)';
   }
+
+  @override
+  String get commonCancel => 'إلغاء';
+
+  @override
+  String get commonSave => 'حفظ';
+
+  @override
+  String get commonDelete => 'حذف';
+
+  @override
+  String get commonEdit => 'تعديل';
+
+  @override
+  String get commonRename => 'إعادة تسمية';
+
+  @override
+  String get commonCreate => 'إنشاء';
+
+  @override
+  String get commonConfirm => 'تأكيد';
+
+  @override
+  String get commonUndo => 'تراجع';
+
+  @override
+  String get commonRetry => 'أعد المحاولة';
+
+  @override
+  String get categoriesTitle => 'الفئات';
+
+  @override
+  String get categoriesEmptyTitle => 'لا توجد فئات بعد';
+
+  @override
+  String get categoriesEmptyBody =>
+      'ستظهر فئاتك الأساسية هنا فور انتهاء التطبيق من التهيئة.';
+
+  @override
+  String get categoriesUnavailable => 'تعذّر تحميل فئاتك. لم يتغيّر أي شيء.';
+
+  @override
+  String get categoryGroupSpending => 'الإنفاق';
+
+  @override
+  String get categoryGroupMoneyMovement => 'حركة الأموال';
+
+  @override
+  String categoryRowTransactionCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count معاملة',
+      many: '$count معاملة',
+      few: '$count معاملات',
+      two: 'معاملتان',
+      one: 'معاملة واحدة',
+      zero: 'لا توجد معاملات',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String categoryRowSystemCaption(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count معاملة · فئة نظام',
+      many: '$count معاملة · فئة نظام',
+      few: '$count معاملات · فئة نظام',
+      two: 'معاملتان · فئة نظام',
+      one: 'معاملة واحدة · فئة نظام',
+      zero: 'فئة نظام — لا يمكن إعادة تسميتها أو حذفها',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get categoryRenameTitle => 'إعادة تسمية الفئة';
+
+  @override
+  String categoryRenamed(String name) {
+    return 'تمت إعادة التسمية إلى $name';
+  }
+
+  @override
+  String categoryDeleteTitle(String name) {
+    return 'حذف \"$name\"؟';
+  }
+
+  @override
+  String categoryDeleteInUseBody(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'تحتوي هذه الفئة على $count معاملة. اختر ماذا يحدث لها:',
+      many: 'تحتوي هذه الفئة على $count معاملة. اختر ماذا يحدث لها:',
+      few: 'تحتوي هذه الفئة على $count معاملات. اختر ماذا يحدث لها:',
+      two: 'تحتوي هذه الفئة على معاملتين. اختر ماذا يحدث لهما:',
+      one: 'تحتوي هذه الفئة على معاملة واحدة. اختر ماذا يحدث لها:',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get categoryDeleteEmptyBody =>
+      'لا شيء يستخدم هذه الفئة، لذا لن يتغيّر شيء آخر.';
+
+  @override
+  String get categoryDeleteReassignLabel => 'انقل معاملاتها إلى';
+
+  @override
+  String categoryDeleted(String name) {
+    return 'تم حذف $name';
+  }
+
+  @override
+  String get categoryPickerTitle => 'اختر فئة';
+
+  @override
+  String categoryPickerTitleFor(String merchant) {
+    return 'تصنيف · $merchant';
+  }
+
+  @override
+  String get categoryPickerSearchHint => 'البحث عن فئة';
+
+  @override
+  String get categoryPickerRecent => 'الأخيرة';
+
+  @override
+  String categoryPickerNoResults(String query) {
+    return 'لا توجد فئة تطابق \"$query\"';
+  }
+
+  @override
+  String get categoryPickerNewCategory => 'فئة جديدة';
+
+  @override
+  String get categoryNewNameLabel => 'اسم الفئة';
+
+  @override
+  String get categoryNewIconLabel => 'الأيقونة';
+
+  @override
+  String get categoryNewCreateAndUse => 'إنشاء واستخدام';
+
+  @override
+  String get categoryNewDuplicateName =>
+      'توجد فئة بهذا الاسم مسبقاً — اختر اسماً آخر';
+
+  @override
+  String categoryAppliedAs(String category) {
+    return 'تم التصنيف كـ $category';
+  }
+
+  @override
+  String categoryScopeQuestion(String merchant) {
+    return 'هل تريد تطبيقها على المعاملات المستقبلية من \"$merchant\" أيضاً؟';
+  }
+
+  @override
+  String get categoryScopeQuestionGeneric =>
+      'هل تريد تطبيقها على المعاملات المستقبلية من هذا التاجر أيضاً؟';
+
+  @override
+  String get categoryScopeFuture => 'هذه والمستقبل';
+
+  @override
+  String get categoryScopeFutureHint => 'يُنشئ أو يُحدّث قاعدة هذا التاجر';
+
+  @override
+  String categoryScopeFutureCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'ويُكمل أيضاً $count معاملة سابقة غير مصنّفة',
+      many: 'ويُكمل أيضاً $count معاملة سابقة غير مصنّفة',
+      few: 'ويُكمل أيضاً $count معاملات سابقة غير مصنّفة',
+      two: 'ويُكمل أيضاً معاملتين سابقتين غير مصنّفتين',
+      one: 'ويُكمل أيضاً معاملة واحدة سابقة غير مصنّفة',
+      zero: 'يُنشئ أو يُحدّث قاعدة هذا التاجر',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get categoryScopeThisOnly => 'هذه المعاملة فقط';
+
+  @override
+  String get categoryScopeThisOnlyHint =>
+      'يترك قاعدة هذا التاجر الحالية كما هي تماماً';
+
+  @override
+  String get categoryScopeAutoConfirm => 'سيتم التطبيق بعد لحظات…';
+
+  @override
+  String get correctionAppliedToOne => 'تم تحديث الفئة';
+
+  @override
+  String correctionAppliedToMany(int count, String merchant) {
+    return 'تم تحديث $count معاملة من $merchant';
+  }
+
+  @override
+  String get categoryAutoApplied => 'طُبِّقت تلقائياً';
+
+  @override
+  String get categoryConfidenceHigh => 'مطابقة مؤكدة';
+
+  @override
+  String get categoryConfidenceLow => 'غير متأكد';
+
+  @override
+  String get categoryConfidenceNone => 'لم يُعثر على مطابقة';
+
+  @override
+  String categoryConfidenceWithValue(String label, int percent) {
+    return '$label ($percent٪)';
+  }
+
+  @override
+  String get reviewReasonUnknownMerchant =>
+      'لم نرَ هذا التاجر من قبل — إلى أي فئة ينتمي إنفاقه؟';
+
+  @override
+  String get reviewReasonNoRuleForMerchant =>
+      'نعرف هذا التاجر، لكن لم يحدّد أحد الفئة التي ينتمي إليها';
+
+  @override
+  String get reviewReasonLowConfidence =>
+      'وجدنا مطابقة قريبة لكننا لسنا واثقين بما يكفي لتطبيقها';
+
+  @override
+  String get reviewReasonGeneric => 'هذه تحتاج إلى حكمك';
+
+  @override
+  String get reviewInboxUnavailable =>
+      'تعذّر تحميل قائمة المراجعة. لم يتغيّر أي شيء.';
+
+  @override
+  String get reviewCountAllClear => 'كل شيء مُراجَع';
+
+  @override
+  String reviewCountNeedsReview(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count عنصر يحتاج مراجعة',
+      many: '$count عنصراً يحتاج مراجعة',
+      few: '$count عناصر تحتاج مراجعة',
+      two: 'عنصران يحتاجان مراجعة',
+      one: 'عنصر واحد يحتاج مراجعة',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String reviewCountBreakdown(int uncategorized, int flagged) {
+    return '$uncategorized غير مصنّفة · $flagged مُعلَّمة';
+  }
+
+  @override
+  String get reviewCountUnavailable => 'عدد عناصر المراجعة غير متاح حالياً';
+
+  @override
+  String get learnedRulesTitle => 'القواعد المتعلمة';
+
+  @override
+  String get learnedRulesEmptyTitle => 'لا توجد قواعد بعد';
+
+  @override
+  String get learnedRulesEmptyBody =>
+      'تصحيح فئة أي معاملة يُنشئ قاعدة تلقائياً، فتصل المعاملة التالية من نفس التاجر مصنَّفة.';
+
+  @override
+  String get learnedRulesUnavailable =>
+      'تعذّر تحميل قواعدك المتعلمة. لم يتغيّر أي شيء.';
+
+  @override
+  String ruleAppliedCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'طُبِّقت على $count معاملة',
+      many: 'طُبِّقت على $count معاملة',
+      few: 'طُبِّقت على $count معاملات',
+      two: 'طُبِّقت على معاملتين',
+      one: 'طُبِّقت على معاملة واحدة',
+      zero: 'لم تُطبَّق بعد',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get ruleSourceSeed => '· مُضمَّنة';
+
+  @override
+  String ruleEditTitle(String merchant) {
+    return 'تعديل قاعدة $merchant';
+  }
+
+  @override
+  String ruleEditCurrentCategory(String category) {
+    return 'الفئة الحالية: $category';
+  }
+
+  @override
+  String get ruleEditNewCategory => 'الفئة الجديدة';
+
+  @override
+  String ruleReapplyPrompt(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          'هل تريد إعادة تطبيق ذلك على $count معاملة حالية من هذا التاجر أيضاً؟',
+      many:
+          'هل تريد إعادة تطبيق ذلك على $count معاملة حالية من هذا التاجر أيضاً؟',
+      few:
+          'هل تريد إعادة تطبيق ذلك على $count معاملات حالية من هذا التاجر أيضاً؟',
+      two: 'هل تريد إعادة تطبيق ذلك على معاملتين حاليتين من هذا التاجر أيضاً؟',
+      one:
+          'هل تريد إعادة تطبيق ذلك على معاملة واحدة حالية من هذا التاجر أيضاً؟',
+      zero: 'لن تتغيّر أي معاملة حالية.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get ruleReapplyPromptCounting =>
+      'جارٍ حساب عدد المعاملات الحالية التي ستتغيّر…';
+
+  @override
+  String ruleReapplyYes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'نعم، $count معاملة',
+      zero: 'إعادة التطبيق',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get ruleReapplyNo => 'فقط للمستقبل';
+
+  @override
+  String ruleReappliedCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'تم تحديث القاعدة وإعادة تطبيقها على $count معاملة',
+      many: 'تم تحديث القاعدة وإعادة تطبيقها على $count معاملة',
+      few: 'تم تحديث القاعدة وإعادة تطبيقها على $count معاملات',
+      two: 'تم تحديث القاعدة وإعادة تطبيقها على معاملتين',
+      one: 'تم تحديث القاعدة وإعادة تطبيقها على معاملة واحدة',
+      zero: 'تم تحديث القاعدة. لم تحتج أي معاملة حالية إلى تغيير.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get ruleUpdatedGoingForward =>
+      'تم تحديث القاعدة. تُركت المعاملات الحالية كما هي.';
+
+  @override
+  String get ruleEditRefused => 'لم تعد هذه الفئة متاحة، لذا لم تتغيّر القاعدة';
+
+  @override
+  String ruleDeleteTitle(String merchant) {
+    return 'حذف قاعدة $merchant؟';
+  }
+
+  @override
+  String get ruleDeleteBody =>
+      'ستصل المعاملات المستقبلية من هذا التاجر غير مصنّفة. أما المعاملات التي صنّفتها سابقاً فتحتفظ بفئاتها.';
+
+  @override
+  String get ruleDeleted => 'تم حذف القاعدة';
+
+  @override
+  String get categoryWhyThisCategory => 'لماذا هذه الفئة؟';
+
+  @override
+  String get categoryProvenanceUser => 'أنت اخترت هذه الفئة.';
+
+  @override
+  String categoryProvenanceAutomatic(int percent) {
+    return 'طبّقتها قاعدة متعلمة تلقائياً، بثقة $percent٪.';
+  }
+
+  @override
+  String get categoryProvenanceUndecided =>
+      'نظر التطبيق ولم يستطع التحديد، لذا تُركت غير مصنّفة.';
+
+  @override
+  String get categoryProvenanceUnknownSource =>
+      'ضُبطت هذه الفئة قبل أن يبدأ التطبيق بتسجيل الكيفية.';
+
+  @override
+  String categoryProvenanceRule(String merchant) {
+    return 'القاعدة: $merchant';
+  }
+
+  @override
+  String get categoryProvenanceRuleGone =>
+      'القاعدة التي فعلت ذلك حُذفت منذ ذلك الحين.';
+
+  @override
+  String get categoryProvenanceNoHistory =>
+      'لا يوجد سجل تصنيف لهذه المعاملة بعد.';
+
+  @override
+  String categoryProvenanceEntry(String when, String actor) {
+    return '$when · $actor';
+  }
+
+  @override
+  String get categoryProvenanceUnavailable => 'تعذّر تحميل سجل هذه الفئة.';
+
+  @override
+  String get categoryActorUser => 'أنت';
+
+  @override
+  String get categoryActorRule => 'قاعدة متعلمة';
+
+  @override
+  String get categoryActorSystem => 'التطبيق';
+
+  @override
+  String get categoryLockedBody =>
+      'فئاتك مشفَّرة وتبقى مقفلة حتى تفتح قفل التطبيق.';
+
+  @override
+  String get transactionUnavailable => 'تعذّر تحميل هذه المعاملة.';
+
+  @override
+  String get transactionGoneTitle => 'لم تعد هذه المعاملة هنا';
+
+  @override
+  String get transactionGoneBody =>
+      'حُذفت أو دُمجت في معاملة أخرى. يمكنك إيجادها ضمن المحذوفة مؤخراً.';
+
+  @override
+  String get completionMessageGone => 'لم تعد هذه الرسالة في قائمة المراجعة';
 }

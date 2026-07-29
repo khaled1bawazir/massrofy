@@ -80,12 +80,42 @@ final class InternalTransferDecisionService {
     InternalTransferLink link,
     InternalTransferVerdict verdict, {
     DateTime? now,
+  }) => decidePairByIds(
+    outTransactionId: link.outTransactionId,
+    inTransactionId: link.inTransactionId,
+    groupId: link.groupId,
+    verdict: verdict,
+    now: now,
+  );
+
+  /// The same decision, addressed by the three things the write actually uses.
+  ///
+  /// Added for P4b's review-inbox wiring (KHA-32). `TransferReviewItem` — the
+  /// value type S-18 renders — carries the two ids and the group id but **not**
+  /// `InternalTransferEvidence`, because the card never displays it. Rebuilding
+  /// a whole [InternalTransferLink] at the call site would have meant inventing
+  /// an evidence value to satisfy the constructor, and an invented evidence
+  /// value is exactly the kind of thing that later gets read as if it were
+  /// observed.
+  ///
+  /// Note that [decidePair] has always ignored `link.evidence` for the write:
+  /// this method is not a new capability, it is the existing one stated in
+  /// terms of its real inputs.
+  Future<void> decidePairByIds({
+    required int outTransactionId,
+    required int inTransactionId,
+    required String groupId,
+    required InternalTransferVerdict verdict,
+    DateTime? now,
   }) {
     return transactionDao.setInternalTransferDecision(
-      transactionIds: <int>[link.outTransactionId, link.inTransactionId],
+      transactionIds: <int>[outTransactionId, inTransactionId],
       state: verdict.persistedState,
+      // Deliberately **not** written on rejection: the rows are not a pair, so
+      // recording a group linking them would assert something the user has
+      // just denied.
       groupId: verdict == InternalTransferVerdict.confirmedInternal
-          ? link.groupId
+          ? groupId
           : null,
       actorDetail: 'internal_transfer_${verdict.name}',
       now: now,

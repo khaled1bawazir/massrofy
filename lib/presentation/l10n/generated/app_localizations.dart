@@ -1399,6 +1399,582 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Transfers ({count})'**
   String needsReviewTabTransfers(int count);
+
+  /// P4b shared button label. Reused across the reassignment, rename and rule dialogs so the same action never reads two ways.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get commonCancel;
+
+  /// P4b shared button label.
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get commonSave;
+
+  /// P4b shared button label for a destructive action, always paired with an icon (NFR-U4).
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get commonDelete;
+
+  /// P4b shared button/tooltip label.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get commonEdit;
+
+  /// S-14's rename affordance tooltip (AC-C3.4).
+  ///
+  /// In en, this message translates to:
+  /// **'Rename'**
+  String get commonRename;
+
+  /// S-14's new-category submit.
+  ///
+  /// In en, this message translates to:
+  /// **'Create'**
+  String get commonCreate;
+
+  /// S-13's explicit scope confirmation, for a user who does not want to wait for the auto-confirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm'**
+  String get commonConfirm;
+
+  /// AC-C5.2's snackbar action. design.md §6.6 chose undo over a blocking confirmation for category corrections.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get commonUndo;
+
+  /// design.md §3.4's recoverable-error action.
+  ///
+  /// In en, this message translates to:
+  /// **'Try again'**
+  String get commonRetry;
+
+  /// S-14 app bar title (docs/mockups/categories-rules.html).
+  ///
+  /// In en, this message translates to:
+  /// **'Categories'**
+  String get categoriesTitle;
+
+  /// S-14 empty state — only reachable before the design §4 starter list has been seeded.
+  ///
+  /// In en, this message translates to:
+  /// **'No categories yet'**
+  String get categoriesEmptyTitle;
+
+  /// S-14 empty state body. States what will happen rather than leaving a blank screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Your starter categories will appear here as soon as the app finishes setting up.'**
+  String get categoriesEmptyBody;
+
+  /// design.md §3.4 Error state for S-14. Reassures that a failed READ changed nothing, because a user seeing an error about their categories will assume the worst.
+  ///
+  /// In en, this message translates to:
+  /// **'Your categories could not be loaded. Nothing has been changed.'**
+  String get categoriesUnavailable;
+
+  /// design.md §4's first bucket: categories that compete for budget share and appear in breakdowns.
+  ///
+  /// In en, this message translates to:
+  /// **'Spending'**
+  String get categoryGroupSpending;
+
+  /// design.md §4's second bucket: income/transfers/withdrawals, excluded from spend totals.
+  ///
+  /// In en, this message translates to:
+  /// **'Money movement'**
+  String get categoryGroupMoneyMovement;
+
+  /// S-14 row caption. The number S-15 quotes back on delete, so it is shown before the user commits to anything.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{No transactions} one{1 transaction} other{{count} transactions}}'**
+  String categoryRowTransactionCount(int count);
+
+  /// The Uncategorized row. Says WHY no affordances are offered, so their absence reads as deliberate rather than as a missing feature (design.md §4, AC-C1.1).
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{System category — cannot be renamed or deleted} one{1 transaction · System category} other{{count} transactions · System category}}'**
+  String categoryRowSystemCaption(int count);
+
+  /// AC-C3.4 — the id is stable across a rename, so nothing is re-categorized.
+  ///
+  /// In en, this message translates to:
+  /// **'Rename category'**
+  String get categoryRenameTitle;
+
+  /// Rename confirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'Renamed to {name}'**
+  String categoryRenamed(String name);
+
+  /// S-15 dialog title.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete \"{name}\"?'**
+  String categoryDeleteTitle(String name);
+
+  /// AC-C3.3 — the delete is blocked until the user decides. The sentence states the requirement rather than warning vaguely.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{This category has 1 transaction. Choose what happens to it:} other{This category has {count} transactions. Choose what happens to them:}}'**
+  String categoryDeleteInUseBody(int count);
+
+  /// The no-decision-needed path. Asking where zero transactions should go would be theatre.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing is using this category, so nothing else will change.'**
+  String get categoryDeleteEmptyBody;
+
+  /// S-15's picker label. Uncategorized is one of the options (AC-C3.3's 'or set to Uncategorized').
+  ///
+  /// In en, this message translates to:
+  /// **'Move its transactions to'**
+  String get categoryDeleteReassignLabel;
+
+  /// Delete confirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted {name}'**
+  String categoryDeleted(String name);
+
+  /// S-12 sheet title when the transaction names no merchant.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a category'**
+  String get categoryPickerTitle;
+
+  /// S-12 sheet title. Naming the merchant is what makes the scope question that follows make sense.
+  ///
+  /// In en, this message translates to:
+  /// **'Categorize · {merchant}'**
+  String categoryPickerTitleFor(String merchant);
+
+  /// design.md §6.2's search field.
+  ///
+  /// In en, this message translates to:
+  /// **'Search categories'**
+  String get categoryPickerSearchHint;
+
+  /// design.md §6.2's last-three-used row.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent'**
+  String get categoryPickerRecent;
+
+  /// design.md §3.4's Filtered-empty state, which must read differently from a true empty.
+  ///
+  /// In en, this message translates to:
+  /// **'No category matches \"{query}\"'**
+  String categoryPickerNoResults(String query);
+
+  /// design.md §6.5's inline create affordance.
+  ///
+  /// In en, this message translates to:
+  /// **'New category'**
+  String get categoryPickerNewCategory;
+
+  /// §6.5's name field.
+  ///
+  /// In en, this message translates to:
+  /// **'Category name'**
+  String get categoryNewNameLabel;
+
+  /// §6.5's icon choice.
+  ///
+  /// In en, this message translates to:
+  /// **'Icon'**
+  String get categoryNewIconLabel;
+
+  /// §6.5 — the new category is applied to the transaction the user was correcting, which is why they opened the form.
+  ///
+  /// In en, this message translates to:
+  /// **'Create and use'**
+  String get categoryNewCreateAndUse;
+
+  /// AC-C3.2. Names the problem rather than saying 'invalid input' (brand.md voice principle 4). CategoryDao.createCustom folds the name, so case, spacing and Arabic orthography all collide.
+  ///
+  /// In en, this message translates to:
+  /// **'A category with this name already exists — choose another name'**
+  String get categoryNewDuplicateName;
+
+  /// design.md §6.4's in-sheet confirmation. The category is ALREADY applied when this renders — the scope strip must not read as if the correction were still pending.
+  ///
+  /// In en, this message translates to:
+  /// **'Categorized as {category}'**
+  String categoryAppliedAs(String category);
+
+  /// US-D5 / AC-C2.3's scope question.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply this to future transactions from \"{merchant}\" too?'**
+  String categoryScopeQuestion(String merchant);
+
+  /// The same question when the merchant has no resolved name.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply this to future transactions from this merchant too?'**
+  String get categoryScopeQuestionGeneric;
+
+  /// AC-D5.1's default option, pre-selected because it trains the learning loop (US-D2/D3).
+  ///
+  /// In en, this message translates to:
+  /// **'This and future ones'**
+  String get categoryScopeFuture;
+
+  /// Shown while the affected count is still loading, so a number never appears out of nowhere.
+  ///
+  /// In en, this message translates to:
+  /// **'Creates or updates this merchant\'s rule'**
+  String get categoryScopeFutureHint;
+
+  /// AC-C5.1 + AC-D5.3 — the bulk half, stated BEFORE the user commits. Only uncategorized rows are counted; rewriting an already-categorized one is AC-D4.4's operation and asks separately.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{Creates or updates this merchant\'s rule} one{Also fills in 1 earlier uncategorized transaction} other{Also fills in {count} earlier uncategorized transactions}}'**
+  String categoryScopeFutureCount(int count);
+
+  /// US-D5's one-off (e.g. a supermarket purchase that was actually a gift).
+  ///
+  /// In en, this message translates to:
+  /// **'Just this transaction'**
+  String get categoryScopeThisOnly;
+
+  /// AC-D5.2's guarantee, stated where the choice is made.
+  ///
+  /// In en, this message translates to:
+  /// **'Leaves this merchant\'s existing rule exactly as it is'**
+  String get categoryScopeThisOnlyHint;
+
+  /// design.md §6.4's auto-confirm. Deliberately not a live countdown: a ticking number invites the user to wait for it, and the whole point is that they need not.
+  ///
+  /// In en, this message translates to:
+  /// **'Applying in a moment…'**
+  String get categoryScopeAutoConfirm;
+
+  /// AC-C2.1's immediate save, for a correction that touched one row.
+  ///
+  /// In en, this message translates to:
+  /// **'Category updated'**
+  String get correctionAppliedToOne;
+
+  /// AC-D5.3 — the merchant-wide option states how many existing transactions were affected. Mirrors the mockup's toast wording.
+  ///
+  /// In en, this message translates to:
+  /// **'Updated {count} transactions from {merchant}'**
+  String correctionAppliedToMany(int count, String merchant);
+
+  /// design.md §3.3's 'Auto-categorized by rule' indicator, as the sparkle icon's semantics label so the fact reaches a screen-reader user (NFR-U4/U1).
+  ///
+  /// In en, this message translates to:
+  /// **'Applied automatically'**
+  String get categoryAutoApplied;
+
+  /// KHA-32's confidence display, banded. At or above autoApplyThreshold (AC-D2.2).
+  ///
+  /// In en, this message translates to:
+  /// **'Confident match'**
+  String get categoryConfidenceHigh;
+
+  /// Below the threshold, or a tier that may never auto-apply. The app is asking (AC-C4.1).
+  ///
+  /// In en, this message translates to:
+  /// **'Not sure'**
+  String get categoryConfidenceLow;
+
+  /// AC-D2.4 — a never-before-seen merchant, never confidently categorized by coincidence.
+  ///
+  /// In en, this message translates to:
+  /// **'No match found'**
+  String get categoryConfidenceNone;
+
+  /// The band plus the raw figure. The band is what a person acts on; the figure is what makes the app checkable, and hiding it would sit oddly beside an audit trail this product otherwise exposes in full.
+  ///
+  /// In en, this message translates to:
+  /// **'{label} ({percent}%)'**
+  String categoryConfidenceWithValue(String label, int percent);
+
+  /// CategoryReviewReason.unknownMerchant. Three reasons, three questions — collapsing them would make the inbox say the wrong sentence about half its rows.
+  ///
+  /// In en, this message translates to:
+  /// **'We have not seen this merchant before — where does its spending belong?'**
+  String get reviewReasonUnknownMerchant;
+
+  /// CategoryReviewReason.noRuleForMerchant.
+  ///
+  /// In en, this message translates to:
+  /// **'We know this merchant, but nobody has said which category it belongs in'**
+  String get reviewReasonNoRuleForMerchant;
+
+  /// CategoryReviewReason.lowConfidenceCategory — including every T4 'did you mean' suggestion, which ADR-008 forbids applying at any confidence.
+  ///
+  /// In en, this message translates to:
+  /// **'We found a close match but we are not sure enough to apply it'**
+  String get reviewReasonLowConfidence;
+
+  /// Fallback for an unrecognised review reason — §5.2's forward-compatibility rule applied to a stored vocabulary.
+  ///
+  /// In en, this message translates to:
+  /// **'This one needs your judgement'**
+  String get reviewReasonGeneric;
+
+  /// design.md §3.4 Error state for S-18. Never rendered as an empty inbox: 'nothing needs review' is this screen's good-news state and showing it wrongly is the worst thing it can do.
+  ///
+  /// In en, this message translates to:
+  /// **'The review inbox could not be loaded. Nothing has been changed.'**
+  String get reviewInboxUnavailable;
+
+  /// design.md §5's ReviewCountCard at zero: it recedes visually. A queue that shouted about being empty would train the user to ignore it.
+  ///
+  /// In en, this message translates to:
+  /// **'All caught up'**
+  String get reviewCountAllClear;
+
+  /// AC-C4.2 — the count of items needing review, visible from the main screen.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{1 item needs review} other{{count} items need review}}'**
+  String reviewCountNeedsReview(int count);
+
+  /// What the badge number is made of. AC-C1.2 counts uncategorized rows in this queue, and a user who did not know that would be looking for that many PROBLEMS. Deliberately does NOT include unparsed messages: KHA-32's done-check defines the badge as flagged plus uncategorized, and S-18's own tabs carry the message count. The two figures overlap (a row can be both flagged and uncategorized), so they do not add up to the headline — which is why the headline is a union, not a sum.
+  ///
+  /// In en, this message translates to:
+  /// **'{uncategorized} uncategorized · {flagged} flagged'**
+  String reviewCountBreakdown(int uncategorized, int flagged);
+
+  /// design.md §3.4 Error state. A failed read must never render as a reassuring zero.
+  ///
+  /// In en, this message translates to:
+  /// **'The review count is unavailable right now'**
+  String get reviewCountUnavailable;
+
+  /// S-16 app bar title (US-D4).
+  ///
+  /// In en, this message translates to:
+  /// **'Learned rules'**
+  String get learnedRulesTitle;
+
+  /// S-16 empty state.
+  ///
+  /// In en, this message translates to:
+  /// **'No rules yet'**
+  String get learnedRulesEmptyTitle;
+
+  /// The copy does real work: it explains how rules come into existence, so an empty screen reads as 'you have not corrected anything yet' rather than 'this feature is broken'.
+  ///
+  /// In en, this message translates to:
+  /// **'Correcting any transaction\'s category teaches a rule automatically, so the next one from that merchant arrives already sorted.'**
+  String get learnedRulesEmptyBody;
+
+  /// design.md §3.4 Error state for S-16.
+  ///
+  /// In en, this message translates to:
+  /// **'Your learned rules could not be loaded. Nothing has been changed.'**
+  String get learnedRulesUnavailable;
+
+  /// AC-D4.1's per-rule detail.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{Not applied yet} one{Applied to 1 transaction} other{Applied to {count} transactions}}'**
+  String ruleAppliedCount(int count);
+
+  /// A seed rule versus one the user taught. AC-D3.1 makes a user rule outrank a seed rule, so the two should not look identical.
+  ///
+  /// In en, this message translates to:
+  /// **'· Built in'**
+  String get ruleSourceSeed;
+
+  /// S-17 dialog title.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit rule for {merchant}'**
+  String ruleEditTitle(String merchant);
+
+  /// S-17 — what the rule says today.
+  ///
+  /// In en, this message translates to:
+  /// **'Currently: {category}'**
+  String ruleEditCurrentCategory(String category);
+
+  /// AC-D4.2 — changing this changes what future transactions get.
+  ///
+  /// In en, this message translates to:
+  /// **'New category'**
+  String get ruleEditNewCategory;
+
+  /// AC-D4.4's required prompt. The count is computed BEFORE the dialog can promise it, so the button cannot name a number the write does not deliver.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{No existing transactions would change.} one{Also re-apply this to 1 existing transaction from this merchant?} other{Also re-apply this to {count} existing transactions from this merchant?}}'**
+  String ruleReapplyPrompt(int count);
+
+  /// Shown while the count is in flight. The re-apply button stays disabled until it arrives — a button reading 'Yes, ? transactions' would ask the user to consent to something unspecified.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking how many existing transactions this would change…'**
+  String get ruleReapplyPromptCounting;
+
+  /// AC-D4.4's affirmative.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{Re-apply} other{Yes, {count} transactions}}'**
+  String ruleReapplyYes(int count);
+
+  /// AC-D4.4's negative — AC-D4.2 without the history rewrite.
+  ///
+  /// In en, this message translates to:
+  /// **'Going forward only'**
+  String get ruleReapplyNo;
+
+  /// AC-D4.4's confirmation. Each affected transaction also got its own audit entry naming the rule — a bulk re-apply that wrote no history would be a defect (KHA-34).
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{Rule updated. No existing transactions needed changing.} one{Rule updated and re-applied to 1 transaction} other{Rule updated and re-applied to {count} transactions}}'**
+  String ruleReappliedCount(int count);
+
+  /// AC-D4.2 alone — states the half the user chose NOT to do, so 'nothing visibly happened' is explained rather than mysterious.
+  ///
+  /// In en, this message translates to:
+  /// **'Rule updated. Existing transactions were left as they are.'**
+  String get ruleUpdatedGoingForward;
+
+  /// KHA-104's refusal reaching the user. The rule is declined rather than written against a category nothing can render.
+  ///
+  /// In en, this message translates to:
+  /// **'That category is no longer available, so the rule was not changed'**
+  String get ruleEditRefused;
+
+  /// AC-D4.3's confirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete the rule for {merchant}?'**
+  String ruleDeleteTitle(String merchant);
+
+  /// AC-D4.3, both halves. A user who believes deleting a rule will un-categorize a year of history will never delete a bad rule.
+  ///
+  /// In en, this message translates to:
+  /// **'Future transactions from this merchant will arrive uncategorized. Transactions you have already categorized keep their categories.'**
+  String get ruleDeleteBody;
+
+  /// AC-D4.3 confirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'Rule deleted'**
+  String get ruleDeleted;
+
+  /// KHA-31 — every automatic categorization stays traceable to its audit entry. Loaded on demand, because it is a second query for a question asked rarely.
+  ///
+  /// In en, this message translates to:
+  /// **'Why this category?'**
+  String get categoryWhyThisCategory;
+
+  /// category_source = 'user'. Deliberately not phrased as a confidence: 'you told us' is a different kind of fact from 'we are sure'.
+  ///
+  /// In en, this message translates to:
+  /// **'You chose this category.'**
+  String get categoryProvenanceUser;
+
+  /// AC-D2.2 / AC-F5.2 — the automatic case, naming the rule below.
+  ///
+  /// In en, this message translates to:
+  /// **'A learned rule applied this automatically, at {percent}% confidence.'**
+  String categoryProvenanceAutomatic(int percent);
+
+  /// category_source = 'none'. A real answer, not an absence — AC-D2.4's honest outcome.
+  ///
+  /// In en, this message translates to:
+  /// **'The app looked and could not decide, so this is left uncategorized.'**
+  String get categoryProvenanceUndecided;
+
+  /// A row written before P4a. Saying so is better than inventing a provenance.
+  ///
+  /// In en, this message translates to:
+  /// **'This category was set before the app started recording how.'**
+  String get categoryProvenanceUnknownSource;
+
+  /// AC-F5.2 — which rule fired, resolved from the live rule row.
+  ///
+  /// In en, this message translates to:
+  /// **'Rule: {merchant}'**
+  String categoryProvenanceRule(String merchant);
+
+  /// Honest rather than a dangling id. KHA-103 clears category_rule_id with the rule, so this is a genuine 'no longer exists', not a lookup failure.
+  ///
+  /// In en, this message translates to:
+  /// **'The rule that did this has since been deleted.'**
+  String get categoryProvenanceRuleGone;
+
+  /// An empty trail is a claim, so it is only ever shown after a successful read.
+  ///
+  /// In en, this message translates to:
+  /// **'No categorization history for this transaction yet.'**
+  String get categoryProvenanceNoHistory;
+
+  /// One audit line, shown verbatim rather than summarised (NFR-A2).
+  ///
+  /// In en, this message translates to:
+  /// **'{when} · {actor}'**
+  String categoryProvenanceEntry(String when, String actor);
+
+  /// design.md §3.4 Error state. An empty history is a claim a failed read has not established.
+  ///
+  /// In en, this message translates to:
+  /// **'The history for this category could not be loaded.'**
+  String get categoryProvenanceUnavailable;
+
+  /// ADR-010 actor 'user'.
+  ///
+  /// In en, this message translates to:
+  /// **'You'**
+  String get categoryActorUser;
+
+  /// ADR-010 actor 'system_rule' — the distinction between what the app did and what the person did is the whole value of the trail.
+  ///
+  /// In en, this message translates to:
+  /// **'A learned rule'**
+  String get categoryActorRule;
+
+  /// ADR-010 actor 'system'.
+  ///
+  /// In en, this message translates to:
+  /// **'The app'**
+  String get categoryActorSystem;
+
+  /// design.md §3.4's Locked state. ADR-005 makes the lock cryptographic, so this is a statement of fact rather than a UI courtesy.
+  ///
+  /// In en, this message translates to:
+  /// **'Your categories are encrypted and stay locked until you unlock the app.'**
+  String get categoryLockedBody;
+
+  /// design.md §3.4 Error state for S-11, including KHA-74's unreadable-amount case.
+  ///
+  /// In en, this message translates to:
+  /// **'This transaction could not be loaded.'**
+  String get transactionUnavailable;
+
+  /// Reachable without any bug: deleted or merged away while this screen was open.
+  ///
+  /// In en, this message translates to:
+  /// **'This transaction is no longer here'**
+  String get transactionGoneTitle;
+
+  /// US-B8 — nothing is destroyed, and the user is told where it went.
+  ///
+  /// In en, this message translates to:
+  /// **'It was deleted or merged into another transaction. You can find it under Recently deleted.'**
+  String get transactionGoneBody;
+
+  /// CompletionMessageUnavailable — two screens open on one queue, or a background sweep reclassified it. Not a crash.
+  ///
+  /// In en, this message translates to:
+  /// **'That message is no longer in the review queue'**
+  String get completionMessageGone;
 }
 
 class _AppLocalizationsDelegate

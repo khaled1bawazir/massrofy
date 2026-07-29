@@ -92,6 +92,71 @@ const Set<String> categoryReviewReasons = <String>{
 String? normalizeStoredCategoryId(String? categoryId) =>
     categoryId == uncategorizedCategoryId ? null : categoryId;
 
+/// **Everything about one transaction's category, captured so it can be put
+/// back exactly** — AC-C5.2's *"undo reverts all affected transactions to
+/// their PRIOR categories, not to a default"*.
+///
+/// ## Why this is a snapshot of six fields and not just `categoryId`
+///
+/// A bulk categorization does not only change `category_id`. It also stamps
+/// `category_source = 'user'`, sets `category_confidence` to 1.0, clears
+/// `category_rule_id`, adds `categoryId` to `user_edited_fields`, and lowers a
+/// review flag the categorizer had raised. An undo that restored only the id
+/// would leave the row **permanently user-owned** — so the learned rule could
+/// never categorise it again (AC-D3.1 would forbid it), and the review flag it
+/// had raised would stay down. The row would look restored and behave
+/// differently forever.
+///
+/// So the undo restores the whole category-shaped part of the row. Taking a
+/// snapshot before the write, rather than computing an inverse afterwards, is
+/// what makes that exact rather than approximate.
+///
+/// **This is a value type, not a row.** It is built from a [TransactionRow] and
+/// handed back to `TransactionDao.restoreCategorySnapshot`; nothing else in the
+/// app may write these columns together.
+final class CategorySnapshot {
+  final int transactionId;
+  final String? categoryId;
+  final String? categorySource;
+  final double? categoryConfidence;
+  final int? categoryRuleId;
+
+  /// The **encoded** `user_edited_fields` string, carried verbatim. Encoded
+  /// rather than decoded because restoring must not reorder or normalise a
+  /// column this class does not own.
+  final String? userEditedFields;
+
+  final bool needsReview;
+  final String? reviewReason;
+
+  const CategorySnapshot({
+    required this.transactionId,
+    required this.categoryId,
+    required this.categorySource,
+    required this.categoryConfidence,
+    required this.categoryRuleId,
+    required this.userEditedFields,
+    required this.needsReview,
+    required this.reviewReason,
+  });
+
+  /// Captures [row]'s category state as it stands right now.
+  factory CategorySnapshot.of(TransactionRow row) => CategorySnapshot(
+    transactionId: row.id,
+    categoryId: row.categoryId,
+    categorySource: row.categorySource,
+    categoryConfidence: row.categoryConfidence,
+    categoryRuleId: row.categoryRuleId,
+    userEditedFields: row.userEditedFields,
+    needsReview: row.needsReview,
+    reviewReason: row.reviewReason,
+  );
+
+  /// Ids only — never a category name, never a merchant (NFR-S4, ADR-015).
+  @override
+  String toString() => 'CategorySnapshot(#$transactionId)';
+}
+
 /// **AC-D3.1's precondition, in one function.** True when a person has
 /// answered the category question for this row, so no automatic path may
 /// write to it.

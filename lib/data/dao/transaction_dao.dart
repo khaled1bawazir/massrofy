@@ -14,6 +14,7 @@ export '../../core/types/edited.dart' show Edited;
 export 'category_fields.dart'
     show
         CategoryReviewReason,
+        CategorySnapshot,
         StoredCategorySource,
         isUserOwnedCategory,
         normalizeStoredCategoryId,
@@ -22,6 +23,27 @@ export 'user_edited_fields.dart'
     show TransactionField, decodeUserEditedFields, encodeUserEditedFields;
 
 part 'transaction_dao.g.dart';
+
+/// The `review_reason` values raised by **ADR-017's duplicate detection**, and
+/// therefore the only ones AC-A5.3's "keep both" is allowed to clear.
+///
+/// The sibling of `categoryReviewReasons` in `category_fields.dart`, and it
+/// exists for the same reason: `transactions.review_reason` is one column
+/// written by several features, and each feature may only lower a flag *it*
+/// raised. Answering "these are two separate purchases" must not silently
+/// answer "where does this shop's spending belong?".
+///
+/// **Duplicated from `ReviewReason` in
+/// `features/ingestion/duplicate_policy.dart` rather than imported**, because
+/// architecture §3's dependency rule runs `features → data` and never the
+/// reverse — the same reason `category_fields.dart` lives in `data/` at all.
+/// The duplication is made safe by a test that asserts the two sets agree, so
+/// adding a reason in one place and not the other fails CI rather than
+/// producing a flag nothing can clear.
+const Set<String> duplicateReviewReasons = <String>{
+  'possible_duplicate',
+  'possible_authorisation_posting_pair',
+};
 
 /// One stored ADR-002 money triple, carried **verbatim** between two rows.
 ///
@@ -2203,6 +2225,189 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
   Future<TransactionRow?> byIdOrNull(int id) => (select(
     transactions,
   )..where((Transactions t) => t.id.equals(id))).getSingleOrNull();
+
+  /// One merchant's **live** transactions, newest first — the population that
+  /// AC-C5.1's bulk categorization, AC-D5.3's affected count and AC-D4.4's
+  /// re-apply-to-history all act on.
+  ///
+  /// Soft-deleted rows are excluded for the same reason [watchLive] excludes
+  /// them: a deleted transaction is out of every list and every total until it
+  /// is restored, and "we updated 12 transactions" must not be counting rows
+  /// the user cannot see.
+  Future<List<TransactionRow>> liveForMerchant(int merchantId) {
+    return (select(transactions)
+          ..where(
+            (Transactions t) =>
+                t.merchantId.equals(merchantId) & t.isDeleted.equals(false),
+          )
+          ..orderBy(<OrderClauseGenerator<Transactions>>[
+            (Transactions t) => OrderingTerm.desc(t.occurredAt),
+            (Transactions t) => OrderingTerm.desc(t.id),
+          ]))
+        .get();
+  }
+
+  /// **AC-A5.3 — "these really are two separate purchases."**
+  ///
+  /// Clears a **duplicate** review flag and the pointer that named the other
+  /// row, leaving both transactions live and both counted in every total. That
+  /// is the whole point of the acceptance criterion: two genuine same-amount
+  /// purchases on the same day must both survive, and the app must not need to
+  /// guess which case it is looking at (`duplicate_policy.dart` — AC-A5.2 and
+  /// AC-A5.3 can produce byte-identical evidence).
+  ///
+  /// ## Why this is its own method and not a `flagAsPossibleDuplicate(null)`
+  ///
+  /// That method's parameters are non-null on purpose: raising a flag always
+  /// names a reason and a counterpart. Making them nullable so one call site
+  /// could *lower* a flag would put the raise and the clear one argument apart,
+  /// which is how a caller ends up clearing a flag it meant to raise.
+  ///
+  /// **It clears only a duplicate flag.** A row flagged for a *different*
+  /// question — an unproven transfer, a low-confidence category — keeps its
+  /// flag, exactly as `_clearCategoryReviewFlag` refuses to clear a duplicate
+  /// flag from the other direction. Answering one question does not answer
+  /// another, and this is the symmetric half of a rule this class already
+  /// enforces.
+  ///
+  /// Audited (NFR-A2): the user made a judgement about their own money, and a
+  /// judgement that leaves no trace cannot be reconstructed later.
+  Future<bool> resolveDuplicateFlag({
+    required int id,
+    String actor = 'user',
+    DateTime? now,
+  }) {
+    final DateTime timestamp = now ?? DateTime.now();
+    return transaction<bool>(() async {
+      final TransactionRow? existing = await byIdOrNull(id);
+      if (existing == null || !existing.needsReview) {
+        return false;
+      }
+      if (!duplicateReviewReasons.contains(existing.reviewReason ?? '')) {
+        // Flagged for something else. Not an error — a stale screen can reach
+        // this — but nothing is written and the caller is told.
+        return false;
+      }
+
+      await (update(
+        transactions,
+      )..where((Transactions t) => t.id.equals(id))).write(
+        TransactionsCompanion(
+          needsReview: const Value<bool>(false),
+          reviewReason: const Value<String?>(null),
+          possibleDuplicateOfId: const Value<int?>(null),
+          updatedAt: Value<DateTime>(timestamp),
+        ),
+      );
+
+      await auditLogDao.append(
+        entityType: 'transaction',
+        entityId: id.toString(),
+        action: 'update',
+        actor: actor,
+        actorDetail: 'duplicate_kept_both',
+        changedAt: timestamp,
+        fieldChanges: <AuditFieldChange>[
+          AuditFieldChange(field: 'needsReview', from: 'true', to: 'false'),
+          AuditFieldChange(
+            field: 'reviewReason',
+            from: existing.reviewReason,
+            to: null,
+          ),
+        ],
+      );
+      return true;
+    });
+  }
+
+  /// **Puts a transaction's category back exactly as it was** — AC-C5.2's
+  /// undo, and the only method in this class that writes the category columns
+  /// *backwards*.
+  ///
+  /// ## An undo is a new event, never an erasure (NFR-A3)
+  ///
+  /// This writes an audit entry like any other mutation, with
+  /// `action: 'categorize'` and the actor who asked for the undo. It does
+  /// **not** remove the entry that recorded the change being undone. A user
+  /// reading US-F5's history must see both — "you categorised these twelve"
+  /// and "you undid it" — because a history that quietly loses a step cannot
+  /// answer "why did last month's figure change?".
+  ///
+  /// ## Why it restores six columns rather than one
+  ///
+  /// See [CategorySnapshot]. Restoring only `category_id` would leave the row
+  /// user-owned forever, so the learned rule could never touch it again and the
+  /// review flag it had raised would stay down — a row that looks restored and
+  /// behaves differently.
+  ///
+  /// ## Why this does not go through [setUserCategory]
+  ///
+  /// That method's contract is "a person is choosing this category", and it
+  /// enforces it: source becomes `user`, confidence becomes 1.0, the rule link
+  /// is cleared, the field is marked user-edited. Every one of those is exactly
+  /// what an undo has to be able to *un-set*. A flag on `setUserCategory`
+  /// saying "except when going backwards" would make the common path carry the
+  /// rare path's complexity, and would put the two write shapes one boolean
+  /// apart.
+  ///
+  /// A no-op returning false when the row is gone — an undo offered from a
+  /// stale snackbar after the transaction was deleted must not throw.
+  Future<bool> restoreCategorySnapshot({
+    required CategorySnapshot snapshot,
+    String actor = 'user',
+    String? actorDetail,
+    DateTime? now,
+  }) {
+    final DateTime timestamp = now ?? DateTime.now();
+    return transaction<bool>(() async {
+      final TransactionRow? existing = await byIdOrNull(snapshot.transactionId);
+      if (existing == null) {
+        return false;
+      }
+
+      await (update(
+        transactions,
+      )..where((Transactions t) => t.id.equals(snapshot.transactionId))).write(
+        TransactionsCompanion(
+          categoryId: Value<String?>(snapshot.categoryId),
+          categorySource: Value<String?>(snapshot.categorySource),
+          categoryConfidence: Value<double?>(snapshot.categoryConfidence),
+          categoryRuleId: Value<int?>(snapshot.categoryRuleId),
+          userEditedFields: Value<String?>(snapshot.userEditedFields),
+          needsReview: Value<bool>(snapshot.needsReview),
+          reviewReason: Value<String?>(snapshot.reviewReason),
+          updatedAt: Value<DateTime>(timestamp),
+          // `merchantId` is deliberately absent: the undo restores the
+          // *category*, not the identity. Which shop this was is a fact the
+          // correction did not invent and the undo has no business
+          // forgetting — and forgetting it would create a second merchant
+          // row on the next message (the KHA-105 failure shape).
+        ),
+      );
+
+      await auditLogDao.append(
+        entityType: 'transaction',
+        entityId: snapshot.transactionId.toString(),
+        action: 'categorize',
+        actor: actor,
+        actorDetail: actorDetail,
+        changedAt: timestamp,
+        fieldChanges: <AuditFieldChange>[
+          AuditFieldChange(
+            field: TransactionField.categoryId,
+            from: existing.categoryId,
+            to: snapshot.categoryId,
+          ),
+          AuditFieldChange(
+            field: 'categorySource',
+            from: existing.categorySource,
+            to: snapshot.categorySource,
+          ),
+        ],
+      );
+      return true;
+    });
+  }
 
   /// Everything flagged for the user's attention — the "low confidence" half
   /// of the Needs Review inbox (design.md S-18), which includes possible
