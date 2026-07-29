@@ -169,10 +169,28 @@ final class CategorizationService {
   /// One merchant, its user-linked aliases, and its rule if it has one. Built
   /// in Dart rather than as a SQL join so the matcher stays a pure function
   /// over plain values — see `merchant_matcher.dart`'s library note.
+  ///
+  /// ## KHA-104 — the read half of the dangling-rule guard
+  ///
+  /// A rule whose `category_id` names no category is dropped here, so it cannot
+  /// reach the matcher at all. `MerchantDao.upsertRule` refuses to *write* such
+  /// a rule; this defends the rows that are already stored — written before
+  /// that check existed, or by raw SQL, or by a future writer that has not read
+  /// this file. Two independent guards on the same property, deliberately, in
+  /// the way AC-D3.1's protection is doubled up.
+  ///
+  /// **Dropping the rule, not the merchant.** The candidate stays in the list
+  /// with `categoryId` and `ruleId` null, so the shop is still *identified* —
+  /// which is what stops a second `merchant` row being created for it — but it
+  /// teaches nothing. The transaction lands in
+  /// [CategorizationResult.flaggedUnknownMerchant] with reason
+  /// `no_rule_for_merchant`, i.e. the app asks the user rather than stamping a
+  /// category nothing can render.
   Future<List<MerchantCandidate>> loadCandidates() async {
     final List<MerchantRow> merchants = await merchantDao.allMerchants();
     final List<MerchantAliasRow> aliases = await merchantDao.allAliases();
     final List<MerchantRuleRow> rules = await merchantDao.enabledRules();
+    final CategoryResolver knownCategories = await resolver();
 
     final Map<int, Set<String>> aliasesByMerchant = <int, Set<String>>{};
     for (final MerchantAliasRow alias in aliases) {
@@ -181,7 +199,13 @@ final class CategorizationService {
           .add(alias.aliasKey);
     }
     final Map<int, MerchantRuleRow> ruleByMerchant = <int, MerchantRuleRow>{
-      for (final MerchantRuleRow rule in rules) rule.merchantId: rule,
+      for (final MerchantRuleRow rule in rules)
+        // [CategoryResolver.isKnown], not [CategoryResolver.resolve]: `resolve`
+        // never returns null — that is what makes AC-C1.1's "never a blank"
+        // true — so it cannot tell "this id is unknown" apart from "this id is
+        // Uncategorized". A *writer* has to tell those apart even though a
+        // renderer does not, which is exactly what `isKnown` exists for.
+        if (knownCategories.isKnown(rule.categoryId)) rule.merchantId: rule,
     };
 
     return <MerchantCandidate>[
@@ -390,7 +414,83 @@ final class CategorizationService {
       now: now,
     );
 
-    if (!learnRule || storedCategoryId == null || merchantId == null) {
+    if (!learnRule) {
+      return;
+    }
+    await learnRuleFromCorrection(
+      transactionId: transactionId,
+      categoryId: storedCategoryId,
+      actor: actor,
+      now: now,
+    );
+  }
+
+  /// **The rule half of a correction, on its own** — AC-D1.1, AC-D1.2.
+  ///
+  /// Ensures the merchant row for the transaction's `merchant_raw_text` and
+  /// upserts `merchant → category`. It writes **nothing to the transaction**:
+  /// that is the caller's half, and separating them is what lets a *second*
+  /// correction surface reuse the learning without also re-writing a category
+  /// it has already written.
+  ///
+  /// ## Why this is public (KHA-101 / D-QA-27-4)
+  ///
+  /// Two user-facing writes can set a category: [applyUserCategory] (the
+  /// categorization surface) and `TransactionDao.applyUserEdit` (the P3b-2 edit
+  /// form). They behaved differently in two user-visible ways, and QA's fix
+  /// direction is *"route every category write through one path"*. The flag
+  /// half now lives at the write boundary in the DAO, where every caller gets
+  /// it. This is the other half: the edit path calls it through the
+  /// `LearnCategoryRule` seam in `features/ledger/transaction_edit.dart`, wired
+  /// in `presentation/providers/ledger_providers.dart` — the layer that already
+  /// depends on both features, so `features/ledger` never imports
+  /// `features/categorization` and the dependency arrow stays acyclic. That is
+  /// the same technique `categorization_providers.dart` uses to bind the
+  /// categorizer into ingestion.
+  ///
+  /// Does nothing — deliberately, not defensively — when there is no category
+  /// to teach or no merchant to teach it about. *"I do not know what this is"*
+  /// is not a lesson, and storing it as one would auto-file every future
+  /// transaction from that merchant into Uncategorized and call it a decision.
+  Future<void> learnRuleFromCorrection({
+    required int transactionId,
+    required String? categoryId,
+    String actor = 'user',
+    DateTime? now,
+  }) async {
+    final String? storedCategoryId = normalizeStoredCategoryId(categoryId);
+    if (storedCategoryId == null) {
+      return;
+    }
+    final TransactionRow? row = await transactionDao.byIdOrNull(transactionId);
+    if (row == null) {
+      return;
+    }
+
+    final String? key = MerchantKey.ofOrNull(row.merchantRawText);
+    int? merchantId = row.merchantId;
+    if (key != null && merchantId == null) {
+      merchantId = await merchantDao.ensureMerchant(
+        merchantKey: key,
+        canonicalName: row.merchantRawText!,
+        firstSeenMessageId: row.sourceMessageId,
+        now: now,
+      );
+      // The transaction should also *hold* the link, so the two correction
+      // surfaces leave a row in the same shape. Written through the narrow
+      // [TransactionDao.linkMerchant] rather than through `setUserCategory`,
+      // deliberately: re-running the category write here would append a second
+      // `categorize` audit entry whose before/after is `X → X`, i.e. a record
+      // of a change that did not happen. This method's contract is *"it writes
+      // nothing to the transaction's category"*, and it keeps it.
+      await transactionDao.linkMerchant(
+        id: transactionId,
+        merchantId: merchantId,
+        actor: actor,
+        now: now,
+      );
+    }
+    if (merchantId == null) {
       return;
     }
 

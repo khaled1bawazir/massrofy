@@ -14,6 +14,64 @@ KHA-64 first half), PR #11, head `51bb730`. See `docs/test-plan.md` §1a, §6a a
 
 ## Summary
 
+### Pass 7 (PR #30, P4a-1 — merge-undo fixes + merchant-identity corroboration)
+
+**No defect was found that blocks merge. Verdict: `QA: PASS 30`.** Head
+`3620388`. This is the **third** adversarial round on `MerchantKey`/
+`MerchantMatcher` and the **third** on the merge/undo link, so the pass was run
+against the eleven issues' own **done-checks** rather than against the PR's
+self-description.
+
+**All eleven done-checks are met.** KHA-88, KHA-94, KHA-96, KHA-98, KHA-99,
+KHA-100, KHA-101, KHA-102, KHA-103, KHA-104, KHA-105 — each verified by
+executing the reproduction the issue specifies. Both corrections the PR
+discloses about its own upstream claims (the ADR-008 v1.3 `QAFE QAFE`
+Jaccard-vs-DL footnote; KHA-101's reachability premise) were **checked rather
+than accepted**, and both are accurate.
+
+**Gates re-run by QA on `3620388` itself**, per the `docs/lessons.md` rule that a
+gate result is evidence only for the tree it was measured on:
+
+| Gate | Result on `3620388` |
+|---|---|
+| `flutter analyze` | clean — `No issues found! (ran in 6.3s)` |
+| `dart format --set-exit-if-changed .` | clean — **208 files, 0 changed** |
+| `flutter test` | **1242 passing / 3 skipped / 1 failing** |
+| ADR-002 money-type guard | clean |
+
+Every number the PR body claims reproduces exactly. The one failure is
+`privacy_overlay_release_mode_test.dart`, confirmed environmental **by
+execution, not by trust**: re-run with the `--dart-define=dart.vm.product=true`
+CI supplies as its own step, it passes. Flutter 3.44.8. Evidence:
+`docs/evidence/pr30/`.
+
+**QA's own adversarial suite for this round:** `test/security/qa_pr30_probe_test.dart`
+— **18 probes, all passing** (16 `HOLDS`, 2 `DEFECT`). The suite deliberately
+does *not* re-run the inverted probes in `qa_pr20/24/27_probe_test.dart`; it only
+asks questions those files do not.
+
+**Two new defects, both strictly NARROWER residuals of defects this PR closes,
+and neither merge-blocking for PR #30.** Blocking this PR would leave the wider
+originals (KHA-98/99) in place, which is plainly worse:
+
+- **D-QA-30-2 (High, and R-16-gated)** — the KHA-99 trailing-digit collision is
+  closed at 3 digits and **open at 4**: `QAMART 1000` and `QAMART 2000` still
+  key as one merchant and auto-apply at T1/1.00. Undisclosed by ADR-008 v1.3.
+- **D-QA-30-1 (Low)** — `MerchantKey.of` is not idempotent, which its own doc
+  comment states as a load-bearing invariant. Effect is a *split*, the
+  recoverable direction, and no shipped call site double-applies it.
+
+**One observation:** O-QA-30-1 — KHA-103's `isUserOwnedCategory` guard reads
+wider than the comment beside it. The dangerous state was attacked and is
+**unreachable** (probe P1), so this is a comment-accuracy note, not a defect.
+
+**Merge-undo: nothing left standing.** Five composition probes past what J1/J1b
+cover — three-deep absorbs, an undo in the middle of a chain, merge→undo→
+re-merge, concurrent merges into one survivor, and the restored-row ghost case —
+**all hold**, with the "scalar is null iff the set is empty" invariant asserted
+after *every* mutation rather than once at the end. KHA-88/94/96 are closed
+properly, not narrowly.
+
 ### Pass 6 (PR #27, P4a — the categorization spine)
 
 **No defect was found that blocks merge. Verdict: `QA: PASS 27`.** Head
@@ -231,6 +289,155 @@ that routes a categorization surface** — KHA-32 (review inbox), KHA-33
 (correction flow), KHA-34 (rules screen) or KHA-97 (category management) —
 because each of those is the first build in which a user can create a rule and
 therefore the first in which an automatic categorization can be wrong.
+
+## Defects found in pass 7 (PR #30, P4a-1, head `3620388`)
+
+Both are **residuals of defects PR #30 closes**, both strictly narrower than the
+original, and **neither blocks PR #30** — blocking it would leave the wider
+KHA-98/99 defects in place. Reproductions: `test/security/qa_pr30_probe_test.dart`.
+
+**Conditional gate (a `blocks` link in Linear, not only this paragraph):**
+D-QA-30-2 is **merge-blocking for the P3b-3 device run and for any build that
+reaches a device**, for the same R-16 reason PR #30 itself argues: every
+`MerchantKey.of` change is free while no install holds a `merchant` row, and
+needs a **splitting** re-key migration afterwards. It is *not* merge-blocking
+for PR #30, and it does **not** require a P4a-2 PR — it is a one-condition
+change or one ADR paragraph, and can ride with the first P4b PR provided that
+PR lands before the device run.
+
+### D-QA-30-2 — KHA-99's trailing-digit collision is closed at 3 digits and OPEN at 4: numbered sibling outlets still merge at confidence 1.00
+
+- **Severity:** High (behaviour), **not merge-blocking for PR #30**;
+  **merge-blocking for the P3b-3 device run / R-16 premise expiry** (above).
+- **Reproduction:** probe **M2**, `test/security/qa_pr30_probe_test.dart`. Passes
+  on `3620388` (it asserts the defect).
+
+KHA-99's done-check names `QAMART 100` / `QAMART 200`, and that pair is
+genuinely fixed. But corroboration signal **(ii)**, length, fires on *any*
+trailing run of `referenceDigitRunMinLength` = 4 or more digits **with no other
+corroboration at all**. So the identical defect survives one digit further
+along:
+
+```
+MerchantKey.of('QAMART 100')   ->  'QAMART 100'   // KHA-99: fixed
+MerchantKey.of('QAMART 200')   ->  'QAMART 200'   // KHA-99: fixed
+MerchantKey.of('QAMART 1000')  ->  'QAMART'       // still collapses
+MerchantKey.of('QAMART 2000')  ->  'QAMART'       // ...onto the same key
+```
+
+Executed end to end, not merely as a key comparison: `MerchantMatcher.match`
+returns `MatchTier.userRule`, confidence **1.00**, `canAutoApply == true`. This
+is the exact shape KHA-98/KHA-99 describe — a collision manufactured by
+normalisation, **upstream of every tier**, where no threshold can reach it — and
+`merchant.merchant_key` is `UNIQUE`, so the two outlets become one row whose
+`canonical_name` is whichever arrived first.
+
+**Expected vs actual.** ADR-008 v1.3's own corroboration rule, condition 3
+(*residue-safety*): *"Stripping must never be able to reduce two strings that
+differ only in a proper noun, **or only in a number that is part of a name**, to
+the same key."* `QAMART 1000` / `QAMART 2000` differ only in a number that is
+part of a name. The shipped length signal does not satisfy the rule the same
+amendment states normatively.
+
+**Why this is filed rather than waved through.** The ADR's "consequences on
+synthetic input" list under settled answer 2 enumerates `QAMART 100` /
+`QAMART 200`, `CAFE 1` / `CAFE 2`, `QAMART 100 200 300`, `PANDA STORE 1234` and
+`PANDA 1234` — **it never states a pair of 4-digit siblings**. So this is not a
+disclosed accepted cost; it is an undisclosed consequence. The trade may well be
+the right one (it is the price of keeping `PANDA 1234` == `PANDA`, which the PR
+lists as preserved), but it was not decided, and the *point* of v1.3 was to
+replace a list nobody could review with a rule anyone can.
+
+**Fix directions (a decision, not necessarily code):**
+1. Require adjacency corroboration **always**, dropping signal (ii). Costs
+   `PANDA 1234` == `PANDA`; keeps `PANDA STORE 1234` == `PANDA`, which is
+   PRD §3.4's actual observed shape.
+2. Add a residue condition to signal (ii): strip only when no *other* stored key
+   differs from the result solely by a trailing digit run — but note ADR-008 v1.3
+   rejected database-dependent stripping under condition 1 (purity), so this
+   would reopen that argument.
+3. **Accept it explicitly**: state the 4-digit sibling case in ADR-008's
+   consequences list and in `referenceDigitRunMinLength`'s doc comment, so the
+   next reader sees the cost the way they now see the `PANDA RIYADH` cost.
+
+Any of the three closes this. What is not acceptable is leaving the rule and the
+code disagreeing silently — that is precisely how KHA-98 survived three readers.
+
+- **Done check:** `MerchantKey.of('QAMART 1000') != MerchantKey.of('QAMART 2000')`,
+  **or** ADR-008 settled answer 2 and `CategorizationConfig.referenceDigitRunMinLength`
+  both state the residual explicitly. Probe M2 inverted in place.
+
+### D-QA-30-1 — `MerchantKey.of` is not idempotent, and its own doc comment says the invariant is load-bearing
+
+- **Severity:** Low. **Not merge-blocking for anything.** Recorded now rather
+  than later only because it is an R-16-cheap decision today and an R-16-costly
+  one after a device run.
+- **Reproduction:** probe **M1**, `test/security/qa_pr30_probe_test.dart`.
+
+`of`'s doc comment states:
+
+> Idempotent — `of(of(x)) == of(x)` — which matters because a key is computed
+> when a merchant is created and recomputed on every later message. A pipeline
+> that changed its own output on a second pass would stop matching the very rows
+> it wrote.
+
+The pipeline runs step 6 (digit strip) **before** step 7 (noise strip). So a
+digit run that is not last when step 6 looks becomes last after step 7 removes
+the token behind it:
+
+```
+MerchantKey.of('PANDA 1234 STORE')   ->  'PANDA 1234'   // STORE removed; 1234 was not trailing
+MerchantKey.of('PANDA 1234')         ->  'PANDA'        // now it is
+```
+
+so `of(of(x)) != of(x)`.
+
+**Actual user-visible consequence, which is not the double-application.** No
+shipped call site ever feeds a key back into `of` — every `MerchantKey.of*` call
+in `lib/` takes `merchantRawText` or an alias string (verified by grep over all
+call sites), so the stated failure mode cannot fire today. What *does* fire is
+**token-order sensitivity**: `PANDA 1234 STORE` and `PANDA STORE 1234` are two
+different merchant identities for what is plainly one shop, which contradicts
+PRD §3.4's "all renderings of one shop produce one key".
+
+That is a **split**, not a merge — the recoverable direction ADR-008 v1.3
+explicitly prefers, fixed by one `MerchantAlias` link — which is why this is Low
+and not High.
+
+- **Done check:** either the noise strip runs before the digit strip (making the
+  invariant true), or `of`'s doc comment stops claiming idempotence and states
+  the ordering dependence instead. Probe M1 inverted in place.
+
+## Observations from the pass-7 probe suite (recorded for audit, not defects)
+
+### O-QA-30-1 — KHA-103's `isUserOwnedCategory` guard reads wider than the comment beside it, but the state it would admit is unreachable
+
+`CategoryDao.deleteCategory`'s uncategorize branch guards the
+`category_source` / `category_confidence` clear on `isUserOwnedCategory(row)`,
+and the comment explains the exception as *"a row whose category a **person**
+chose keeps `category_source = 'user'`"*. But `isUserOwnedCategory` is an **OR**
+of two deliberately-redundant AC-D3.1 signals (`category_source == 'user'` **or**
+`user_edited_fields` contains `categoryId`). If only the second disjunct were
+ever true, the row would keep `category_source = 'rule'` with a NULL
+`category_id` — which is the second clause of KHA-103's own done-check.
+
+**QA attacked this and it does not work** (probe **P1**, a `HOLDS`). Two
+independent reasons, both verified by execution:
+
+1. The merge unions protected fields from `MergeEnrichment.protectedFields`,
+   which holds only fields actually **carried into a gap**. A rule-categorized
+   survivor has no gap in `category_id`, so it inherits no protection marking;
+   and in the one shape where `category_id` *is* carried, the survivor by
+   definition had no category, so its source was never `'rule'`.
+2. Structurally: `TransactionDao.applyAutomaticCategory` returns `false` and
+   **writes nothing at all** for a user-owned row, so the automatic path can
+   never stamp `'rule'` onto a protected row in the first place.
+
+So KHA-103 is correctly closed. Recorded because the comment predicts `'user'`
+while the function it calls does not guarantee it — the two agree only via an
+invariant enforced in a different file (`transaction_dao.dart:481`), and a future
+edit to either could separate them without any test noticing. A one-line comment
+naming that dependency would close it.
 
 ### D-QA-27-1 — the city-name noise list silently merges two unrelated businesses into ONE merchant, then auto-categorizes at confidence 1.00
 

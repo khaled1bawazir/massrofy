@@ -131,14 +131,44 @@ final class TransactionEditTargetMissing extends TransactionEditResult {
 /// evolve independently without one silently changing the other's messages.
 enum AmountProblemOnEdit { unparsable, negative }
 
+/// **KHA-101's seam** — teaches `merchant → category` after the edit form
+/// changes a category.
+///
+/// A function type rather than a `CategorizationService` field, and that is not
+/// squeamishness about coupling: `features/categorization` already imports
+/// `features/ledger` (`category_breakdown.dart` needs `PeriodRange` and
+/// `LedgerTransaction`), so a field here would close a cycle between two
+/// sibling features. The seam is bound in
+/// `presentation/providers/ledger_providers.dart` — the layer that already
+/// depends on both — which is precisely how `categorization_providers.dart`
+/// binds the categorizer into ingestion without `features/ingestion` importing
+/// `features/categorization`.
+///
+/// Implemented by `CategorizationService.learnRuleFromCorrection`. Its extra
+/// optional named parameters (`actor`) are allowed by Dart's function subtyping,
+/// so the tear-off assigns with no adapter lambda.
+typedef LearnCategoryRule =
+    Future<void> Function({
+      required int transactionId,
+      required String? categoryId,
+      DateTime? now,
+    });
+
 /// Applies edits, soft deletes and restores — the write half of US-B5/B6/B8.
 final class TransactionEditService {
   final AppDatabase database;
   final TransactionDao transactionDao;
 
+  /// See [LearnCategoryRule]. Null means *"no categorization service in this
+  /// composition"* — the app while locked, and most of the ledger's own tests,
+  /// which are about editing rather than about learning. An edit still applies
+  /// in full when it is null; only the rule is not taught.
+  final LearnCategoryRule? learnCategoryRule;
+
   const TransactionEditService({
     required this.database,
     required this.transactionDao,
+    this.learnCategoryRule,
   });
 
   /// **AC-B5.1** — applies [draft] to transaction [id].
@@ -216,9 +246,39 @@ final class TransactionEditService {
     final Set<String> nowProtected = decodeUserEditedFields(
       after?.userEditedFields,
     );
-    return TransactionEditApplied(
-      (nowProtected.difference(before).toList()..sort()),
-    );
+    final List<String> changedFields = nowProtected.difference(before).toList()
+      ..sort();
+
+    // **KHA-101 — the two correction surfaces agree.** Correcting a category
+    // from the detail screen must teach the same rule that correcting it from
+    // the categorization surface does, or AC-D2.1's electric-bill promise
+    // ("the next bill arrives already categorized") is false for anyone who
+    // uses this form.
+    //
+    // Gated on `changedFields`, not on `draft.categoryId != null`: the DAO is
+    // the authority on whether the value actually moved, and someone who
+    // pressed Save without touching the category has taught nothing. The flag
+    // half of this defect is fixed at the write boundary in
+    // `TransactionDao.applyUserEdit`, so it holds even for a caller that never
+    // reaches this service.
+    final LearnCategoryRule? learner = learnCategoryRule;
+    final Edited<String?>? categoryEdit = draft.categoryId;
+    if (learner != null &&
+        categoryEdit != null &&
+        changedFields.contains(TransactionField.categoryId)) {
+      // Both nullable locals are tested rather than `!`-asserted. The pair is
+      // provably consistent today — `applyUserEdit` only marks `categoryId`
+      // touched when the caller passed it — but that is an invariant held in
+      // another file, and a null-assertion that depends on one is a crash
+      // waiting for someone to add a second way of marking a field edited.
+      await learner(
+        transactionId: id,
+        categoryId: categoryEdit.value,
+        now: now,
+      );
+    }
+
+    return TransactionEditApplied(changedFields);
   }
 
   /// **AC-B6.1/B6.2/B6.4** — soft-deletes a transaction after the caller has

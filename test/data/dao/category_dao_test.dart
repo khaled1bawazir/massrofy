@@ -285,6 +285,68 @@ void main() {
       );
     });
 
+    test(
+      'KHA-103 — delete-with-uncategorize also clears the provenance of the '
+      'rules it destroys, and the reassign branch deliberately does not',
+      () async {
+        // The uncategorize branch DELETES the merchant rules naming this
+        // category. A transaction left pointing at one says "rule #7 put nothing
+        // here" about a rule that no longer exists: a detail screen answering
+        // "why is this categorized this way" dereferences a missing rule, and the
+        // audit trail's `merchant_rule:7` is unresolvable.
+        final int ruleOwned = await transactionIn(null);
+        await transactionDao.applyAutomaticCategory(
+          id: ruleOwned,
+          categoryId: 'groceries',
+          confidence: 1.0,
+          ruleId: 7,
+          actorDetail: 'merchant_rule:7',
+        );
+        // A row whose category a PERSON chose, in the same category.
+        final int userOwned = await transactionIn('groceries');
+
+        await categoryDao.deleteCategory(
+          id: 'groceries',
+          decision: const SetToUncategorized(),
+        );
+
+        final TransactionRow cleared = await transactionDao.byId(ruleOwned);
+        expect(cleared.categoryId, isNull);
+        expect(cleared.categoryRuleId, isNull);
+        expect(cleared.categorySource, StoredCategorySource.none);
+        expect(cleared.categoryConfidence, isNull);
+
+        // Narrowed to rows the RULE owns. `category_source = 'user'` is one of
+        // AC-D3.1's two independent protection signals, and downgrading it here
+        // would leave the person's choice defended by only one of the two
+        // mechanisms that were deliberately made redundant.
+        final TransactionRow untouched = await transactionDao.byId(userOwned);
+        expect(untouched.categoryId, isNull);
+        expect(untouched.categorySource, StoredCategorySource.user);
+        expect(isUserOwnedCategory(untouched), isTrue);
+
+        // The REASSIGN branch keeps the provenance, and that asymmetry is the
+        // decision: there the rule is repointed rather than destroyed, so it
+        // still exists, still names a real category, and still explains the row.
+        final int reassigned = await transactionIn(null);
+        await transactionDao.applyAutomaticCategory(
+          id: reassigned,
+          categoryId: 'dining',
+          confidence: 1.0,
+          ruleId: 9,
+          actorDetail: 'merchant_rule:9',
+        );
+        await categoryDao.deleteCategory(
+          id: 'dining',
+          decision: const ReassignTo('shopping_retail'),
+        );
+        final TransactionRow moved = await transactionDao.byId(reassigned);
+        expect(moved.categoryId, 'shopping_retail');
+        expect(moved.categoryRuleId, 9);
+        expect(moved.categorySource, StoredCategorySource.rule);
+      },
+    );
+
     test('a soft-deleted transaction is repointed too — a restore must not '
         'resurrect a dangling reference', () async {
       final int a = await transactionIn('groceries');

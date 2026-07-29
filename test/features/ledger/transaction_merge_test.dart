@@ -33,6 +33,7 @@
 /// nothing anywhere said so out loud.
 library;
 
+import 'package:drift/drift.dart' show GeneratedColumn;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:massrofy/core/money/money.dart';
 import 'package:massrofy/data/dao/audit_log_dao.dart';
@@ -216,6 +217,7 @@ void main() {
       expect((await dao.byId(b)).isDeleted, isFalse);
       expect((await dao.byId(b)).mergedIntoId, isNull);
       expect((await dao.byId(a)).mergedFromTransactionId, isNull);
+      expect(await dao.absorbedTransactionIds(a), isEmpty);
       expect(
         LedgerTotals.spend(
           toLedgerTransactions(await dao.all()),
@@ -223,6 +225,177 @@ void main() {
         ).base!.toCanonicalString(),
         '305.5',
       );
+    });
+
+    test('KHA-88 / D-QA-7 — the survivor\'s absorbed link is SET-VALUED, and '
+        'the scalar column is null exactly when the set is empty', () async {
+      // Three alerts for one purchase is ordinary — a POS alert, a "card used"
+      // alert and a settlement alert — so a survivor holding two absorbed rows
+      // is a normal state that a single scalar column cannot describe.
+      //
+      // No column was added for this. Each absorbed row already carries
+      // `merged_into_id`, so the set was in the schema all along and merely
+      // never asked for; `absorbedTransactionIds` asks it. That matters beyond
+      // tidiness: `merged_from_transaction_id` is the input to
+      // `MergeRefusal.chainWouldForm`, and a lossy input to a safety guard is a
+      // defeated guard (KHA-94).
+      final int survivor = await sms(messageId: 11);
+      final int first = await sms(messageId: 22);
+      final int second = await sms(messageId: 33);
+
+      expect(await dao.absorbedTransactionIds(survivor), isEmpty);
+      expect((await dao.byId(survivor)).mergedFromTransactionId, isNull);
+
+      await service.merge(
+        survivorId: survivor,
+        mergedAwayId: first,
+        confirmedByUser: true,
+      );
+      await service.merge(
+        survivorId: survivor,
+        mergedAwayId: second,
+        confirmedByUser: true,
+      );
+
+      // Newest first, so `.first` is what the scalar should name.
+      expect(await dao.absorbedTransactionIds(survivor), <int>[second, first]);
+      expect((await dao.byId(survivor)).mergedFromTransactionId, second);
+
+      // Undoing the MOST RECENT merge re-points the scalar at the earlier one
+      // rather than blanking it. Blanking was the bug: the survivor claimed to
+      // have absorbed nothing while still holding `first`.
+      await service.undo(second);
+      expect(await dao.absorbedTransactionIds(survivor), <int>[first]);
+      expect((await dao.byId(survivor)).mergedFromTransactionId, first);
+
+      // The audit entry records the genuine new value, not a claim of null, so
+      // US-F5 can say "one other duplicate is still merged".
+      final AuditEntryRow reversal = (await auditLogDao.queryFor(
+        'transaction',
+        survivor.toString(),
+      )).last;
+      expect(reversal.action, 'merge_undo');
+      expect(reversal.fieldChangesJson, contains('"$first"'));
+
+      // Undoing the remaining one empties both, together.
+      await service.undo(first);
+      expect(await dao.absorbedTransactionIds(survivor), isEmpty);
+      expect((await dao.byId(survivor)).mergedFromTransactionId, isNull);
+      expect(await auditLogDao.verifyChainIntegrity(), isTrue);
+    });
+
+    test('KHA-96 / O-QA-11 — a merge clears ONLY the review flag that named '
+        'this pair; a flag raised by a different question survives', () async {
+      // `mergeDuplicatePair` used to write `needsReview: false` on both rows
+      // unconditionally, whatever they were flagged for. A survivor flagged as
+      // a possible duplicate of a THIRD row, or for an unparsable amount
+      // (KHA-74), or as an unproven internal-transfer leg, therefore left the
+      // review inbox the moment an unrelated pair was resolved — the inbox
+      // quietly losing an item the user was going to be asked about.
+      final int survivor = await sms(messageId: 11);
+      final int absorbed = await sms(messageId: 22);
+      final int third = await sms(messageId: 33, amount: '99.00');
+
+      // The survivor is flagged about a DIFFERENT row.
+      await dao.flagAsPossibleDuplicate(
+        id: survivor,
+        otherId: third,
+        reviewReason: 'possible_duplicate',
+      );
+
+      await service.merge(
+        survivorId: survivor,
+        mergedAwayId: absorbed,
+        confirmedByUser: true,
+      );
+
+      final TransactionRow kept = await dao.byId(survivor);
+      expect(
+        kept.needsReview,
+        isTrue,
+        reason:
+            'resolving one pair does not answer the question about a third '
+            'row — the flag must survive and re-derive',
+      );
+      expect(kept.reviewReason, 'possible_duplicate');
+      expect(kept.possibleDuplicateOfId, third);
+      // The merge itself still happened.
+      expect(kept.mergedFromTransactionId, absorbed);
+    });
+
+    test('KHA-96 / O-QA-11 — the flag that DOES name this pair is cleared on '
+        'both rows, so a resolved pair leaves the inbox', () async {
+      final int survivor = await sms(messageId: 11);
+      final int absorbed = await sms(messageId: 22);
+      await dao.flagAsPossibleDuplicate(
+        id: survivor,
+        otherId: absorbed,
+        reviewReason: 'possible_duplicate',
+      );
+      await dao.flagAsPossibleDuplicate(
+        id: absorbed,
+        otherId: survivor,
+        reviewReason: 'possible_duplicate',
+      );
+
+      await service.merge(
+        survivorId: survivor,
+        mergedAwayId: absorbed,
+        confirmedByUser: true,
+      );
+
+      expect((await dao.byId(survivor)).needsReview, isFalse);
+      expect((await dao.byId(survivor)).reviewReason, isNull);
+      expect((await dao.byId(survivor)).possibleDuplicateOfId, isNull);
+      // The absorbed row's flag is cleared too. It matters despite the row
+      // being soft-deleted: an undo restores it whole, and a question the merge
+      // *did* answer should not come back with it.
+      expect((await dao.byId(absorbed)).needsReview, isFalse);
+    });
+
+    test('KHA-96 / D-QA-20 — a merge across two PROVENANCES keeps the '
+        'survivor\'s own and records the absorbed one in the trail', () async {
+      // The recorded decision for `provenance` / `provenance_detail`: explicit
+      // noop, with the absorbed value written into the survivor's merge audit
+      // entry so NFR-A1's "where did this record come from" stays answerable.
+      final int survivor = await sms(messageId: 11);
+      // A manual entry for the same movement — the case that makes comparing
+      // these columns the wrong choice: this is a merge the user obviously
+      // wants.
+      final int manual = await dao.insertManual(
+        amount: Money.parse('152.75', currency: 'SAR'),
+        occurredAt: DateTime.utc(2026, 7, 15, 10),
+        direction: 'debit',
+        transactionType: TransactionType.posPurchase,
+        affectsSpend: true,
+      );
+
+      expect((await dao.byId(survivor)).provenance, 'sms');
+      expect((await dao.byId(manual)).provenance, 'manual');
+
+      expect(
+        await service.merge(
+          survivorId: survivor,
+          mergedAwayId: manual,
+          confirmedByUser: true,
+        ),
+        isA<MergeCompleted>(),
+        reason: 'a differing provenance must not refuse the merge',
+      );
+
+      // The survivor keeps its own: this method enriches a row, it does not
+      // re-create it.
+      expect((await dao.byId(survivor)).provenance, 'sms');
+      // ...and the absorbed row keeps its own, because nothing is destroyed.
+      expect((await dao.byId(manual)).provenance, 'manual');
+
+      // The trail is where the composite fact lives.
+      final AuditEntryRow mergeEntry = (await auditLogDao.queryFor(
+        'transaction',
+        survivor.toString(),
+      )).firstWhere((AuditEntryRow e) => e.action == 'merge');
+      expect(mergeEntry.fieldChangesJson, contains('absorbedProvenance'));
+      expect(mergeEntry.fieldChangesJson, contains('manual'));
     });
 
     test(
@@ -564,6 +737,120 @@ void main() {
         reason:
             'a TransactionField value is handled by none of the three merge '
             'strategies — decide which one it gets, in transaction_merge.dart',
+      );
+    });
+
+    test('KHA-96 / D-QA-20 — EVERY COLUMN of `transactions`, enumerated from '
+        'the schema itself, has a recorded merge decision', () {
+      // The sibling test above is a forcing function at the *field-vocabulary*
+      // level, and QA verified it works. But `TransactionField` is the
+      // user-editable vocabulary and contains **no money column at all**, so
+      // KHA-87's own done check — *"the next column added to `transactions`
+      // cannot silently join the 'neither compared nor carried' set"* — was
+      // being served by a hand-written list of four column names that adding a
+      // fifth column would not have disturbed.
+      //
+      // This is the schema-derived version, promoted here from QA's probe K1.
+      // It is driven by `db.transactions.$columns`, so a column added to
+      // `transaction_table.dart` fails **by name** until someone writes it into
+      // one of the groups below. Run against the tree that shipped P3b-3 it
+      // immediately named two columns nobody had decided about (`provenance`,
+      // `provenance_detail`) — which is precisely the point: a hand-written
+      // list could never have surfaced them.
+      //
+      // Three legitimate outcomes for a column, and every entry below is in
+      // exactly one of them:
+      const Set<String> comparedBeforeEnrichment = <String>{
+        'amount_amount',
+        'amount_currency',
+        'direction',
+        'transaction_type',
+        'affects_spend',
+        'internal_transfer_state',
+      };
+      const Set<String> comparedAndCarried = <String>{
+        'fee_amount_amount',
+        'fee_amount_currency',
+        'fee_amount_minor',
+        'converted_amount_amount',
+        'converted_amount_currency',
+        'converted_amount_minor',
+        'fx_rate',
+        'fx_rate_date',
+        'fx_rate_source',
+        'remaining_balance_amount',
+        'remaining_balance_currency',
+        'remaining_balance_minor',
+        'internal_transfer_group_id',
+      };
+      const Set<String> carried = <String>{
+        'merchant_raw_text', 'reference_number', 'counterparty_name',
+        'occurred_at', 'instrument_id',
+        // Recomputed rather than gap-filled: it is derived state, so a survivor
+        // that was waiting for a conversion stops waiting once a merge hands it
+        // one. See `MergeEnrichment.conversionPending`.
+        'conversion_pending',
+      };
+      // The deliberate noops. Each of these is a recorded DECISION, and the
+      // reason lives at the code that implements it — not here — so this list
+      // is a checklist rather than a second copy of the argument.
+      const Set<String> deliberateNoop = <String>{
+        // P4a's categorization block. `category_id` is *refused* rather than
+        // carried when the losing row holds a user category the survivor lacks
+        // (the D-QA-10 loop), and the other three describe how the SURVIVOR's
+        // own category was decided — carrying them would attach another row's
+        // provenance to a decision never made about it.
+        'category_id', 'category_source', 'category_confidence',
+        'category_rule_id', 'merchant_id',
+        // KHA-96 / D-QA-20. NFR-A1's "where did this record come from" pair.
+        // The survivor keeps its own: a merge enriches a row, it does not
+        // re-create it, so the row was created however it was created. The
+        // absorbed row keeps its own too (nothing is destroyed) and the
+        // survivor's `merge` audit entry records it when the two differ, so the
+        // question stays answerable from the trail. Comparing them would refuse
+        // the merge the user most obviously wants — a manual entry plus the
+        // bank's later SMS for the same purchase — and carrying them cannot
+        // fire, because `provenance` is NOT NULL with a default so the survivor
+        // never has a gap.
+        'provenance', 'provenance_detail',
+        // Identity, bookkeeping and per-row metadata. None of these is money,
+        // none is a movement identity, and every one of them is *supposed* to
+        // stay attached to the row it describes.
+        'id', 'amount_minor', 'counterparty_bank_name', 'time_source',
+        'instrument_kind', 'instrument_masked_ref', 'source_message_id',
+        'rule_pack_id', 'rule_pack_version', 'rule_id',
+        'needs_review', 'review_reason', 'possible_duplicate_of_id',
+        'merged_into_id', 'merged_from_transaction_id', 'user_edited_fields',
+        'is_deleted', 'deleted_at', 'created_at', 'updated_at',
+      };
+
+      final Set<String> decided = <String>{
+        ...comparedBeforeEnrichment,
+        ...comparedAndCarried,
+        ...carried,
+        ...deliberateNoop,
+      };
+      final Set<String> schema = db.transactions.$columns
+          .map((GeneratedColumn<Object> column) => column.name)
+          .toSet();
+
+      expect(
+        decided.difference(schema),
+        isEmpty,
+        reason:
+            'this list names a column that no longer exists — it has drifted '
+            'from the schema and is no longer checking what it claims to',
+      );
+      expect(
+        schema.difference(decided),
+        isEmpty,
+        reason:
+            'a column of `transactions` is handled by NONE of the merge\'s '
+            'strategies and is on no deliberate-noop list. Decide which one it '
+            'gets, in transaction_merge.dart, and add it above. KHA-87\'s root '
+            'cause was a missing DECISION, not a missing line of code: the '
+            'absorbed row is soft-deleted whole, so an undecided column leaves '
+            'the ledger with it.',
       );
     });
 

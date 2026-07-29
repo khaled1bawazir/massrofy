@@ -2,8 +2,8 @@ STATUS: APPROVED
 
 # Massrofy — Architecture Decision Record
 
-**Version:** 1.2
-**Date:** 2026-07-29 (v1.1: 2026-07-28; v1.0: 2026-07-27)
+**Version:** 1.3
+**Date:** 2026-07-29 (v1.2: 2026-07-29; v1.1: 2026-07-28; v1.0: 2026-07-27)
 **Author:** solution-architect agent (phase 3 — architecture, human gate 2)
 **Sources of truth:** `docs/PRD.md` v0.3 (STATUS: Approved), `docs/build-plan.md` v1.0
 **Repository state at v1.0:** greenfield. **At v1.1:** P1 merged (`9d1487c`), P2 open as PR #2.
@@ -20,12 +20,23 @@ Every pattern in this document is established here, not inherited.
 > human should read even though it does not, in my judgement, require re-approving the whole
 > architecture. If the human disagrees with H-13, ADR-018 is the one decision to re-open.
 
+> **v1.3 is likewise an amendment, not a re-opening of gate 2.** It resolves four defects found
+> by qa-tester during the PR #27 QA gate on the P4a categorization spine (**KHA-98** High,
+> **KHA-99**, **KHA-100**, **KHA-102**), all four of which are facets of one policy question that
+> ADR-008 v1.0 left implicit: *when may a machine decide that two raw merchant strings are the
+> same business?* The answer is now written down as a rule rather than as a token list. Recorded
+> as a dated subsection under ADR-008, in the same shape as ADR-010's KHA-69 decision. The status
+> line stays `APPROVED`. **One consequence does need the human, and it is a process event, not a
+> re-approval: this decision requires one new UI affordance that `docs/design.md` does not
+> contain, so it triggers the project's first `/revise-design` round since gate 2 — see H-15.**
+
 ---
 
 ## Changelog
 
 | Version | Date | Change |
 |---|---|---|
+| **1.3** | 2026-07-29 | **ADR-008 amended — KHA-98/99/100/102 decided.** A **corroboration rule** is stated normatively: a token may be stripped only if it is *type-level* incapable of distinguishing two businesses. Consequences, all settled: **city names are dropped from the noise list entirely** (option (b) — KHA-98); the **trailing-digit strip is bounded and corroborated** (at most one run, adjacency or ≥4 digits — KHA-99); the **all-noise fallback key is removed**, so a string that tokenises to nothing yields *no merchant identity* rather than a placeholder identity (KHA-102, going deliberately further than QA's stated fix direction); **T3 is redefined over the token multiset**, not the token set (KHA-100). A clean-migration posture is claimed with an explicit premise and an explicit expiry (new risk **R-16**). **P4b must ship a "these are two different shops" affordance** — new **H-15**, and a `/revise-design` round. No other ADR is touched. |
 | **1.2** | 2026-07-29 | **KHA-69 decided and recorded** — the audit-chain timestamp fix is forward-only, and **option (a)** is taken: no install carrying pre-P3a audit rows exists, so no migration is written. Recorded as a dated subsection under ADR-010, with the evidence (ADR-005 gates the DB key behind the lock; KHA-75 showed the lock had never succeeded on hardware; the first real-device unlock was on `56e9cbaa`, which already contains the fix) and with the binding standing condition that the P10 staging APK goes onto a clean install. No ADR is amended; nothing else changes. |
 | **1.1** | 2026-07-28 | **ADR-018 added** — resolves the ADR-005 (cryptographic app lock) vs ADR-006 (background ingestion) conflict raised as **KHA-56**. Background ingestion is suspended while the app is locked; NFR-R1 is restated as an unlocked-window commitment. ADR-005 and ADR-006 amended in place; ADR-006's latency table replaced with one carrying a lock-state axis. **ADR-013 rewritten** to ratify and make normative the widened PAN/secret detection raised as **KHA-57** (originating defect KHA-54) — and to close two defects of the same class that KHA-54's fix did **not** close (the greedy grouped-PAN window, and grouped IBANs). §6.8, §8.1 (H-6, H-13, H-14), §8.2 (O-5, O-6), §8.3 (R-1) and §9 updated to match. |
 | 1.0 | 2026-07-27 | Initial ADR (ADR-001..ADR-017), written against a greenfield repository. |
@@ -545,12 +556,25 @@ that breaks a previously-passing fixture fails the build.
 ### ADR-008 — Merchant normalisation is a canonical-key pipeline with an explicit **alias table**; matching is tiered and never silently wrong.
 
 **Answers A-7. Mitigates R-5. Serves US-D1..D5, AC-D2.3, AC-D2.4.**
+**Amended by the KHA-98 decision (v1.3, 2026-07-29)** — the dated subsection at the end of this
+ADR. Three things below are **superseded and annotated rather than deleted**, per this document's
+house style (ADR-006 does the same with its latency table), so that a reader who finds the old
+text quoted somewhere else can see that it was superseded and why: the noise-token list no longer
+contains city names, the trailing-digit strip is now bounded and corroborated, and **T3 is defined
+over the token *multiset*, not the token set.** Read the subsection before touching
+`merchant_key.dart`, `merchant_matcher.dart`, or `CategorizationConfig`.
 
 **Normalisation pipeline** (`merchantRaw` → `merchantKey`):
 Unicode NFKC → strip bidi controls and tatweel → remove Arabic diacritics → fold Arabic letter
-variants (`أإآٱ→ا`, `ة→ه`, `ى→ي`, `ؤ→و`, `ئ→ي`) → case-fold Latin to upper → strip trailing
-store/terminal/reference digit runs → strip a configurable noise-token list (`BRANCH`, `STORE`,
-`FRC`, city names, terminal ids) → collapse whitespace.
+variants (`أإآٱ→ا`, `ة→ه`, `ى→ي`, `ؤ→و`, `ئ→ي`) → case-fold Latin to upper → ~~strip trailing
+store/terminal/reference digit runs~~ → ~~strip a configurable noise-token list (`BRANCH`,
+`STORE`, `FRC`, city names, terminal ids)~~ → collapse whitespace.
+
+> ⚠️ **The two struck steps are superseded by the KHA-98 decision below.** *"City names"* was
+> wrong — a city name is a proper noun and can be the *distinguishing* token of two unrelated
+> businesses, which made this line the direct cause of a High-severity identity merge at
+> confidence 1.00. *"Trailing digit runs"* was unbounded, which made it the cause of the same
+> defect in a second shape. The corrected steps are stated normatively in the subsection.
 
 **Matching tiers.**
 
@@ -558,7 +582,7 @@ store/terminal/reference digit runs → strip a configurable noise-token list (`
 |---|---|---|---|
 | T1 | exact `merchantKey` match on a **user-created** rule | 1.00 | auto-apply |
 | T2 | exact `merchantKey` match on a **seed** rule | 0.90 | auto-apply |
-| T3 | token-set Jaccard ≥ 0.80 against a known merchant | 0.60–0.85 | apply **only if ≥ threshold**, otherwise flag |
+| T3 | ~~token-set~~ **token-multiset** Jaccard ≥ 0.80 against a known merchant (amended, KHA-100) | 0.60–0.85 | apply **only if ≥ threshold**, otherwise flag |
 | T4 | normalised Damerau-Levenshtein ratio ≥ 0.90 | ≤ 0.60 | **never auto-apply** — surface as "did you mean…" in review |
 | — | no match | 0.00 | Uncategorized + `needsReview` (AC-D2.4) |
 
@@ -577,6 +601,297 @@ on `merchantId`, not on the raw string, so one link fixes both scripts forever.
 Only explicit user actions do (AC-D3.2). User-sourced rules always outrank seed rules
 (AC-D3.1). Scope choice ("this transaction only" / "this and future from this merchant") is
 carried on the correction command, per US-D5.
+
+#### KHA-98 decision — normalisation may only strip what cannot distinguish two businesses. **Option (b). Decided 2026-07-29.**
+
+**Status: DECIDED. Settles KHA-98 (High), KHA-99, KHA-100 and KHA-102 in one policy, because
+QA's own note is right that they are one question. Binding on the mobile-engineer's fix; it is
+not a menu.**
+
+##### The defect, in one paragraph
+
+`MerchantKey.of('MAKKAH BAKERY')` and `MerchantKey.of('MADINAH BAKERY')` both return `'BAKERY'`,
+because ADR-008 v1.0 told the pipeline to strip city names unconditionally. `merchant.merchant_key`
+is `UNIQUE`, so two unrelated businesses become **one row**, whose `canonical_name` is whichever
+raw string arrived first. Categorising one then auto-applies to the other at **tier T1,
+confidence 1.00, `needsReview` false**. No confidence gate can catch this, because it is not a
+fuzzy-match confidence problem at all: it is a **deterministic collision manufactured by
+normalisation, upstream of every tier**. `autoApplyThreshold` could be set to 1.01 and the merge
+would still happen. That is what makes it High and what makes it an architecture decision rather
+than a tuning one. (All merchant strings in this subsection are synthetic — NFR-M3.)
+
+##### The rule this ADR was missing: **corroboration**
+
+ADR-008 v1.0 shipped a *list* where it should have shipped a *rule*. Lists cannot be reviewed;
+you cannot tell whether the next entry someone adds is safe. Here is the rule, and it is the part
+of this decision that must outlive the specific fixes below.
+
+> **A token may be removed from a merchant string only if it is incapable, by its kind, of
+> distinguishing one business from another.**
+>
+> Three conditions, all required:
+>
+> 1. **Type-level, not instance-level.** Whether a token is strippable must be decidable from the
+>    token alone. `MerchantKey.of` stays a **pure, deterministic, database-free function**.
+> 2. **Structural, not proper.** A strippable token names *what kind of thing* a merchant is —
+>    an outlet, legal-form or terminal word (`BRANCH`, `STORE`, `FRC`, `LLC`, `فرع`). A **proper
+>    noun** — a city, a district, a mall, a person — names *which* one, and is never strippable.
+> 3. **Residue-safe.** Stripping must never be able to reduce two strings that differ only in a
+>    proper noun, or only in a number that is part of a name, to the same key.
+>
+> **And the collapse bar, which is the answer to the manager's question "when is it safe to
+> collapse two raw strings into one identity?":** a machine may collapse two raw merchant strings
+> into one identity **only** when their difference is confined to (i) structural noise tokens of
+> the kind above, (ii) a digit run corroborated as a store/terminal/reference number, (iii)
+> separators and whitespace, (iv) case, and (v) Arabic/Latin orthographic folding. **Every other
+> collapse is a user action** — a `MerchantAlias` link — recorded in the audit trail and
+> reversible. This is the same principle ADR-008 already applies to cross-script matching
+> (*"Arabic and Latin renderings cannot be reliably transliterated. We do not try."*) and the
+> same principle ADR-017/R-8 applies to duplicate transactions. It was simply never applied to
+> normalisation itself.
+
+##### The three options, and why (b) wins
+
+| Option | Assessment |
+|---|---|
+| **(a)** Strip a city token only when another significant token survives **and** the resulting key already names a known merchant | **Rejected, and not narrowly.** Two independent defeats. **First, it fails condition 1**: "already names a known merchant" is a database lookup, so the identity function becomes stateful and *arrival-order dependent*. `PANDA RIYADH` arriving first keys as `PANDA RIYADH`; if `PANDA` is later created, `PANDA JEDDAH` keys as `PANDA` — the same chain now holds two rows, and which row a message lands in depends on history. A `UNIQUE` identity column computed by a non-deterministic function is a worse property than the defect it fixes. **Second, and decisively, it does not fix the reported defect**: the corroboration it offers is *exactly the condition under which the merge occurs*. If the user ever has a merchant keyed `BAKERY` — a shop called "Bakery" is entirely ordinary — then `MAKKAH BAKERY` and `MADINAH BAKERY` both strip, both corroborate, and both merge, at 1.00, as before. Option (a) makes the collision rarer and harder to reason about. It does not close it. |
+| **(b)** **Drop city names from the noise list entirely; let the tiers handle chain branches** | **CHOSEN.** Purity preserved. The defect is closed at its root rather than gated. The cost is real and is stated below, and the *direction* of the residual error is the one AC-D2.3 explicitly asks for. |
+| **(c)** Keep the list; require a "these are two different shops" split UI in P4b | **Rejected as a fix; adopted as a companion requirement.** (c) does not address the identity merge at all — it is a manual repair offered *after* the damage, and the damage is the expensive kind: `merchant_key` is `UNIQUE`, so splitting means minting a second merchant, re-attributing historical transactions by their retained `merchantRawText`, and writing an audit entry per re-attributed row. Choosing (c) alone would mean deliberately shipping a default that manufactures work of that shape. **However**, a split/unlink affordance is still required for an independent reason — see the P4b answer below — so (c)'s deliverable survives, attached to (b) rather than substituting for it. |
+
+##### Settled answer 1 — **city tokens: DROPPED. Unconditionally.**
+
+All twelve city entries (`RIYADH`, `JEDDAH`, `DAMMAM`, `KHOBAR`, `MAKKAH`, `MADINAH` and their
+folded Arabic forms) leave `MerchantKey.noiseTokens`. The remaining list — outlet, legal-form and
+terminal vocabulary — is exactly the set that satisfies condition 2, and **no proper noun may ever
+be added to it**. A test must pin that: the noise list is asserted against an explicit allow-list
+of structural words, so a future "helpful" addition fails CI rather than silently merging two
+shops.
+
+**What this costs, stated honestly.** A chain's branches stop auto-merging. Against the current
+matcher:
+
+| Synthetic pair | Keys after the fix | Tier reached | Outcome |
+|---|---|---|---|
+| `MAKKAH BAKERY` / `MADINAH BAKERY` | `MAKKAH BAKERY` / `MADINAH BAKERY` | Jaccard 1/3 = 0.33 (below the 0.80 T3 floor); DL ratio ≈ 0.79 (below the 0.90 T4 floor) | `MerchantMatch.none` → Uncategorized + `needsReview`. **The defect is closed.** |
+| `PANDA RIYADH` / `PANDA JEDDAH` | `PANDA RIYADH` / `PANDA JEDDAH` | Jaccard 1/3 = 0.33 | flagged for review, not merged |
+| `PANDA STORE 1234` / `Panda` | `PANDA` / `PANDA` | T1/T2 exact | **unchanged** — the pipeline's own motivating case from PRD §3.4 still works |
+
+Note the second row is the cost: the user tags two Panda branches instead of one. Note also that
+QA's report estimates that pair at Jaccard 0.5; the shipped `_jaccard` computes |A∩B|/|A∪B| =
+1/3 = 0.33. Both are far below the 0.80 floor, so the conclusion is unchanged, but the correct
+figure is recorded here because a future tuner will read it.
+
+**Why this cost is the right one to pay.** The two errors are not symmetric and the asymmetry is
+the whole argument:
+
+- **Two rows that should be one** is recoverable in one user action. The `MerchantAlias` table
+  already exists for exactly this, and ADR-008 already promises *"one link fixes both scripts
+  forever"*. Linking `PANDA JEDDAH` to `PANDA RIYADH` is the user asserting identity — which is
+  the only actor this architecture trusts to assert it.
+- **One row that should be two** destroys the identity. The canonical name is wrong, the money is
+  attributed to the wrong business, correcting one shop re-points the other's future messages, and
+  the repair requires the forensic split described in option (c).
+
+AC-D2.3 already chose between these: *"match, or flag as low-confidence — never silently
+miscategorize, never silently merge unrelated merchants."* Flagging is named; over-merging is
+forbidden. **Prefer the simpler and more conservative option, and say so explicitly: (b) is
+both.** It deletes code rather than adding a lookup, and it fails toward asking the user.
+
+##### Settled answer 2 — **trailing digits: BOUNDED and CORROBORATED (KHA-99)**
+
+The current step is a `while` loop with no bound, so `QAMART 100`, `QAMART 200` and
+`QAMART 100 200 300` all key as `QAMART` — the KHA-98 shape in a second guise. But unlike a city
+name, a digit run *does* have a recognisable reference shape, so the answer is not "drop it"; it
+is "corroborate it". Normative:
+
+1. **At most one** trailing all-digit token is removed. Two digit runs in a row are not a
+   reference; they are part of a name or a garbled string, and collapsing them is a guess.
+2. It is removed **only if at least one non-digit token remains** afterwards.
+3. It is removed **only if corroborated as a reference** by either signal:
+   - **(i) Adjacency** — the token immediately before it is a structural noise token this pipeline
+     is also stripping (`STORE`, `BRANCH`, `BR`, `TERMINAL`, `TERM`, `POS`, `FRC`, `فرع`, `محل`).
+     This is PRD §3.4's actual observed shape: `PANDA STORE 1234`.
+   - **(ii) Length** — the run is **≥ 4 digits**. Four or more digits is a till, terminal or
+     reference id, not a branch number a human says out loud.
+4. **Leading digits keep their existing protection.** `7 ELEVEN` must survive. That asymmetry was
+   already deliberate and already documented in `merchant_key.dart`; it stands.
+
+The `4` is a named constant beside `autoApplyThreshold` (suggested: `referenceDigitRunMinLength`),
+tunable against the corpus, with the same posture as **O-1**: the *value* is tuning, the *bar* is
+not. Consequences on synthetic input:
+
+- `QAMART 100` / `QAMART 200` → keys differ. Jaccard 0.33 → no T3. Damerau-Levenshtein ratio
+  1 − 1/10 = **0.90**, which meets the T4 floor — so this pair surfaces as *"did you mean QAMART
+  100?"*, `canAutoApply` false, `needsReview` true. **That is the ideal outcome, not a
+  consolation:** the app says what it noticed and lets the person decide.
+- `CAFE 1` / `CAFE 2` → keys differ; DL ratio 0.83, below the T4 floor → `none` + `needsReview`.
+- `QAMART 100 200 300` → `QAMART 100 200 300` (rule 1 and rule 3 both decline).
+- `PANDA STORE 1234` → `PANDA` (adjacency corroboration). `PANDA 1234` → `PANDA` (length
+  corroboration). Both preserved.
+
+##### Settled answer 3 — **the all-noise fallback key is REMOVED (KHA-102)**
+
+`MerchantKey.ofOrNull('***')` currently returns `'***'`, defeating the exact guard it exists to
+be. `of()` falls back to the *folded string* when every token was stripped; a punctuation-only
+string tokenises to nothing but folds to itself, so it is non-empty and `ofOrNull`'s `isEmpty`
+test misses it. One rule then categorises every masked-merchant transaction across every bank —
+which `ofOrNull`'s own doc comment correctly calls *"the single most damaging silent merge
+available in this design"*.
+
+**Decision: when every token is stripped, there is no key.** `of` returns the empty string,
+`ofOrNull` returns null, and the transaction is `skippedNoMerchant` — identical treatment to a
+transaction that carried no merchant text at all, which is what the method already promises.
+
+**This deliberately goes further than QA's stated fix direction, and the reason matters.**
+`docs/defects.md` proposes *"require the fallback key to contain at least one letter or digit"*.
+That closes `'***'` and leaves `'STORE'` and `'فرع'` open — a merchant string consisting only of
+structural noise would still become an identity, and two unrelated masked strings would still
+collapse onto it. The general form of the argument is short and is the reason to prefer removal
+over patching: **an all-noise string is by construction made only of tokens we have just declared
+incapable of distinguishing two businesses, so a key built from it is by construction incapable of
+distinguishing two businesses.** That is precisely the silent merge. Patching the symptom would
+have left the class open.
+
+**The cost, and why it is near-zero.** A merchant genuinely named nothing but a noise word ("Store",
+"محل") gets no merchant identity, so no rule can be learned for it and its transactions are
+individually categorised each time. The noise list is deliberately short and, in the code's own
+words, consists only of words *"that cannot plausibly be a merchant on their own"* — and with the
+city entries now gone, that claim is finally true. **Nothing is lost or hidden:** the transaction
+is still written, still carries its `merchantRawText`, still appears in totals, still audits.
+NFR-A7 is untouched. We decline to *identify*; we never discard.
+
+##### Settled answer 4 — **T3 means the token MULTISET (KHA-100)**
+
+The ambiguity is real: ADR-008 said "token-set", and `CategorizationConfig`'s tuning rationale
+defends 0.85 as *"the two strings contain the same tokens and differ only in order, spacing, case,
+store number or noise words"* — a **permutation** claim. The code compares Dart `Set`s, so
+multiplicity is invisible and `QAFE QAFE` reaches Jaccard 1.0 against `QAFE`, auto-applying
+another merchant's rule at exactly the threshold.
+
+**Decision: T3 is defined over the token multiset, and the code moves to meet the rationale — not
+the other way round.** Jaccard is computed with multiplicities, so `{QAFE, QAFE}` vs `{QAFE}` is
+1/2 = 0.5, below the 0.80 floor; the pair falls through and can never auto-apply.
+
+> **Correction recorded at implementation (2026-07-29, mobile-engineer), factual only — the
+> decision above is unchanged.** This paragraph originally said the pair *"falls through to T4 and
+> becomes a suggestion"*. It falls through **past** T4 as well: the Damerau-Levenshtein ratio for
+> `QAFE QAFE` against `QAFE` is 1 − 5/9 ≈ **0.44**, well under the 0.90 T4 floor, so the matcher
+> returns `MerchantMatch.none` and does not offer a "did you mean" either. Both outcomes are
+> refusals and neither can auto-apply, so nothing about the decision or its safety argument moves —
+> but a future tuner reading "it becomes a suggestion" would be surprised by the observed
+> behaviour, so the executed answer is recorded here and pinned by PROBE D in
+> `test/security/qa_pr27_probe_test.dart`.
+
+Two reasons, in order of weight. **First, it is what the corroboration rule requires:** no
+normalisation step in this pipeline produces or removes a repeated token, so a duplicated token is
+a genuine difference between two strings, and collapsing it is a machine asserting identity on a
+guess. **Second, it is the more conservative of two live options** — the alternative was to weaken
+the documented rationale to match the code, which would leave a real (if narrow) auto-apply path
+open *and* leave the next tuner reading a rationale that overstates the safety of 0.85. Fixing the
+code makes the sentence in `CategorizationConfig` literally true, which is worth more than the
+handful of lines it costs.
+
+##### Settled answer 5 — the R-16 migration posture: **clean migration, no re-key, with a stated premise and a stated expiry**
+
+Every fix above changes the output of `MerchantKey.of` for inputs that already have rows. On an
+install holding `merchant` rows, that would require a re-key migration — and a nasty one, because
+re-keying can *split* one row into two, which means re-attributing historical transactions by
+their retained `merchantRawText` and writing an audit entry per re-attribution (NFR-A2). **No such
+migration is written, because no such install exists.** The premise, stated explicitly so the next
+reader does not have to re-derive it:
+
+> **Premise.** No install anywhere holds a `merchant`, `merchant_alias` or `merchant_rule` row.
+
+**The evidence, and an honest note on how strong it is.** Three facts compose:
+
+1. Those tables were created by **schema v7**, which landed on `main` at `42db8ff` (PR #27) on
+   **2026-07-29** — the same day as this decision.
+2. **No build carrying schema v7 has been installed on any device.** code-reviewer's PR #20 gate
+   blocks *"any build that reaches a device"* until KHA-87/88 close, and **KHA-88 is still open**
+   (PR #24's merge commit: *"KHA-88 stays open for the set-valued-link schema half"*). The KHA-7
+   device spike is still in Backlog, and `docs/build-plan.md` §7.3 row 5 instructs the human to
+   wait for P3b-3 before running it. KHA-53 (the P10 staging release) has not started.
+3. Therefore no `MerchantKey` has ever been computed outside CI.
+
+> **This is weaker evidence than ADR-010's KHA-69 argument, and the difference must not be
+> glossed.** KHA-69's premise was *structural* — the DB key is provisioned behind the app-lock
+> gate, so audit rows could not exist. This premise is **procedural**: it holds because nobody has
+> installed an APK yet, and it can be falsified by one person doing one ordinary thing.
+> Specifically, note that a routed UI is **not** required to populate `merchant`: the categorizer
+> is already bound into live ingestion (`presentation/providers/categorization_providers.dart` →
+> `ingestion_providers.dart`), so a single ingested SMS on an unlocked v7 install creates merchant
+> rows with no screen involved. Anyone reasoning about this from `lib/app.dart`'s routing would
+> reach the wrong answer — which is the exact trap `docs/lessons.md` records ("'unreachable today'
+> is a claim about *navigation*, not about code").
+
+**Expiry condition, binding.** *This posture is void the moment any build carrying schema v7 or
+later is installed on a device and unlocked.* Before relying on it again, check both:
+(i) has any APK containing `lib/features/categorization/` been installed on hardware?
+(ii) does `merchant` hold any row on any install? **If either answer is yes, this decision does
+not authorise a clean migration** and the re-key-plus-re-attribution migration described above
+becomes mandatory. Recorded as **R-16** in §8.3.
+
+**The window is open today and closes on a human action, not on a code change.** That is the
+argument for landing the mobile-engineer's fix before the P3b-3 device run, not after it.
+
+##### Settled answer 6 — **does P4b need a "these are two different shops" affordance? YES.**
+
+Plainly: **yes**, and choosing option (b) does not remove the need. The reasoning is not the one
+KHA-98 gives (that reason — *"P4a is already creating the merged rows"* — is dissolved by (b)
+together with the clean-migration posture, since no merged rows exist and none will be created).
+The reason that survives is this:
+
+> After this decision, the `MerchantAlias` link is **the only remaining operation in the entire
+> product that collapses two identities into one.** It therefore carries the whole of AC-D2.3's
+> "never silently merge" burden by itself. R-8's standing principle — a merge must be
+> user-confirmed **and reversible**, never automatic — applies to it exactly as it applies to the
+> transaction merge in ADR-017. **An irreversible identity link is the same defect as an automatic
+> one, one step later.**
+
+The minimum surface, scoped so the designer is not guessing:
+
+1. **Where.** On **S-16 (Learned / Merchant Rules)**, or a merchant-detail sheet reached from it —
+   not a new top-level screen. For a merchant that has aliases, list them with their `script` and
+   `source`.
+2. **The action.** *"This is a different shop"* on an alias: detaches it into its own `Merchant`
+   row, re-points the transactions whose `merchantRawText` produced that alias key, and leaves the
+   remaining transactions where they are.
+3. **Audit.** One audit entry per re-pointed transaction, actor `user` — the same shape AC-D4.4
+   already requires for a bulk historical re-apply. The split is a new event, never an erasure
+   (NFR-A3).
+4. **Confirmation.** A confirmation dialog, not a single tap. This is O-QA-8/KHA-90's lesson
+   applied before the fact rather than after: the riskiest operation in a screen must not be
+   cheaper to trigger than the safer ones beside it.
+
+**This is a process event and it is named here so the manager can act on it.** `docs/design.md`
+contains no such affordance — S-16 today is search plus `{Merchant} → {Category}` rows plus the
+S-17 edit sheet. **A `/revise-design` round is therefore required before whichever P4b issue
+carries this can ship.** It is additive (one action on an existing screen, one dialog), so it
+should not require re-approving the whole design document — but design approval is a human gate
+under `CLAUDE.md`, so **the human must approve the delta.** Raised as **H-15** in §8.1. This
+amendment does not block on it, and neither should the rest of P4b.
+
+##### What this decision does **not** change
+
+`MerchantAlias`, the cross-script posture, tier ordering, T1/T2/T4 semantics, `canAutoApply`'s
+structural refusal of T4, `minimumFuzzyMatchKeyLength`, and the value of `autoApplyThreshold`
+(**still 0.85** — nothing here is a threshold-tuning change, and O-1 stands). KHA-101, KHA-103,
+KHA-104 and KHA-105 are engineering defects with no architectural content and are **not** settled
+here.
+
+##### Where this must be enforced and observed
+
+- `MerchantKey.noiseTokens` pinned against an explicit structural-word allow-list, so adding a
+  proper noun fails a test rather than merging two shops.
+- Regression tests, from this subsection's synthetic table verbatim: `MAKKAH BAKERY` ≠
+  `MADINAH BAKERY`; `QAMART 100` ≠ `QAMART 200`; `QAMART 100 200 300` keeps all three runs;
+  `PANDA STORE 1234` == `Panda`; `MerchantKey.ofOrNull('***')` and `ofOrNull('-*-')` both null;
+  `MerchantKey.ofOrNull('STORE')` null; `QAFE QAFE` does not reach T3 against `QAFE`.
+- The corroboration rule quoted in `merchant_key.dart`'s library comment, replacing the current
+  *"a chain's branches are the chain"* defence — which is the sentence that made the defect look
+  intentional to three consecutive readers.
+- `CategorizationConfig`'s 0.85 rationale updated to state the multiset semantics, since that
+  rationale is what the next tuner reads.
 
 ---
 
@@ -1872,12 +2187,13 @@ equivalents. This binds QA and production-support as much as engineering.
 | **H-12** | **Play publication is architecturally foreclosed.** ADR-006 depends on `RECEIVE_SMS`/`READ_SMS`, which Play restricts to default SMS handlers. NFR-C3 is satisfied *by* side-loading. Publishing later would require re-architecting ingestion | Acknowledge the lock-in |
 | **H-13** | **⚠️ NFR-R1 is reduced. This is the one item in v1.1 you should actually weigh.** ADR-018 decides that background SMS ingestion is suspended while the app is locked, because the alternative is a second, auth-free copy of your financial data. **Net effect: "seconds from SMS arrival" holds while the app is unlocked; while locked it becomes "seconds from unlock, with nothing lost."** AC-A1.4 is still fully met. If you want the *feel* of the original, ADR-018 decision 5 offers an opt-in, content-free "a bank message is waiting" notification at zero security cost | **Confirm the reduction**, and say yes/no to building the opt-in nudge in P6/P7. If you would rather have the original latency and accept an auth-free ingest inbox, say so — but read ADR-018's four arguments first; I recommend against it clearly |
 | **H-14** | **Ratifying ADR-013's widening surfaced two live defects of the same class that KHA-54's fix did *not* close.** (i) The grouped-PAN scan tests only the maximal digit-group sequence, so `4111 1111 1111 1111 45` leaves a full PAN in cleartext with `panRedacted = false`. (ii) Grouped SA IBANs (`SA03 8000 0000 6080 1016 7519`) are not matched at all. Both are security defects in an open PR, not future work | **No decision needed — flagging for visibility.** These are must-fix under §13.4/§13.5 before PR #2 merges, and should be raised as `bug` issues routed to mobile-engineer. Tell me if you want them held to a follow-up instead |
+| **H-15** | **⚠️ A `/revise-design` round is now required — this is the v1.3 item that needs you.** The KHA-98 decision makes the `MerchantAlias` link the **only** remaining operation in the product that collapses two identities into one, so it must be reversible (R-8's principle). That needs a **"This is a different shop"** affordance on **S-16 (Learned / Merchant Rules)** plus a confirmation dialog, and `docs/design.md` has neither. The change is **additive** — one action on an existing screen, one dialog, no new top-level screen — so in my judgement it does not require re-approving the whole design document, only the delta. But design approval is a human gate under `CLAUDE.md`, so it is yours to approve, not the team's to assume | **Two things, please.** (1) Confirm the additive-delta reading, so the manager can run `/revise-design` scoped to S-16 rather than re-opening gate 2. (2) Note the sequencing: this blocks only the P4b issue that carries the split affordance — not P4b as a whole, and not the mobile-engineer's KHA-98/99/100/102 fix, which should land first and independently |
 
 ### 8.2 Residual open questions I am deliberately **not** deciding here
 
 | # | Item | Why deferred, and where it lands |
 |---|---|---|
-| **O-1** | **The numeric value of `autoApplyThreshold`** (residual OQ-14). Initial **0.85**, and the token-set/edit-distance constants alongside it | These must be **tuned against the synthetic corpus in P4**, not guessed in P0. Deciding a number now would be false precision. The architecture pins the *structure* — one named constant, one place, tiered matching where T4 can never auto-apply — so tuning never requires a redesign. The observable bar (AC-D2.3/D2.4: match or flag, never silently miscategorise) is enforced regardless of the value |
+| **O-1** | **The numeric value of `autoApplyThreshold`** (residual OQ-14). Initial **0.85**, and the token-set/edit-distance constants alongside it | These must be **tuned against the synthetic corpus in P4**, not guessed in P0. Deciding a number now would be false precision. The architecture pins the *structure* — one named constant, one place, tiered matching where T4 can never auto-apply — so tuning never requires a redesign. The observable bar (AC-D2.3/D2.4: match or flag, never silently miscategorise) is enforced regardless of the value. **Reaffirmed at v1.3, with one correction to how the bar is guaranteed:** KHA-98 showed that the bar is *not* enforced by tier structure alone, because a normalisation collision arrives at T1 already merged and never meets a gate. The bar is now enforced by the tier structure **plus** the corroboration rule in ADR-008's KHA-98 subsection. 0.85 is unchanged; `referenceDigitRunMinLength = 4` joins it as a tunable with the same posture |
 | **O-2** | **Rule-pack signing for imported packs.** v1 ships unsigned, mitigated by declarative-only rules, a regex timeout, mandatory user review of the diff, and no network permission | Signing needs a key-distribution story that only matters once packs are shared beyond the user. Revisit if that changes |
 | **O-3** | **Exact wording of the erase-all cloud-trash warning** (ADR-011) and the backup-freshness copy (ADR-012) | Designer's call (D-10), with the architectural facts fixed here |
 | **O-4** | Whether the diagnostic ring buffer should survive erase-all for post-mortem purposes | Currently: it is wiped, because AC-F3.1 says "all data". Raise only if production-support finds this blocking |
@@ -1892,7 +2208,8 @@ equivalents. This binds QA and production-support as much as engineering.
 | **R-2** backup key recovery | **Closed.** App-generated 128-bit Recovery Phrase, HKDF/Argon2id, salt in the cleartext envelope header, nothing device-bound required to restore (ADR-004, ADR-012). QA must test restore on a device that has never seen the original Keystore |
 | **R-3** exact decimal money | **Closed by construction.** `Money` cannot round-trip a float; cross-currency arithmetic throws; CI bans `double` in money paths and `SUM()` on money columns (ADR-002) |
 | **R-4** parser brittleness | **Mitigated.** Data-driven rule packs, importable without an APK reinstall, corpus regression in CI, review queue as the never-lose-a-message safety net (ADR-007) |
-| **R-5** cross-script merchant matching | **Mitigated.** Normalisation pipeline + explicit alias table + tiered matching where the fuzzy tier can never auto-apply (ADR-008) |
+| **R-5** cross-script merchant matching | **Re-characterised at v1.3, and the mitigation was incomplete as written.** The alias table and the never-auto-applying fuzzy tier stand. What v1.0 missed is that **the normalisation pipeline was itself a merge mechanism** — KHA-98/KHA-99/KHA-102 all merged unrelated merchants *upstream of every tier*, at confidence 1.00, where no gate exists. R-5's real surface was never only "too loose vs too strict matching"; it was also "too aggressive normalisation", which is invisible to every control the ADR named. Closed by the corroboration rule (ADR-008, KHA-98 decision), which bounds what normalisation may collapse and pushes everything else onto a user-created, auditable, **reversible** alias link |
+| **R-16** merchant re-key migration window *(added 2026-07-29; the manager's KHA-98 brief calls this "R-17" — **R-16 is the correct next free ID**: `docs/build-plan.md` v1.4 ends at R-15 and no R-16 or R-17 exists in either document)* | **Open, time-boxed, and it expires on a human action.** The KHA-98 fix changes `MerchantKey.of`'s output, which on a populated install would require a re-key migration that can *split* one merchant row into two — meaning re-attribution of historical transactions by `merchantRawText` and one audit entry per row. That migration is **not** written, on the stated premise that no install holds a `merchant` row (schema v7 landed today; no v7 build has reached a device; KHA-88 and the PR #20 device gate are still open). **The premise is procedural, not structural**, and a routed UI is not needed to break it — the categorizer is already bound into live ingestion, so one ingested SMS on an unlocked v7 install populates the table. Land the fix before the P3b-3 device run. Full expiry condition in ADR-008's KHA-98 subsection. **Owner: mobile-engineer (fix), manager (sequencing).** |
 | **R-6** on-device PDF | **Recommend descope to v1.1**, behind a port so it costs nothing to add later (ADR-016). Human decision H-3 |
 | **R-7** internal-transfer bootstrap | **Mitigated.** Candidates never change totals until confirmed; unknown state is visible, not guessed (§4.2 `InternalTransferLink`) |
 | **R-8** auth-vs-posting duplicates | **Mitigated with an explicit bias.** Only exact-content duplicates are suppressed; everything else is flagged, never auto-removed (ADR-017) |
@@ -1914,7 +2231,7 @@ equivalents. This binds QA and production-support as much as engineering.
 | A-4 backup key derivation, escrow, recovery | **ADR-012** (+ ADR-004) — generated Recovery Phrase, no escrow |
 | A-5 exact-decimal money + CI enforcement | **ADR-002** |
 | A-6 parser rule model + data updates | **ADR-007** + §5.2 |
-| A-7 merchant normalisation, matching, confidence threshold | **ADR-008**; threshold value is residual **O-1** |
+| A-7 merchant normalisation, matching, confidence threshold | **ADR-008** + its **KHA-98 decision** (v1.3) — the corroboration rule is the normative answer to "what may normalisation collapse"; threshold value is residual **O-1** |
 | A-8 duplicate detection | **ADR-017** |
 | A-9 FX handling offline | **ADR-009** |
 | A-10 audit-trail enforcement boundary | **ADR-010** — stated, not over-claimed |

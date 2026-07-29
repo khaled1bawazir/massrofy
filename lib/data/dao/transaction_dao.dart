@@ -502,7 +502,20 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
           // Recorded even when nothing was categorised: knowing *which* shop
           // this was is useful on its own, and it is what stops a second
           // merchant row being created for the same key next time.
-          merchantId: Value<int?>(merchantId),
+          //
+          // **KHA-105.** `absent()` when null, exactly like [setUserCategory],
+          // so a caller that simply does not know the merchant cannot
+          // accidentally *unlink* one that is already there. The two siblings
+          // disagreed on this until now, and the automatic one was the
+          // dangerous side: `categorizeTransaction` calls it a second time with
+          // `categoryId: null` on the flag-for-review path, and any future
+          // caller written from that example would have silently cleared the
+          // link. Unlinking a merchant is not a small error — the next message
+          // from that shop creates a second `merchant` row and the learned rule
+          // stops applying.
+          merchantId: merchantId == null
+              ? const Value<int?>.absent()
+              : Value<int?>(merchantId),
           // Only ever raises a flag, never lowers one: an existing flag was
           // raised by a different question (a possible duplicate, an unproven
           // transfer) and clearing it here would answer a question nobody
@@ -554,6 +567,66 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
       }
 
       return true;
+    });
+  }
+
+  /// Records **which merchant** a transaction belongs to, and nothing else.
+  ///
+  /// The narrowest possible write, added for KHA-101: a category correction
+  /// made from the edit form has to leave the row in the same shape as one made
+  /// from the categorization surface, and the only thing missing was this link.
+  ///
+  /// Deliberately *not* reusing [setUserCategory] for that: re-running the
+  /// category write to pick up its `merchantId` argument would append a second
+  /// `categorize` audit entry whose before/after is `X → X` — a record of a
+  /// change that did not happen, which is the shape of dishonest history
+  /// `restore()`'s own doc comment warns about.
+  ///
+  /// A no-op (no write, no audit entry) when the link is already what is asked
+  /// for, so a caller may call it freely. It never *clears* a link: the
+  /// parameter is non-null, because "I do not know the merchant" is not a
+  /// reason to forget one that is already recorded (the same lesson as KHA-105
+  /// two methods up).
+  Future<void> linkMerchant({
+    required int id,
+    required int merchantId,
+    String actor = 'user',
+    String? actorDetail,
+    DateTime? now,
+  }) {
+    final DateTime timestamp = now ?? DateTime.now();
+    return transaction<void>(() async {
+      final TransactionRow existing = await (select(
+        transactions,
+      )..where((Transactions t) => t.id.equals(id))).getSingle();
+      if (existing.merchantId == merchantId) {
+        return;
+      }
+
+      await (update(
+        transactions,
+      )..where((Transactions t) => t.id.equals(id))).write(
+        TransactionsCompanion(
+          merchantId: Value<int?>(merchantId),
+          updatedAt: Value<DateTime>(timestamp),
+        ),
+      );
+
+      await auditLogDao.append(
+        entityType: 'transaction',
+        entityId: id.toString(),
+        action: 'update',
+        actor: actor,
+        actorDetail: actorDetail ?? 'merchant_link',
+        changedAt: timestamp,
+        fieldChanges: <AuditFieldChange>[
+          AuditFieldChange(
+            field: 'merchantId',
+            from: existing.merchantId?.toString(),
+            to: merchantId.toString(),
+          ),
+        ],
+      );
     });
   }
 
@@ -626,6 +699,67 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
         ],
       );
     });
+  }
+
+  /// **The authoritative, set-valued answer to "what has this row absorbed?"**
+  /// — KHA-88 / D-QA-7, and the input KHA-94's chain guard was missing.
+  ///
+  /// ## Why this exists, and why it needed no new column
+  ///
+  /// `merged_from_transaction_id` is a **single scalar**, so a survivor that
+  /// absorbs a second duplicate overwrites its pointer to the first. Three
+  /// alerts for one purchase is not exotic — a POS alert, a "card used" alert
+  /// and a settlement alert produce exactly that shape — so a survivor holding
+  /// two absorbed rows is an ordinary state, and the column could describe only
+  /// one of them.
+  ///
+  /// The set was never actually missing from the schema; it was merely never
+  /// *asked for*. Each absorbed row carries `merged_into_id` naming its
+  /// survivor, so the complete set of rows a survivor has absorbed is exactly
+  /// the rows whose `merged_into_id` is that survivor. This method is that
+  /// question, asked directly. No migration, and therefore none of the re-key
+  /// risk R-16 is currently holding open elsewhere in this phase.
+  ///
+  /// ## The scalar is now a cache with a stated invariant
+  ///
+  /// `merged_from_transaction_id` remains, as the **most recent** merge into
+  /// this row — it is what the merge audit entry's before/after is written
+  /// against, and it is what the pure `MergePlan.between` can consult without a
+  /// database. [restore] maintains the invariant that makes it safe:
+  ///
+  /// > `merged_from_transaction_id` is null **if and only if** this method
+  /// > returns an empty list.
+  ///
+  /// Before KHA-88 that invariant did not hold, and KHA-94 (probe J1) is the
+  /// exploit: undoing the *most recent* merge into a survivor nulled the scalar
+  /// while an *earlier* absorbed row was still absorbed, so
+  /// `MergeRefusal.chainWouldForm` saw an unencumbered row and let a chain
+  /// form. `TransactionMergeService.merge` now asks *this* method rather than
+  /// trusting the cache, so the guard is correct even if the invariant is ever
+  /// broken by something outside this DAO (a raw-SQL edit, a future writer).
+  ///
+  /// Ordered newest-absorbed first (`deleted_at` is set at merge time), so
+  /// `.first` is the row the scalar should name.
+  Future<List<int>> absorbedTransactionIds(int survivorId) async {
+    final List<TransactionRow> rows =
+        await (select(transactions)
+              // `&`, not `&&`: drift builds a SQL `AND` expression here rather
+              // than evaluating two Dart booleans.
+              ..where(
+                (Transactions t) =>
+                    t.mergedIntoId.equals(survivorId) &
+                    t.isDeleted.equals(true),
+              )
+              ..orderBy(<OrderClauseGenerator<Transactions>>[
+                (Transactions t) => OrderingTerm(
+                  expression: t.deletedAt,
+                  mode: OrderingMode.desc,
+                ),
+                (Transactions t) =>
+                    OrderingTerm(expression: t.id, mode: OrderingMode.desc),
+              ]))
+            .get();
+    return <int>[for (final TransactionRow row in rows) row.id];
   }
 
   /// Restores a soft-deleted transaction (US-B8, **AC-B8.2**).
@@ -738,16 +872,39 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
                   ..where((Transactions t) => t.id.equals(survivorId)))
                 .getSingleOrNull();
 
-        // **The identity check (D-QA-8).** Clear the survivor's pointer only
+        // **The identity check (D-QA-8).** Touch the survivor's pointer only
         // when it actually names the row being restored. If the survivor has
         // since absorbed a different duplicate, that later merge is none of
         // this undo's business and its link stays intact.
         if (survivor != null && survivor.mergedFromTransactionId == id) {
+          // **KHA-88 / D-QA-7, and the fix KHA-94 needs.** The pointer is
+          // *re-pointed*, not blanked. `absorbedTransactionIds` is the
+          // authoritative set (the `merged_into_id` back-pointers), and the row
+          // being restored has already had its own back-pointer cleared a few
+          // lines above — so what comes back here is exactly what the survivor
+          // still holds.
+          //
+          // Blanking was the bug. A survivor that had absorbed two rows and
+          // then had the *most recent* undone was left claiming it had absorbed
+          // **nothing**, while still holding the earlier one. That is a lossy
+          // scalar in the worst place: `MergeRefusal.chainWouldForm` read it,
+          // saw an unencumbered row, and permitted the chain it exists to
+          // prevent (KHA-94 probe J1).
+          //
+          // The invariant this restores, stated on `absorbedTransactionIds`:
+          // the scalar is null **iff** the survivor has absorbed nothing.
+          final List<int> stillAbsorbed = await absorbedTransactionIds(
+            survivorId,
+          );
+          final int? nextPointer = stillAbsorbed.isEmpty
+              ? null
+              : stillAbsorbed.first;
+
           await (update(
             transactions,
           )..where((Transactions t) => t.id.equals(survivorId))).write(
             TransactionsCompanion(
-              mergedFromTransactionId: const Value<int?>(null),
+              mergedFromTransactionId: Value<int?>(nextPointer),
               updatedAt: Value<DateTime>(timestamp),
             ),
           );
@@ -771,7 +928,12 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
               AuditFieldChange(
                 field: 'mergedFromTransactionId',
                 from: id.toString(),
-                to: null,
+                // A genuine observation, not a claim: `null` when this was the
+                // survivor's only absorbed row, otherwise the earlier merge the
+                // scalar now names. US-F5 can therefore say "this undo left one
+                // other duplicate still merged" rather than implying it undid
+                // everything.
+                to: nextPointer?.toString(),
               ),
             ],
           );
@@ -1206,6 +1368,23 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
   /// form and pressing Save without typing has not expressed an intent about
   /// anything, and treating that as ten permanent overrides would freeze the
   /// row against all future enrichment for no reason.
+  ///
+  /// ## KHA-101 — this method and [setUserCategory] now agree
+  ///
+  /// Two user-facing writes can set a category, and they behaved differently in
+  /// two user-visible ways. Both are closed:
+  ///
+  ///  1. **The review flag.** Changing `category_id` here clears a flag the
+  ///     *categorizer* raised (AC-C4.3), exactly as [setUserCategory] does, via
+  ///     the same [_clearCategoryReviewFlag] helper — so a flag raised by a
+  ///     different question survives, by construction rather than by care.
+  ///     Fixed at this write boundary, so it holds for any caller.
+  ///  2. **The learned rule.** A DAO cannot compute a merchant key without
+  ///     importing the feature layer, so the rule half is one level up:
+  ///     `TransactionEditService` calls
+  ///     `CategorizationService.learnRuleFromCorrection` through the
+  ///     `LearnCategoryRule` seam, bound in
+  ///     `presentation/providers/ledger_providers.dart`.
   Future<void> applyUserEdit({
     required int id,
     Edited<Money>? amount,
@@ -1390,6 +1569,27 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
         transactions,
       )..where((Transactions t) => t.id.equals(id))).write(companion);
 
+      // **KHA-101 / D-QA-27-4 — the two correction surfaces now agree.**
+      //
+      // `setUserCategory` has always cleared the categorizer's review flag; the
+      // edit form did not, so a person who answered *"this is Dining"* from the
+      // detail screen was left with the row still sitting in the review inbox
+      // asking *"is this a shop you know?"* (AC-C4.3: *"when the user confirms
+      // or corrects the category, the flag is cleared"*).
+      //
+      // The same helper as `setUserCategory`, so the sibling property comes for
+      // free and cannot drift: a flag raised by a **different** question — a
+      // possible duplicate, an unproven internal transfer — is untouched,
+      // because answering one question does not answer the other. That is a
+      // check on `review_reason`, not on the boolean.
+      //
+      // Guarded on `touched` rather than on `categoryId != null`, so pressing
+      // Save without altering the category clears nothing — the same restraint
+      // this method already applies to `user_edited_fields` above.
+      if (touched.contains(TransactionField.categoryId)) {
+        await _clearCategoryReviewFlag(id: id, existing: existing);
+      }
+
       await auditLogDao.append(
         entityType: 'transaction',
         entityId: id.toString(),
@@ -1552,6 +1752,34 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
           ? null
           : encodeUserEditedFields(unionProtected);
 
+      // --- 0b. Does the review flag on each row belong to THIS pair? --------
+      //
+      // **O-QA-11 / KHA-96.** This method used to write
+      // `needsReview: false, reviewReason: null, possibleDuplicateOfId: null`
+      // unconditionally on both rows, whatever they were flagged for. A
+      // survivor flagged for an unparsable amount (KHA-74), for being an
+      // unproven internal-transfer leg (AC-B11.2), or for being a possible
+      // duplicate of some *third* row therefore left the review inbox the
+      // moment an unrelated pair was resolved. That is the review inbox quietly
+      // losing an item the user was going to be asked about — the same class of
+      // silence the whole merge design exists to avoid, and it lands directly
+      // in P4b's needs-review screen.
+      //
+      // The test is `possible_duplicate_of_id`, which is the column that says
+      // *which row this flag is about*. It is structural rather than a
+      // vocabulary check, so this DAO needs no knowledge of
+      // `features/ingestion`'s `ReviewReason` strings (architecture §3: `data`
+      // may not import `features`) — and it is strictly more precise than a
+      // reason check would be, because it distinguishes "duplicate of the row
+      // in front of us" from "duplicate of a third row".
+      //
+      // A flag this merge does not answer is left exactly as it is, to
+      // re-derive: whatever raised it is still true.
+      final bool survivorFlagNamesThisPair =
+          survivor.possibleDuplicateOfId == mergedAwayId;
+      final bool absorbedFlagNamesThisPair =
+          mergedAway.possibleDuplicateOfId == survivorId;
+
       // --- 1. The survivor absorbs whatever it was missing -----------------
       final List<AuditFieldChange> survivorChanges = <AuditFieldChange>[
         AuditFieldChange(
@@ -1655,6 +1883,57 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
             from: survivor.userEditedFields,
             to: mergedProtectedFields,
           ),
+        // --- KHA-96 / D-QA-20: `provenance` — the recorded decision --------
+        //
+        // **Decision: explicit noop, with the absorbed row's value recorded
+        // here so NFR-A1 stays answerable.**
+        //
+        // QA's schema-derived enumeration (probe K1, now a forcing function in
+        // `transaction_merge_test.dart`) found `provenance` and
+        // `provenance_detail` as the only two columns with no merge decision
+        // anywhere. They are NFR-A1's *"where did this record come from"* pair,
+        // and merging a `manual` row into an `sms` row soft-deletes the manual
+        // origin whole.
+        //
+        // Neither **compared** nor **carried**, and both alternatives are worse
+        // than they look:
+        //
+        //  - *Compared* (refuse when they differ) would refuse the merge the
+        //    user most obviously wants: someone types a purchase manually, the
+        //    bank's SMS arrives an hour later, and the two are the same
+        //    movement. Refusing a plainly-correct merge to protect a metadata
+        //    string is the wrong trade.
+        //  - *Carried* (gap-fill) cannot fire: `provenance` is `NOT NULL` with
+        //    a default, so the survivor never has a gap in it. A carry would
+        //    have to be an *overwrite*, which property 3 forbids outright.
+        //
+        // So the survivor keeps its own provenance, which is the truth about
+        // the survivor: this method does not re-create the row, it enriches it,
+        // and the row was created however it was created. The absorbed row also
+        // keeps its own — nothing is destroyed — and this entry names it, so
+        // "the record I am looking at also absorbed a manual entry" is
+        // recoverable from the trail without a second column. Emitted only when
+        // the two differ, so an sms/sms merge (the common case) adds no noise.
+        // `from: null` is deliberate and is not laziness. Every other entry in
+        // this list is a genuine before/after **on the survivor**; these two are
+        // not — the survivor's own `provenance` does not change. They record a
+        // *newly known fact* ("the row absorbed here was a manual entry"), and
+        // writing `from: survivor.provenance` would read as a change that did
+        // not happen, which is the dishonest-history shape `restore()`'s doc
+        // comment warns about.
+        if (survivor.provenance != mergedAway.provenance)
+          AuditFieldChange(
+            field: 'absorbedProvenance',
+            from: null,
+            to: mergedAway.provenance,
+          ),
+        if (mergedAway.provenanceDetail != null &&
+            survivor.provenanceDetail != mergedAway.provenanceDetail)
+          AuditFieldChange(
+            field: 'absorbedProvenanceDetail',
+            from: null,
+            to: mergedAway.provenanceDetail,
+          ),
       ];
 
       await (update(
@@ -1731,10 +2010,17 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
               : Value<String?>(mergedProtectedFields),
           mergedFromTransactionId: Value<int?>(mergedAwayId),
           // The pair has been resolved by the user, so the duplicate flag that
-          // asked them to resolve it comes off.
-          needsReview: const Value<bool>(false),
-          reviewReason: const Value<String?>(null),
-          possibleDuplicateOfId: const Value<int?>(null),
+          // asked them to resolve *it* comes off — and only that one. See the
+          // O-QA-11 note where `survivorFlagNamesThisPair` is computed.
+          needsReview: survivorFlagNamesThisPair
+              ? const Value<bool>(false)
+              : const Value<bool>.absent(),
+          reviewReason: survivorFlagNamesThisPair
+              ? const Value<String?>(null)
+              : const Value<String?>.absent(),
+          possibleDuplicateOfId: survivorFlagNamesThisPair
+              ? const Value<int?>(null)
+              : const Value<int?>.absent(),
           updatedAt: Value<DateTime>(timestamp),
         ),
       );
@@ -1757,9 +2043,20 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
           isDeleted: const Value<bool>(true),
           deletedAt: Value<DateTime?>(timestamp),
           mergedIntoId: Value<int?>(survivorId),
-          needsReview: const Value<bool>(false),
-          reviewReason: const Value<String?>(null),
-          possibleDuplicateOfId: const Value<int?>(null),
+          // Same rule as the survivor (O-QA-11). It matters even though this
+          // row is leaving the inbox by being soft-deleted: an undo restores it
+          // whole, and a flag that was silently dropped on the way in does not
+          // come back — so the question the user was going to be asked would be
+          // gone for good after a merge and an undo.
+          needsReview: absorbedFlagNamesThisPair
+              ? const Value<bool>(false)
+              : const Value<bool>.absent(),
+          reviewReason: absorbedFlagNamesThisPair
+              ? const Value<String?>(null)
+              : const Value<String?>.absent(),
+          possibleDuplicateOfId: absorbedFlagNamesThisPair
+              ? const Value<int?>(null)
+              : const Value<int?>.absent(),
           updatedAt: Value<DateTime>(timestamp),
         ),
       );

@@ -129,7 +129,11 @@ void main() {
       'PANDA FOODS 1420',
       'PANDA-FOODS-0042',
       'PANDA FOODS BRANCH',
-      'PANDA FOODS STORE RIYADH',
+      // `PANDA FOODS STORE RIYADH` left this list at ADR-008 v1.3 (KHA-98):
+      // the city name is a proper noun and is no longer stripped, so this is a
+      // *different key* — a branch, not a cosmetic variant. It is asserted
+      // below as the flagged case it now is.
+      'PANDA FOODS STORE 0042',
     ]) {
       test('"$variant" matches the PANDA FOODS rule', () {
         final MerchantMatch match = MerchantMatcher.match(variant, store);
@@ -137,6 +141,49 @@ void main() {
         expect(match.canAutoApply, isTrue);
       });
     }
+
+    test('KHA-98 — a branch identified by a CITY name is flagged, not '
+        'auto-applied', () {
+      // The stated cost of dropping city names from the noise list, executed
+      // rather than asserted in prose. `PANDA FOODS STORE RIYADH` keys as
+      // `PANDA FOODS RIYADH`, whose multiset Jaccard against `PANDA FOODS` is
+      // 2/3 ≈ 0.67 — below the 0.80 T3 floor — so the pair reaches no tier that
+      // may auto-apply.
+      //
+      // This is AC-D2.3's named-and-accepted direction: *"match, or flag as
+      // low-confidence — never silently merge unrelated merchants."* The user
+      // links the branch once with a `MerchantAlias` and it is right forever.
+      final MerchantMatch match = MerchantMatcher.match(
+        'PANDA FOODS STORE RIYADH',
+        store,
+      );
+      expect(
+        match.canAutoApply,
+        isFalse,
+        reason:
+            'a city-distinguished branch must be surfaced for review, not '
+            'merged onto the parent chain\'s rule',
+      );
+      expect(match.needsReview, isTrue);
+    });
+
+    test('KHA-100 — a REPEATED token is a real difference, so T3 refuses it', () {
+      // T3 is defined over the token *multiset* (ADR-008 v1.3 settled answer
+      // 4). Over sets, `PANDA PANDA FOODS` was `{PANDA, FOODS}` — identical to
+      // `PANDA FOODS`, Jaccard 1.0 — and auto-applied another brand's rule at
+      // exactly the threshold. Over multisets it is 2/3 ≈ 0.67 and falls
+      // through.
+      //
+      // No step of `MerchantKey.of` produces or removes a repeated token, so
+      // the multiplicity is signal: two brand names that differ by a repetition
+      // are two brand names.
+      final MerchantMatch match = MerchantMatcher.match(
+        'PANDA PANDA FOODS',
+        store,
+      );
+      expect(match.canAutoApply, isFalse);
+      expect(match.tier, isNot(MatchTier.tokenSet));
+    });
 
     test('a genuine token reordering matches at T3 and applies', () {
       // Same tokens, different order — Jaccard 1.0, which is the only T3

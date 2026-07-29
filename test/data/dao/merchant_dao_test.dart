@@ -6,8 +6,11 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:massrofy/data/dao/audit_log_dao.dart';
+import 'package:massrofy/data/dao/category_dao.dart';
 import 'package:massrofy/data/dao/merchant_dao.dart';
+import 'package:massrofy/data/dao/transaction_dao.dart';
 import 'package:massrofy/data/db/app_database.dart';
+import 'package:massrofy/features/categorization/categorization_service.dart';
 
 import '../../support/plain_test_database.dart';
 
@@ -18,10 +21,24 @@ void main() {
   late AuditLogDao auditLogDao;
   late MerchantDao merchantDao;
 
-  setUp(() {
+  setUp(() async {
     db = openPlainTestDatabase();
     auditLogDao = AuditLogDao(db, auditChainKey: _testChainKey);
     merchantDao = MerchantDao(db, auditLogDao);
+    // **KHA-104.** `upsertRule` now validates `category_id` against the
+    // `category` table, so a rule-store test needs real categories to point at.
+    // That dependency is the fix, not an inconvenience: a rule naming a
+    // category that was never created used to be writable, and the matcher then
+    // stamped it onto real transactions — a row saying "categorized" while
+    // every screen rendered "Uncategorized".
+    //
+    // Seeded through the service, the same way `category_dao_test.dart` does
+    // it, so there is exactly one implementation of design §4's starter list.
+    await CategorizationService(
+      categoryDao: CategoryDao(db, auditLogDao),
+      merchantDao: merchantDao,
+      transactionDao: TransactionDao(db, auditLogDao),
+    ).ensureDefaultsSeeded();
   });
 
   tearDown(() async => db.close());
@@ -125,6 +142,62 @@ void main() {
   group('rules — AC-D1.1, AC-D1.2, AC-D3.1', () {
     Future<int> merchant(String key) =>
         merchantDao.ensureMerchant(merchantKey: key, canonicalName: key);
+
+    test('KHA-104 — a rule naming a category that does not exist is REFUSED, '
+        'because SQLite is not checking it for us', () async {
+      // `merchant_rule.category_id` has no foreign key, and the
+      // `category_no_delete_while_in_use` trigger guards only the *delete*
+      // direction. So a rule could be written for a category id that was never
+      // created, and the matcher then confidently stamped it onto real
+      // transactions: the row said "categorized" while every screen rendered
+      // "Uncategorized" — AC-C1.1's explicit fallback state reached by
+      // accident rather than by decision.
+      final int id = await merchant('SEC KAHRABA');
+
+      await merchantDao.upsertRule(
+        merchantId: id,
+        categoryId: 'no_such_category',
+        source: 'user',
+        actor: 'user',
+      );
+      expect(await merchantDao.allRules(), isEmpty);
+      expect(await merchantDao.ruleForMerchant(id), isNull);
+
+      // A no-op, not a throw: the reachable caller is a person correcting a
+      // category in the UI, and a crash is the wrong answer to stale data. The
+      // sentinel is negative, so a caller that ignores it cannot mistake it for
+      // a real `merchant_rule.id`.
+      expect(
+        await merchantDao.upsertRule(
+          merchantId: id,
+          categoryId: 'no_such_category',
+          source: 'user',
+          actor: 'user',
+        ),
+        lessThan(0),
+      );
+
+      // A refusal must also not disturb a rule that is already there.
+      await merchantDao.upsertRule(
+        merchantId: id,
+        categoryId: 'utilities_bills',
+        source: 'user',
+        actor: 'user',
+      );
+      await merchantDao.upsertRule(
+        merchantId: id,
+        categoryId: 'no_such_category',
+        source: 'user',
+        actor: 'user',
+      );
+      expect(
+        (await merchantDao.ruleForMerchant(id))!.categoryId,
+        'utilities_bills',
+        reason:
+            'a refused write must leave the stored rule exactly as it was, '
+            'not blank it',
+      );
+    });
 
     test('categorizing creates a rule, visible in the learned-rules list '
         '(AC-D1.1)', () async {

@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import '../db/app_database.dart';
+import '../db/tables/category_table.dart';
 import '../db/tables/merchant_table.dart';
 import 'audit_log_dao.dart';
 
@@ -36,6 +37,23 @@ class MerchantDao extends DatabaseAccessor<AppDatabase>
   final AuditLogDao auditLogDao;
 
   MerchantDao(super.attachedDatabase, this.auditLogDao);
+
+  /// [upsertRule]'s "I declined to write this rule" answer.
+  ///
+  /// A sentinel rather than a nullable return so the method's existing callers
+  /// keep a non-null `int`, and a negative value because `merchant_rule.id` is
+  /// an autoincrementing primary key and can never be one — a caller that
+  /// ignores the result cannot accidentally treat it as a real rule id.
+  static const int _ruleRefused = -1;
+
+  /// True when [categoryId] resolves to a row in the `category` table.
+  ///
+  /// See [upsertRule] for why this DAO reads that table without owning it.
+  Future<bool> _categoryExists(String categoryId) async =>
+      await (attachedDatabase.select(
+        attachedDatabase.categories,
+      )..where((Categories t) => t.id.equals(categoryId))).getSingleOrNull() !=
+      null;
 
   /// Resolves the merchant with [merchantKey], creating it on first sight.
   ///
@@ -202,6 +220,35 @@ class MerchantDao extends DatabaseAccessor<AppDatabase>
   /// [actor] has no default. That is the ADR-008 constraint made mechanical:
   /// a caller must state who is changing the rule, and the automatic path has
   /// no user to name.
+  ///
+  /// ## KHA-104 — the referential check SQLite is not doing for us
+  ///
+  /// `merchant_rule.category_id` has no foreign key, and the
+  /// `category_no_delete_while_in_use` trigger guards only the **delete**
+  /// direction. So until now a rule could be written naming a category that was
+  /// never created, and the matcher would confidently stamp it onto real
+  /// transactions: the row then says *"categorized"* while every screen renders
+  /// *"Uncategorized"* — AC-C1.1's explicit fallback state reached **by
+  /// accident rather than by decision**.
+  ///
+  /// This method already runs inside a `transaction()`, so the read and the
+  /// write cannot race: a category deleted between the two would abort the
+  /// whole block. An unresolvable [categoryId] is a **no-op returning -1**
+  /// rather than a throw, because the reachable caller is a user correcting a
+  /// category in the UI and a crash is the wrong answer to stale data; the
+  /// transaction's category is still written by
+  /// `TransactionDao.setUserCategory`, only the *rule* is declined.
+  ///
+  /// The read side is defended independently, in
+  /// `CategorizationService.loadCandidates` — a rule already in the table from
+  /// before this check existed (or written by raw SQL) must not fire either.
+  /// Two independent guards, the same belt-and-braces shape AC-D3.1 uses.
+  ///
+  /// Note this method reaches `attachedDatabase.categories` directly rather
+  /// than through the generated `_$MerchantDaoMixin`: `Categories` is
+  /// deliberately **not** added to this DAO's `@DriftAccessor` list, because
+  /// this class does not own that table and must not grow write access to it.
+  /// One read is the whole dependency.
   Future<int> upsertRule({
     required int merchantId,
     required String categoryId,
@@ -212,6 +259,9 @@ class MerchantDao extends DatabaseAccessor<AppDatabase>
   }) {
     final DateTime timestamp = now ?? DateTime.now();
     return transaction<int>(() async {
+      if (!await _categoryExists(categoryId)) {
+        return _ruleRefused;
+      }
       final MerchantRuleRow? existing = await ruleForMerchant(merchantId);
 
       if (existing == null) {

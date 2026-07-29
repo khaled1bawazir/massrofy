@@ -401,24 +401,25 @@ void main() {
   // PROBE J — composition attacks on the new refusals.
   // =========================================================================
   group('PROBE J — do the new refusals hold under composition?', () {
-    test('J1 DEFECT — the chain guard is defeated by the D-QA-7 pointer '
-        'overwrite plus an undo: a survivor that still holds an absorbed row '
-        'can be merged away', () async {
-      // `MergeRefusal.chainWouldForm` reads ONE scalar,
-      // `mergedAway.mergedFromTransactionId`, to decide whether the row has
-      // absorbed anything. D-QA-7 (disclosed as acceptable in this PR) means
-      // that scalar records only the MOST RECENT merge into that survivor.
-      // `restore()`'s new identity check then clears the scalar when the most
-      // recent merge is undone — correctly, in isolation — leaving the
-      // survivor holding an earlier absorbed row with a null pointer.
+    test('J1 FIXED (KHA-94/KHA-88) — the chain guard survives the D-QA-7 '
+        'pointer overwrite plus an undo: a survivor that still holds an '
+        'absorbed row cannot be merged away', () async {
+      // `MergeRefusal.chainWouldForm` read ONE scalar,
+      // `mergedAway.mergedFromTransactionId`, to decide whether the row had
+      // absorbed anything. D-QA-7 means that scalar records only the MOST
+      // RECENT merge into that survivor. `restore()`'s identity check then
+      // cleared the scalar when the most recent merge was undone — correctly,
+      // in isolation — leaving the survivor holding an earlier absorbed row
+      // with a null pointer. The guard then saw "absorbed nothing".
       //
-      // At that point the guard sees "absorbed nothing" and permits exactly
-      // the chain its doc comment says cannot exist:
-      //   first -> survivor -> newSurvivor,
-      // with `first` soft-deleted and pointing at a row that is itself
-      // soft-deleted. That is the doc's own words for what the guard prevents:
-      // "soft-delete the middle of a chain and leave the row it absorbed
-      // pointing at something that no longer counts".
+      // Two independent changes close it, and the probe checks both:
+      //
+      //  1. **`restore()` re-points rather than blanks.** The invariant is now
+      //     *"the scalar is null iff `absorbedTransactionIds` is empty"*.
+      //  2. **The guard asks the authoritative question.**
+      //     `TransactionMergeService.merge` queries the `merged_into_id`
+      //     back-pointers — the set itself — rather than trusting the cache,
+      //     so it holds even if the invariant is broken from outside the DAO.
       final int survivor = await sms(messageId: 11);
       final int first = await sms(messageId: 22);
       final int second = await sms(messageId: 33);
@@ -434,14 +435,23 @@ void main() {
         mergedAwayId: second,
         confirmedByUser: true,
       );
-      // The scalar now names `second`; `first` is invisible to the guard.
+      // The scalar names `second`, the most recent merge. The complete set is
+      // both, and is now askable.
       expect((await dao.byId(survivor)).mergedFromTransactionId, second);
+      expect(await dao.absorbedTransactionIds(survivor), <int>[second, first]);
 
-      // The user undoes the most recent merge. The identity check matches, so
-      // the pointer is cleared — and the survivor's record of having absorbed
-      // `first` goes with it.
+      // The user undoes the most recent merge. INVERTED (was: the pointer
+      // became null while `first` was still absorbed). It is re-pointed at the
+      // earlier merge that genuinely still stands.
       await merge.undo(second);
-      expect((await dao.byId(survivor)).mergedFromTransactionId, isNull);
+      expect(
+        (await dao.byId(survivor)).mergedFromTransactionId,
+        first,
+        reason:
+            'the survivor still holds `first`, so it must not claim to have '
+            'absorbed nothing',
+      );
+      expect(await dao.absorbedTransactionIds(survivor), <int>[first]);
       expect(
         (await dao.byId(first)).isDeleted,
         isTrue,
@@ -453,28 +463,69 @@ void main() {
         mergedAwayId: survivor,
         confirmedByUser: true,
       );
+      // INVERTED (was: `isA<MergeCompleted>()`).
       expect(
-        chained,
-        isA<MergeCompleted>(),
+        (chained as MergeRejected).reason,
+        MergeRefusal.chainWouldForm,
         reason:
-            'DEFECT: this is the a -> b -> c chain B6 asserts is refused. '
-            'The guard is blind to it because the survivor\'s single scalar '
-            'pointer was reset by an unrelated undo',
+            'this is the a -> b -> c chain B6 asserts is refused; the guard '
+            'must not be blind to it just because an unrelated undo touched '
+            'the survivor\'s scalar pointer',
       );
 
-      // The resulting shape, stated explicitly so the severity is arguable
-      // from evidence rather than from prose: `first` is soft-deleted and
-      // points at `survivor`, which is itself soft-deleted and points at
-      // `newSurvivor`. Undoing the outer merge does not bring `first` back.
-      expect((await dao.byId(survivor)).isDeleted, isTrue);
-      expect((await dao.byId(survivor)).mergedIntoId, newSurvivor);
+      // The refusal wrote nothing: no chain exists, `survivor` is still live
+      // and still holds `first`, and `newSurvivor` gained no link.
+      expect((await dao.byId(survivor)).isDeleted, isFalse);
+      expect((await dao.byId(survivor)).mergedIntoId, isNull);
       expect((await dao.byId(first)).mergedIntoId, survivor);
-      expect((await dao.byId(first)).isDeleted, isTrue);
-      // No money vanished — one live row still carries the movement — so this
-      // is a traceability/guard-integrity defect, not a KHA-74 repeat.
-      expect((await reportNow()).spend.base!.toCanonicalString(), '305.5');
+      expect((await dao.byId(newSurvivor)).mergedFromTransactionId, isNull);
+      // Three live movements now: `survivor`, `second` (restored) and
+      // `newSurvivor`.
+      expect((await reportNow()).spend.base!.toCanonicalString(), '458.25');
       expect(await auditLogDao.verifyChainIntegrity(), isTrue);
     });
+
+    test(
+      'J1b FIXED (KHA-94) — the guard is authoritative, not merely '
+      'cache-consistent: a hand-corrupted scalar does not defeat it',
+      () async {
+        // The invariant `restore()` maintains is what makes the *pure*
+        // `MergePlan.between` check sound. This probe removes that invariant by
+        // raw SQL — the shape a partially-applied migration, an external DB edit
+        // or a future writer with a bug would produce — and asserts the guard
+        // still refuses, because `TransactionMergeService.merge` asks the
+        // `merged_into_id` back-pointers directly.
+        //
+        // Two guards on one property, so neither being wrong is sufficient.
+        final int survivor = await sms(messageId: 11);
+        final int absorbed = await sms(messageId: 22);
+        final int newSurvivor = await sms(messageId: 33);
+
+        await merge.merge(
+          survivorId: survivor,
+          mergedAwayId: absorbed,
+          confirmedByUser: true,
+        );
+
+        await db.customStatement(
+          'UPDATE transactions SET merged_from_transaction_id = NULL '
+          'WHERE id = $survivor',
+        );
+        expect((await dao.byId(survivor)).mergedFromTransactionId, isNull);
+        // The authoritative answer disagrees with the corrupted cache…
+        expect(await dao.absorbedTransactionIds(survivor), <int>[absorbed]);
+
+        // …and the authoritative answer is the one the guard uses.
+        final MergeResult chained = await merge.merge(
+          survivorId: newSurvivor,
+          mergedAwayId: survivor,
+          confirmedByUser: true,
+        );
+        expect((chained as MergeRejected).reason, MergeRefusal.chainWouldForm);
+        expect((await dao.byId(survivor)).isDeleted, isFalse);
+        expect(await auditLogDao.verifyChainIntegrity(), isTrue);
+      },
+    );
 
     test('J2 HOLDS — three-way merge in the intended order: the RESULT of a '
         'merge can still absorb a third alert', () async {
@@ -860,6 +911,16 @@ void main() {
         // AC-C1.3's reconciliation is unaffected either way.
         'category_source', 'category_confidence', 'category_rule_id',
         'merchant_id',
+        // KHA-96 / D-QA-20 — the two columns this probe originally surfaced as
+        // undecided. The decision is now recorded in `mergeDuplicatePair`: an
+        // **explicit noop**, with the absorbed row's value written into the
+        // survivor's merge audit entry so NFR-A1 stays answerable. Comparing
+        // them would refuse the merge the user most obviously wants (a manual
+        // entry plus the bank's later SMS for the same purchase), and carrying
+        // them cannot fire at all — `provenance` is NOT NULL with a default, so
+        // the survivor never has a gap and a "carry" would be an overwrite,
+        // which property 3 forbids outright.
+        'provenance', 'provenance_detail',
         // deliberately neither: not money, not a movement identity
         'id', 'amount_minor', 'category_id', 'counterparty_bank_name',
         'time_source', 'instrument_kind', 'instrument_masked_ref',
@@ -876,17 +937,23 @@ void main() {
         isEmpty,
         reason: 'this list has drifted from the schema',
       );
+      // INVERTED (was: `<String>{'provenance', 'provenance_detail'}`). With
+      // those two decided, this is the forcing function KHA-87's done check
+      // asked for: any column added to `transactions` from here on fails this
+      // assertion by name until someone records what the merge does with it.
+      //
+      // The same enumeration now also lives in `transaction_merge_test.dart`,
+      // beside the field-vocabulary check, so the forcing function is in the
+      // engineer's own suite rather than only in a QA artifact — this copy is
+      // kept as the executed audit evidence that the probe was run.
       expect(
         actual.difference(handled),
-        <String>{'provenance', 'provenance_detail'},
+        isEmpty,
         reason:
-            'DEFECT: these two columns are neither compared, nor carried, nor '
-            'on any deliberate-noop list. Merging a `manual` row into an '
-            '`sms` row silently rewrites which of the two the surviving '
-            'record claims to be (NFR-A1). When a decision is recorded, move '
-            'them into `handled` and change this to expect isEmpty — at '
-            'which point this test becomes the forcing function KHA-87\'s '
-            'done check asked for.',
+            'a column of `transactions` is neither compared, nor carried, nor '
+            'on the deliberate-noop list. Decide which it gets, in '
+            'transaction_merge.dart — the KHA-87 shape is a MISSING DECISION, '
+            'not a missing line of code.',
       );
     });
   });

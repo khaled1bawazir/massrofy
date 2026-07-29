@@ -360,4 +360,86 @@ void main() {
       expect(row.sourceMessageId, 1);
     });
   });
+
+  // =========================================================================
+  group('KHA-101 — the `learnCategoryRule` seam', () {
+    // The seam is a function type rather than a `CategorizationService` field
+    // because `features/categorization` already imports `features/ledger`
+    // (`category_breakdown.dart`), so a field here would close a cycle between
+    // two sibling features. Production binds it in
+    // `presentation/providers/ledger_providers.dart`, the layer that already
+    // depends on both. These tests use a recording stub, so they check the
+    // *contract of the seam* — when it fires, with what — rather than
+    // re-testing the categorization service through it.
+    late List<({int transactionId, String? categoryId})> learned;
+
+    TransactionEditService withLearner() => TransactionEditService(
+      database: db,
+      transactionDao: dao,
+      learnCategoryRule:
+          ({
+            required int transactionId,
+            required String? categoryId,
+            DateTime? now,
+          }) async => learned.add((
+            transactionId: transactionId,
+            categoryId: categoryId,
+          )),
+    );
+
+    setUp(() => learned = <({int transactionId, String? categoryId})>[]);
+
+    test('a category correction teaches the rule', () async {
+      final int id = await parsed();
+      await withLearner().edit(
+        id,
+        const TransactionEditDraft(categoryId: Edited<String?>('dining')),
+      );
+      expect(learned, hasLength(1));
+      expect(learned.single.transactionId, id);
+      expect(learned.single.categoryId, 'dining');
+    });
+
+    test('an edit that does NOT touch the category teaches nothing', () async {
+      final int id = await parsed();
+      await withLearner().edit(
+        id,
+        const TransactionEditDraft(
+          merchantRawText: Edited<String?>('EXTRA MART'),
+        ),
+      );
+      expect(learned, isEmpty);
+    });
+
+    test('pressing Save without changing the category teaches nothing', () async {
+      // Gated on the DAO's own judgement of what changed, not on the form
+      // having offered the field. Someone who opened the edit form and pressed
+      // Save has not taught the app anything, and a rule minted from that would
+      // start categorising a whole merchant's future spending.
+      final int id = await parsed();
+      final TransactionEditService editService = withLearner();
+      await editService.edit(
+        id,
+        const TransactionEditDraft(categoryId: Edited<String?>('dining')),
+      );
+      learned.clear();
+      await editService.edit(
+        id,
+        const TransactionEditDraft(categoryId: Edited<String?>('dining')),
+      );
+      expect(learned, isEmpty);
+    });
+
+    test('with no learner bound, the edit still applies in full', () async {
+      // Null is the honest value while the app is locked or the categorization
+      // service is still seeding. An edit must not depend on it.
+      final int id = await parsed();
+      await service.edit(
+        id,
+        const TransactionEditDraft(categoryId: Edited<String?>('dining')),
+      );
+      expect((await dao.byId(id)).categoryId, 'dining');
+      expect((await dao.byId(id)).categorySource, StoredCategorySource.user);
+    });
+  });
 }
