@@ -14,6 +14,45 @@ KHA-64 first half), PR #11, head `51bb730`. See `docs/test-plan.md` §1a, §6a a
 
 ## Summary
 
+### Pass 4 (PR #20, P3b-2 — the mutation surface)
+
+**No defect was found that blocks merge. Verdict: QA: PASS 20.** Head `61efd7b`.
+All five claimed gates reproduced exactly: analyze clean, format clean (181 files,
+0 changed), **986 passing / 3 skipped / 0 failing**, money-type guard clean, debug
+APK built. `check_no_network_permission.sh` not run locally (needs a release build
+and a merged manifest) — CI owns it, and the PR says so.
+
+A **37-probe adversarial suite** was written and run
+(`test/security/qa_pr20_probe_test.dart`, 33 probes;
+`test/security/qa_pr20_probe_rescan_test.dart`, 4). Roughly two thirds of it
+attacks the enrichment merge, because `docs/build-plan.md` names that the single
+highest-risk operation in P3 and risk R-8 sets the standard it must meet.
+
+**R-8 is upheld.** No probe made a transaction row disappear; no probe reached a
+merge without confirmation; no probe got a negative magnitude past any DAO write
+path. The soft-delete-with-pointers design does what it claims for the
+single-merge case, verified by execution.
+
+What the probes found is a **different failure mode than the one the file was
+hardened against: not a lost row, but a lost figure.** `MergeEnrichment` genuinely
+cannot express "write null" — that type-level property holds — but the safety
+conclusion drawn from it is wider than the type, because the money columns it
+does *not* carry (`fee_amount_*`, `converted_amount_*`, `fx_rate`) ride out of the
+ledger on the soft-deleted row.
+
+Nine defects and five observations raised, **none blocking**. Two are High
+(**D-QA-5**, **D-QA-6**) because they remove money from a reported figure with no
+signal — the KHA-74 shape, arriving through the very write path KHA-74's fix
+anticipated. One more is High (**D-QA-8**) because it is an NFR-A2 audit hole on
+*every* merge undo, not just an edge case.
+
+They are not merge-blockers: each requires a deliberate, user-confirmed,
+reversible action; the two money defects reduce *derived figures* while both
+underlying rows remain intact and readable; and the whole screen layer is
+unrouted today, so none is reachable by a user before the next phase wires
+navigation. Fixing them is P3b-3/P4 work, and they should be fixed before any
+build reaches a device.
+
 ### Pass 3 (PR #18, P3b-1 — multi-currency, refunds, income/transfers)
 
 **No defect was found in P3b-1's own scope that blocks its merge. Verdict: QA: PASS 18.**
@@ -210,6 +249,254 @@ for what did surface, correctly classified as risks and gaps rather than defects
   than correctable.
 - **Why not blocking.** No total is under-stated and no money is lost;
   AC-B11.2 passes for the case P3b-1 primarily targets. This is a sub-case gap.
+
+### D-QA-5 — a merge silently removes the absorbed row's FX fee from the fee total
+
+- **Severity: High.** Found in pass 4 (PR #20). **Not a merge blocker** (see why
+  below). **Linear:** filed against KHA-64.
+- **Affects:** ADR-017 D2, NFR-A6, PRD §3.4 ("the FX fee is its own figure"),
+  and the PR's own claim that *"a merge is structurally incapable of deleting
+  information. It fills gaps only."*
+- **What.** `MergeEnrichment` carries five fields — `merchantRawText`,
+  `referenceNumber`, `counterpartyName`, `occurredAt`, `instrumentId`. It has no
+  `feeAmount`. `MergePlan.between` refuses a merge only on amount, currency,
+  direction and type, so two rows that agree on all four but **disagree about the
+  fee** are considered mergeable. The absorbed row is then soft-deleted whole,
+  taking its `fee_amount_*` columns out of `LedgerTotals.feesFor` with it.
+- **Steps to reproduce** (`test/security/qa_pr20_probe_test.dart`, probe A1):
+  1. Ingest two alerts for one purchase, both `152.75 SAR`, `debit`,
+     `pos_purchase`. Give the second a `feeAmount` of `9.20 SAR`.
+  2. `LedgerTotals.report(...).fees.base` → `9.2`.
+  3. `merge(survivorId: first, mergedAwayId: second, confirmedByUser: true)`
+     returns `MergeCompleted`.
+  4. `LedgerTotals.report(...).fees.base` → **`null`**.
+- **Expected:** resolving a duplicate does not change what the bank charged. The
+  fee is either carried onto the survivor, or the pair is refused as disagreeing
+  about a money field, or the loss is flagged.
+- **Actual:** the fee total silently drops to nothing. No error, no flag, no
+  count. The survivor's `fee_amount_amount` is still `NULL`; the absorbed row
+  still holds `9.2`, unreachable from any figure.
+- **Why not blocking.** The row is not destroyed (R-8 holds), the action is
+  user-initiated and reversible via `restore()`, and no screen routes to the
+  merge yet. But it is exactly the KHA-74 failure mode — money absent from a
+  total with no signal — arriving through a write path KHA-74's own fix
+  anticipated, so it should not survive into P4.
+
+### D-QA-6 — a merge can drop a foreign purchase out of the base-currency spend total
+
+- **Severity: High.** Found in pass 4 (PR #20). **Not a merge blocker.**
+  **Linear:** filed against KHA-64.
+- **Affects:** AC-B9.2, ADR-009, NFR-A6.
+- **What.** Same root cause as D-QA-5, on a different column.
+  `convertedAmount`/`fxRate` are neither compared by `MergePlan.between` nor
+  carried by `MergeEnrichment`. The natural D2 shape for a foreign card
+  purchase is a terse first alert with no conversion and a second alert
+  carrying the settled base-currency figure — and the review inbox offers the
+  **older** row as the survivor by default, i.e. the one that cannot convert.
+- **Steps to reproduce** (probe A2):
+  1. Ingest `40.00 USD` with no `convertedAmount` (message 1) and `40.00 USD`
+     with `convertedAmount = 150.00 SAR` (message 2).
+  2. `report.spend.base` → `150` (the convertible row reaches the base total).
+  3. Merge message 2 into message 1, confirmed.
+  4. `report.spend.base` → **`null`**. 150 SAR left the headline figure.
+- **Expected:** one movement, still worth 150 SAR in the base currency.
+- **Actual:** the base figure becomes unavailable. Bounded damage — the native
+  `40.00 USD` is intact and the row is reported in `unconverted`, so the user is
+  *told* the figure is incomplete (probe A3 confirms this) — but the headline
+  number they read dropped because they resolved a duplicate.
+- **Why not blocking.** As D-QA-5: reversible, user-initiated, currently
+  unroutable, and the error is disclosed via `unconverted` rather than hidden.
+
+### D-QA-7 — a survivor that absorbs a second duplicate forgets the first
+
+- **Severity: Medium.** Found in pass 4 (PR #20). **Linear:** filed against
+  KHA-64.
+- **Affects:** NFR-A6, and the PR's "pointers both ways" property.
+- **What.** `merged_from_transaction_id` is a single nullable scalar.
+  `mergeDuplicatePair` overwrites it on every merge into that survivor. Three
+  alerts for one purchase (POS alert + "card used" alert + settlement alert) is
+  not exotic and the D2 reference tier flags all of them.
+- **Steps to reproduce** (probe B2): merge `first` into `survivor`, then merge
+  `second` into `survivor`. `survivor.mergedFromTransactionId` is `second`; the
+  link to `first` is gone from the survivor's row.
+- **Expected:** the survivor records both absorptions.
+- **Actual:** it records the latest. Reconstructible from `first.mergedIntoId`
+  and from the audit trail (the `merge` entry records `from: first, to: second`),
+  so this is degradation rather than loss — but the stated property is false
+  after the second merge.
+
+### D-QA-8 — `restore()` corrupts the survivor's merge link, and audits nothing against the survivor
+
+- **Severity: High.** Found in pass 4 (PR #20). **Not a merge blocker.**
+  **Linear:** filed against KHA-64.
+- **Affects:** NFR-A2 (*"every mutation writes an append-only audit entry with
+  actor and before/after"*), NFR-A6, AC-B6.4, US-F5.
+- **Two problems in one method,** `TransactionDao.restore()` lines 310–323:
+  1. It clears `merged_from_transaction_id` on `existing.mergedIntoId`
+     **unconditionally**, without checking that the pointer it is clearing refers
+     to the row being restored. After two merges into one survivor, undoing the
+     *first* wipes the survivor's link to the *second*.
+  2. It writes to the survivor row and appends **no audit entry against the
+     survivor**. The only entry written is against the restored row's id. This
+     happens on **every** merge undo, single or multiple.
+- **Steps to reproduce** (probes B3 and B4):
+  - B3: merge `first` then `second` into `survivor`; `survivor
+    .mergedFromTransactionId == second`. Call `undo(first)`. Now
+    `survivor.mergedFromTransactionId == null` while `second.mergedIntoId ==
+    survivor` and `second.isDeleted == true` — the two halves of the link
+    contradict each other and nothing in the app can detect it. The survivor's
+    audit-entry count is **unchanged**.
+  - B4 (minimal): merge `b` into `a`, then `undo(b)`. `a
+    .mergedFromTransactionId` goes `b → null` silently; `a`'s change history
+    still reads "merge" with no reversal, so US-F5 shows a merge that was undone
+    as though it still stands.
+- **Expected:** the restore clears only the pointer that names the restored row,
+  and appends an entry to the survivor's history recording the reversal —
+  exactly as the method's own doc comment says it does (*"records the reversal
+  in the change history — an undo that left no trace would be its own audit
+  failure"*). That sentence is currently true of the absorbed row only.
+- **Actual:** as above. The audit chain itself stays intact
+  (`verifyChainIntegrity()` is true) — this is a completeness gap, not tampering.
+- **Why not blocking.** No money moves and no row is lost. But of the nine
+  findings this is the one that is wrong on the *simplest* path, and it
+  falsifies an NFR-A2 statement the PR makes in its own words.
+
+### D-QA-9 — merge chains are possible in the survivor direction
+
+- **Severity: Low.** Found in pass 4 (PR #20). **Linear:** filed against KHA-64.
+- **What.** `transaction_merge_test.dart` has a test named *"an already-merged
+  row cannot be merged again — no chains, no resurrection"*. It pins the
+  **absorbed** direction only: merging a soft-deleted row is refused by
+  `MergeRefusal.notLive`. A **survivor** is still live, so `a → b` then `b → c`
+  is permitted.
+- **Steps to reproduce** (probe B6): merge `a` into `b`, then merge `b` into
+  `c`; the second returns `MergeCompleted`. Then `undo(b)` leaves `b` and `c`
+  both live (spend `305.5` — inflation, the safe direction) with `a` still
+  soft-deleted, and no flag telling the user they have a duplicate they already
+  resolved once.
+- **Expected:** either chains are refused, or the test name and doc comment stop
+  claiming they cannot happen.
+
+### D-QA-10 — a user edit on the losing side of a merge is discarded for the parser's value
+
+- **Severity: Medium.** Found in pass 4 (PR #20). **Linear:** filed against
+  KHA-26 (AC-B5.3).
+- **What.** AC-B5.3 is *"user intent outranks the parser, always"*. The merge
+  implements the narrower rule *"never overwrite the survivor"*. When the user's
+  correction is on the row being merged away and the survivor still holds the
+  parser's mis-read, the parser's text wins.
+- **Steps to reproduce** (probe D2): two rows both parsed as
+  `ALINMA*POS*3311`. Edit row `b`'s merchant to `Panda Hypermarket`. Merge `b`
+  into `a`, confirmed. `a.merchantRawText` is still `ALINMA*POS*3311`; the
+  correction lives only on the soft-deleted row and is off every screen.
+- **Expected:** either the user-edited value is preferred, or the disagreement is
+  surfaced (the file's own principle: *"two records that disagree about a value
+  are not a merge candidate; they are a question for the user"* — currently
+  enforced for amount/direction/type but not for merchant).
+- **Actual:** silent. Nothing warns the user their correction stopped applying.
+
+### D-QA-11 — a user value copied by a merge arrives on the survivor unprotected
+
+- **Severity: Medium.** Found in pass 4 (PR #20). **Linear:** filed against
+  KHA-26 (AC-B5.3).
+- **What.** When the survivor's field is null and the absorbed row's value was a
+  **user edit**, `MergePlan.between` copies it (correctly), but
+  `mergeDuplicatePair` does not add the field to the survivor's
+  `user_edited_fields`. The survivor now holds a user-authored value the app
+  believes came from the parser, so the next automated write — a later merge, or
+  P7's statement import — may overwrite it.
+- **Steps to reproduce** (probe D3): `a` has no merchant; edit `b`'s merchant to
+  `Panda Hypermarket`; merge `b` into `a`. `a.merchantRawText ==
+  'Panda Hypermarket'` but `decodeUserEditedFields(a.userEditedFields)` is empty.
+- **Expected:** protection travels with the value. The whole reason the rule
+  lives in a column (per `user_edited_fields.dart`'s own doc) is that tomorrow's
+  writer will not know about it.
+
+### D-QA-12 — undoing a merge does not reverse the enrichment
+
+- **Severity: Low.** Found in pass 4 (PR #20). **Linear:** filed against KHA-64.
+- **What.** `transaction_merge.dart` says *"`restore()` reverses the entire
+  operation"* and its test is named *"the merge is REVERSIBLE"*. `restore()`
+  reverses the soft delete and (over-eagerly, see D-QA-8) the pointers. It does
+  not reverse the field copies.
+- **Steps to reproduce** (probe F6): merge a row carrying
+  `EXTRA MART`/`REF-9911` into an empty one, then undo. Both rows are live and
+  both now claim the same merchant and reference number.
+- **Expected:** either the enrichment is reverted, or the doc stops calling the
+  undo a full reversal. (Keeping the enrichment is arguably the better
+  behaviour — gap-filling information is not harmful — so this may be a
+  documentation fix.)
+
+### D-QA-13 — AC-B5.3's re-scan half has no test in PR #20
+
+- **Severity: Low** (coverage, not behaviour — the property **holds**). Found in
+  pass 4. **Linear:** filed against KHA-26.
+- **What.** KHA-26's done-check names four tests: *"edit-then-rescan preserves
+  the edit; delete-then-rescan does not resurrect; restore returns the
+  transaction with its history; erase-all leaves nothing restorable."* PR #20
+  contains the second and third; the fourth is disclosed and ticketed (KHA-86);
+  the **first is neither present nor disclosed**. AC-B5.3 is tested only against
+  `MergePlan.between`, i.e. the merge path, not the re-scan path the AC's own
+  wording names.
+- **Notable because** this is the same shape of gap the engineer's self-review
+  caught for AC-B6.3 and closed with `deleted_transaction_rescan_test.dart` — the
+  symmetric edit case was not closed with it.
+- **QA supplied the missing test:** `test/security/qa_pr20_probe_rescan_test.dart`
+  (4 tests, real `IngestionPipeline` + real rule pack). All pass — an edited
+  merchant, an edited amount and a user-cleared field all survive two full
+  re-scans, and no second transaction row is written. Recommend the engineer
+  move it to `test/features/ingestion/` alongside its sibling.
+
+---
+
+## Observations from the pass-4 probe suite (recorded for audit, not defects)
+
+### O-QA-5 — `mergeDuplicatePair` is public and defaults `actor` to `'user'`
+
+The "never automatic" control is real but lives in the service layer plus a
+test, not in the type system: `TransactionDao.mergeDuplicatePair` can be called
+directly, and its `actor` parameter defaults to `'user'`, so a future background
+caller would write an audit entry claiming a person did it. Grep of `lib/`
+confirms `TransactionMergeService` is the only caller today. Cheap hardening:
+make `actor` required.
+
+### O-QA-6 — no CHECK constraint defends `amount_amount` from a negative magnitude
+
+KHA-79 closed the guard at all five DAO write paths (verified, probes E1–E4). A
+raw Drift insert bypassing the DAO still stores `-50.00` and inverts a spend
+total (probe E6). Not reachable from any app code path today. Relevant when P7
+adds statement import, which is exactly the scenario `sign_convention.dart`
+warns about.
+
+### O-QA-7 — `ledger_mapping.dart` over-claims what makes a row unreadable
+
+The library doc says a row is unreadable when *"`amount_currency` is not a
+currency code this build understands"*. `Money` performs no currency validation
+at all, so a row with `ZZZ` maps fine (probe G2). Behaviourally benign — such a
+row lands in its own currency bucket and is reported as `unconverted`, i.e.
+visible rather than dropped, which is what KHA-74 actually required. Fix the
+sentence, or add the validation.
+
+### O-QA-8 — the merge has no confirmation dialog; soft delete does
+
+`needs_review_screen.dart` fires `onMerge!(item)` on a single tap.
+`transaction_detail_screen.dart` owns a real `AlertDialog` for delete (AC-B6.2),
+which is the strictly *less* dangerous operation. `confirmedByUser` would be set
+by whatever caller is written later, so today the highest-risk operation in P3 is
+one tap away in the UI layer while the lesser one takes two. Worth an in-screen
+confirmation before the merge is ever routed — particularly given D-QA-10, where
+a mis-tap silently discards a user's correction.
+
+### O-QA-9 — none of P3b-2's providers has a production consumer yet
+
+`transactionMergeServiceProvider`, `manualEntryServiceProvider`,
+`transactionEditServiceProvider` and
+`internalTransferDecisionServiceProvider` are constructed but never watched: the
+app shell still routes only to `HomePlaceholderScreen`. This is consistent
+across the whole screen layer, pre-existing, and honestly disclosed by the PR's
+own *"nothing here has run on a device"*. Recorded only so the claim *"its only
+caller is a user action in the review inbox"* is read as intent rather than as a
+present fact.
 
 ---
 
