@@ -21,6 +21,7 @@ library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/time/clock.dart';
 import '../../data/dao/bank_dao.dart';
 import '../../data/dao/instrument_dao.dart';
 import '../../data/db/app_database.dart';
@@ -115,28 +116,110 @@ final FutureProvider<LedgerEntityResolver?> ledgerEntityResolverProvider =
 final NotifierProvider<PeriodRangeNotifier, PeriodRange> ledgerPeriodProvider =
     NotifierProvider<PeriodRangeNotifier, PeriodRange>(PeriodRangeNotifier.new);
 
+/// **AC-E1.4's period selector.** Owns "which calendar month am I looking at".
+///
+/// ## P5a closes the UTC-boundary limitation P3a documented here
+///
+/// The previous implementation computed month boundaries in UTC and said so:
+/// *"a transaction between 00:00 and 03:00 Riyadh time on the first of a month
+/// currently falls in the previous month's figure. P5 owns period boundaries
+/// properly."* This is P5. Boundaries now come from
+/// [RiyadhCalendar.monthWindowUtc], which is the same arithmetic the
+/// historical import's AC-A3.1 lookback uses — so "the month the import starts
+/// from" and "the month the home screen totals" are the same month by
+/// construction rather than by two functions happening to agree.
+///
+/// ## Why "am I still tracking the current month" is tracked explicitly
+///
+/// AC-E1.4 asks for two things that pull in opposite directions: on the 1st
+/// the total must **reset** to the new month, and the prior month must stay
+/// **viewable**. A notifier that recomputed the current month on every resume
+/// would satisfy the first and break the second — a user who paged back to
+/// June to check something, then took a phone call, would come back to July
+/// with no explanation. So the rollover only happens while the user has not
+/// navigated ([_followsCurrentMonth]), and paging back pins the period until
+/// they page forward again.
 class PeriodRangeNotifier extends Notifier<PeriodRange> {
+  /// True while the selector is showing "this month" rather than a month the
+  /// user chose. Only then may the clock move the period underneath them.
+  bool _followsCurrentMonth = true;
+
   @override
   PeriodRange build() => currentCalendarMonth();
 
-  void setRange(PeriodRange range) => state = range;
-
-  /// The calendar month containing [now], in UTC.
+  /// True when the visible period **is** the live current month.
   ///
-  /// A known simplification, stated rather than hidden: month boundaries are
-  /// computed in UTC, while the product's day boundary is `Asia/Riyadh`
-  /// (architecture §7.4). For the +03:00 offset that shifts the boundary by
-  /// three hours, so a transaction between 00:00 and 03:00 Riyadh time on the
-  /// first of a month currently falls in the previous month's figure. P5 owns
-  /// period boundaries properly (it owns the period selector); this is
-  /// recorded here so the next person meets a documented limitation rather
-  /// than a mystery.
+  /// A pure function of [state], deliberately *not* a read of
+  /// [_followsCurrentMonth]. The two answer different questions and conflating
+  /// them causes a subtle UI bug: the flag is plain mutable state that Riverpod
+  /// does not watch, so a change to it alone would not rebuild the selector,
+  /// and the forward arrow could be left enabled on the current month.
+  ///
+  ///  - *"Is there a month after this one?"* — a fact about the range, and what
+  ///    the selector needs.
+  ///  - *"Has the user pinned a month?"* — a fact about intent, and what the
+  ///    AC-E1.4 rollover needs. That one stays private.
+  bool get isCurrentMonth => state.startUtc == currentCalendarMonth().startUtc;
+
+  void setRange(PeriodRange range) {
+    _followsCurrentMonth = false;
+    state = range;
+  }
+
+  /// Moves [delta] calendar months from the visible period (negative = older).
+  ///
+  /// Landing back on the live current month re-arms the rollover, so paging
+  /// June → July does not leave the app permanently pinned to a July that will
+  /// be stale on 1 August.
+  void shiftMonths(int delta, {DateTime? now}) {
+    if (delta == 0) {
+      return;
+    }
+    final (DateTime start, DateTime end) = RiyadhCalendar.monthWindowUtc(
+      // Mid-window rather than the boundary instant: `startUtc` is 21:00 on
+      // the previous month's last day in UTC, so shifting from it directly
+      // would be off by one month. Adding a day lands unambiguously inside the
+      // month being shifted from.
+      state.startUtc.add(const Duration(days: 1)),
+      monthOffset: delta,
+    );
+    final PeriodRange moved = PeriodRange(
+      startUtc: start,
+      endUtcExclusive: end,
+    );
+    _followsCurrentMonth =
+        moved.startUtc == currentCalendarMonth(now: now).startUtc;
+    state = moved;
+  }
+
+  /// Jumps back to the live current month (the period selector's "This month"
+  /// affordance) and re-arms the AC-E1.4 rollover.
+  void showCurrentMonth({DateTime? now}) {
+    _followsCurrentMonth = true;
+    state = currentCalendarMonth(now: now);
+  }
+
+  /// **AC-E1.4 — "when the user opens the app on the 1st, the current-month
+  /// total resets to the new month".**
+  ///
+  /// Called on every foreground resume (see `app.dart`). A no-op unless the
+  /// month has genuinely turned over *and* the user is still tracking the
+  /// current month, so it can be called unconditionally and cheaply.
+  void refreshIfTrackingCurrentMonth({DateTime? now}) {
+    if (!_followsCurrentMonth) {
+      return;
+    }
+    final PeriodRange fresh = currentCalendarMonth(now: now);
+    if (fresh.startUtc != state.startUtc) {
+      state = fresh;
+    }
+  }
+
+  /// The Riyadh calendar month containing [now], as UTC instants.
   static PeriodRange currentCalendarMonth({DateTime? now}) {
-    final DateTime reference = (now ?? DateTime.now()).toUtc();
-    final DateTime start = DateTime.utc(reference.year, reference.month);
-    final DateTime end = reference.month == 12
-        ? DateTime.utc(reference.year + 1)
-        : DateTime.utc(reference.year, reference.month + 1);
+    final (DateTime start, DateTime end) = RiyadhCalendar.monthWindowUtc(
+      (now ?? DateTime.now()).toUtc(),
+    );
     return PeriodRange(startUtc: start, endUtcExclusive: end);
   }
 }
@@ -228,6 +311,182 @@ final StreamProvider<PeriodReport> periodReportProvider =
         );
       }
     });
+
+/// **S-10 / S-23 / S-24 — the live ledger, mapped once for every screen that
+/// lists transactions** (KHA-36).
+///
+/// ## Why one provider rather than one per screen
+///
+/// Three P5a surfaces need "the transactions, newest first, each with its
+/// internal-transfer verdict": the transaction list, the instrument detail
+/// page, and the home screen's recent-activity preview. Giving each its own
+/// stream would give each its own chance to slice the ledger *before* running
+/// `InternalTransferDetector` — and the detector is only correct over the
+/// **whole** set, because the two legs of a transfer live on two different
+/// instruments (see `bank_tree.dart`'s note on the same trap). Running it here,
+/// once, over everything, means a screen physically cannot get that wrong: it
+/// receives a verdict, never the responsibility for computing one.
+///
+/// Nothing is cached (NFR-A6): every emission is recomputed from the rows in
+/// that same emission.
+final StreamProvider<LedgerView> ledgerViewProvider =
+    StreamProvider<LedgerView>((Ref ref) async* {
+      final UnlockedDatabaseSession? session = await ref.watch(
+        unlockedDatabaseSessionProvider.future,
+      );
+      if (session == null) {
+        // Locked: ADR-005 makes the lock cryptographic, so "nothing" is the
+        // truthful value rather than a placeholder.
+        yield LedgerView.empty;
+        return;
+      }
+      final LedgerDaos? daos = await ref.watch(ledgerDaosProvider.future);
+
+      await for (final List<TransactionRow> rows
+          in session.transactionDao.watchLive()) {
+        final Map<int, LedgerInstrument> byId = <int, LedgerInstrument>{
+          if (daos != null)
+            for (final InstrumentRow row in await daos.instrumentDao.all())
+              row.id: toLedgerInstrument(row),
+        };
+
+        // KHA-74: rows this build cannot read are reported, never dropped
+        // silently into a shorter list the user has no way to notice.
+        final LedgerMappingOutcome outcome = mapLedgerTransactions(
+          rows,
+          instrumentsById: byId,
+        );
+        final InternalTransferAnalysis analysis =
+            InternalTransferDetector.analyze(outcome.transactions);
+
+        // Newest first — the order every list in the mockups uses. Sorted here
+        // rather than in SQL so an undated row (`occurredAt == null`, a real
+        // case: a message can state no time) has one defined position instead
+        // of whatever the database's NULL ordering happens to be. Undated rows
+        // sort last: they are the least likely to be what the user opened the
+        // list to find.
+        final List<LedgerTransaction> ordered =
+            List<LedgerTransaction>.of(outcome.transactions)
+              ..sort((LedgerTransaction a, LedgerTransaction b) {
+                final DateTime? left = a.occurredAt;
+                final DateTime? right = b.occurredAt;
+                if (left == null && right == null) {
+                  return b.id.compareTo(a.id);
+                }
+                if (left == null) {
+                  return 1;
+                }
+                if (right == null) {
+                  return -1;
+                }
+                final int byTime = right.compareTo(left);
+                // Ties broken by id so the order is stable across rebuilds; a
+                // list that reshuffles between frames reads as data changing.
+                return byTime != 0 ? byTime : b.id.compareTo(a.id);
+              });
+
+        yield LedgerView(
+          transactions: ordered,
+          internalTransferStates: <int, String>{
+            for (final LedgerTransaction txn in outcome.transactions)
+              if (analysis.stateFor(txn) != null)
+                txn.id: analysis.stateFor(txn)!,
+          },
+          unreadable: outcome.unreadable,
+        );
+      }
+    });
+
+/// What every P5a list screen renders.
+final class LedgerView {
+  /// Live (non-deleted) transactions, newest first, across **all** periods.
+  /// Screens filter by [PeriodRange]; the unfiltered set is what makes the
+  /// internal-transfer analysis below correct.
+  final List<LedgerTransaction> transactions;
+
+  /// Transaction id → `internal` | `candidate` | `external`, computed over the
+  /// whole set. Absent means "the detector had nothing to say".
+  final Map<int, String> internalTransferStates;
+
+  /// KHA-74's data-problem rows — surfaced by the review inbox, and counted
+  /// here so a list screen can say the ledger is incomplete rather than
+  /// quietly showing fewer rows than exist.
+  final List<UnreadableTransaction> unreadable;
+
+  const LedgerView({
+    required this.transactions,
+    required this.internalTransferStates,
+    required this.unreadable,
+  });
+
+  static const LedgerView empty = LedgerView(
+    transactions: <LedgerTransaction>[],
+    internalTransferStates: <int, String>{},
+    unreadable: <UnreadableTransaction>[],
+  );
+
+  /// This view's transactions that fall inside [period], order preserved.
+  ///
+  /// Uses [PeriodRange.contains], which is the **same** predicate
+  /// `LedgerTotals` uses to decide what goes into a figure — so "the rows on
+  /// screen" and "the rows behind the total above them" are the same set by
+  /// construction, which is what NFR-A6 actually asks for. An undated row is
+  /// excluded from both, together.
+  List<LedgerTransaction> inPeriod(PeriodRange period) => <LedgerTransaction>[
+    for (final LedgerTransaction txn in transactions)
+      if (period.contains(txn.occurredAt)) txn,
+  ];
+
+  /// Only [instrumentId]'s transactions — AC-B2.3's *"only that instrument's
+  /// transactions are listed"*, as a filter over the same list every other
+  /// screen reads.
+  List<LedgerTransaction> forInstrument(int instrumentId) =>
+      <LedgerTransaction>[
+        for (final LedgerTransaction txn in transactions)
+          if (txn.instrument?.id == instrumentId) txn,
+      ];
+}
+
+/// **AC-B1.2 — the sanitised body of the SMS a transaction came from**, so the
+/// user can check every parsed number against the sentence it came from
+/// (P5a, KHA-114's neighbouring gap).
+///
+/// Null for a manual entry, for a transaction whose source message has been
+/// erased, and while the app is locked. All three are the same answer to the
+/// screen — *"there is no original text"* — and S-11 says so rather than
+/// rendering an empty box.
+///
+/// A `family` keyed on the transaction id rather than a field on
+/// [ledgerViewProvider]: raw message bodies are the most sensitive thing this
+/// app stores, and loading every one of them into memory to render a list would
+/// be the opposite of the "one deliberate tap away" treatment design.md §5
+/// gives the panel. Auto-disposed when the detail screen closes.
+// ignore: always_specify_types — the family's generated type name is an
+// implementation detail of Riverpod's codegen-free API and is not meant to be
+// written out by hand; `final` keeps this readable and still fully typed.
+final originalMessageTextProvider = FutureProvider.family<String?, int>((
+  Ref ref,
+  int transactionId,
+) async {
+  final UnlockedDatabaseSession? session = await ref.watch(
+    unlockedDatabaseSessionProvider.future,
+  );
+  if (session == null) {
+    return null;
+  }
+  final TransactionRow? row = await session.transactionDao.byIdOrNull(
+    transactionId,
+  );
+  final int? messageId = row?.sourceMessageId;
+  if (messageId == null) {
+    return null; // A manual entry. There is no original text to show.
+  }
+  final RawMessageRow? message = await session.rawMessageDao.byId(messageId);
+  // The stored body is already redacted at the ingestion boundary
+  // (ADR-013), so what reaches the screen has no PAN in it to leak into a
+  // screenshot or an accessibility tree.
+  return message?.sanitizedBody;
+});
 
 /// KHA-64's S-19 write path, bound to the unlocked session.
 final FutureProvider<UnparsedCompletionService?>

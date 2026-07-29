@@ -31,6 +31,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/crypto/domain_separated_key.dart';
 import '../../core/time/clock.dart';
 import '../../data/dao/ingest_watermark_dao.dart';
+import '../../data/db/app_database.dart';
 import '../../data/sms/android_sms_source.dart';
 import '../../features/ingestion/background_entrypoint.dart';
 import '../../features/ingestion/content_hmac.dart';
@@ -226,6 +227,78 @@ final FutureProvider<IngestionRunResult?> foregroundSweepProvider =
 
       return result;
     });
+
+/// **S-05 — the historical import's live progress** (KHA-113, AC-A3.2).
+///
+/// A Drift stream over the watermark row, which is the only place the import
+/// records where it has got to (`historical_importer.dart` writes it after
+/// every chunk, precisely so the import survives being killed mid-run). That
+/// makes progress a *derived* fact rather than something the screen has to be
+/// pushed: a background chunk that lands while the app is closed still moves
+/// the bar the next time anyone looks.
+final StreamProvider<ImportProgress> importProgressProvider =
+    StreamProvider<ImportProgress>((Ref ref) async* {
+      final UnlockedDatabaseSession? session = await ref.watch(
+        unlockedDatabaseSessionProvider.future,
+      );
+      if (session == null) {
+        yield ImportProgress.idle;
+        return;
+      }
+      final IngestWatermarkDao dao = IngestWatermarkDao(session.database);
+      yield* dao.watch().map(
+        (IngestWatermarkRow row) => ImportProgress(
+          state: row.importState,
+          processed: row.importProcessedCount,
+          // Null while the importer is still counting candidates, which the
+          // screen renders as an indeterminate bar rather than a fake
+          // percentage.
+          totalCandidates: row.importTotalCandidates,
+          fromDateUtc: row.importFromDate,
+        ),
+      );
+    });
+
+/// What S-05 renders. A value type rather than the raw row so the screen never
+/// sees the ingestion cursor, which is an implementation detail it has no use
+/// for and could not explain to a user.
+final class ImportProgress {
+  /// The watermark's own vocabulary: `idle` | `running` | `paused` | `done`.
+  final String state;
+  final int processed;
+  final int? totalCandidates;
+
+  /// AC-A3.1's lower bound — the start of the current calendar month. Used to
+  /// count how many transactions the import has actually produced, which is
+  /// the number the user cares about (the mockup shows it, not the message
+  /// count).
+  final DateTime? fromDateUtc;
+
+  const ImportProgress({
+    required this.state,
+    required this.processed,
+    required this.totalCandidates,
+    required this.fromDateUtc,
+  });
+
+  static const ImportProgress idle = ImportProgress(
+    state: importStateIdle,
+    processed: 0,
+    totalCandidates: null,
+    fromDateUtc: null,
+  );
+
+  /// True while there is an import worth showing a progress screen for.
+  /// `paused` counts: an import interrupted by a lock or a process death is
+  /// still unfinished work, and hiding it would tell the user it had finished.
+  ///
+  /// `completed` deliberately does not — see [IngestWatermarkDao.completeImport]
+  /// for why "done" is a distinct terminal state rather than a return to
+  /// `idle`, and why conflating the two once made the app re-import the whole
+  /// month on every launch.
+  bool get isActive =>
+      state == importStateRunning || state == importStatePaused;
+}
 
 /// The unparsed half of the Needs Review inbox (design.md S-18).
 ///

@@ -91,6 +91,52 @@ abstract final class RiyadhCalendar {
     return riyadhMonthStart.subtract(riyadhUtcOffset);
   }
 
+  /// The **half-open** UTC window `[start, endExclusive)` of a Riyadh calendar
+  /// month — the month containing [nowUtc], shifted by [monthOffset] months
+  /// (`-1` = previous month, `+1` = next).
+  ///
+  /// **This is what OQ-12 / AC-E1.4 mean by "calendar month".** Every period
+  /// figure in the app is bounded by this, and the boundary has to be the
+  /// user's midnight rather than UTC's: at 01:00 on the 1st in Riyadh it is
+  /// still 22:00 on the last day of the previous month in UTC, so a UTC month
+  /// boundary would file that coffee under the wrong month and the total the
+  /// user checks at breakfast would be missing it. It is the same three-hour
+  /// correction [startOfCurrentMonthUtc] applies for the import lookback
+  /// (AC-A3.1), which is not a coincidence — the import scope and the home
+  /// screen's headline figure have to agree about where a month starts.
+  ///
+  /// `DateTime.utc` normalises out-of-range months on its own
+  /// (`DateTime.utc(2026, 13)` is January 2027, `DateTime.utc(2026, 0)` is
+  /// December 2025), so December→January and the year rollover need no special
+  /// case here.
+  static (DateTime start, DateTime endExclusive) monthWindowUtc(
+    DateTime nowUtc, {
+    int monthOffset = 0,
+  }) {
+    final DateTime riyadhNow = nowUtc.toUtc().add(riyadhUtcOffset);
+    final DateTime startWall = DateTime.utc(
+      riyadhNow.year,
+      riyadhNow.month + monthOffset,
+    );
+    final DateTime endWall = DateTime.utc(
+      riyadhNow.year,
+      riyadhNow.month + monthOffset + 1,
+    );
+    return (
+      startWall.subtract(riyadhUtcOffset),
+      endWall.subtract(riyadhUtcOffset),
+    );
+  }
+
+  /// The Riyadh wall-clock reading of a UTC instant.
+  ///
+  /// Used only for **labelling** a period ("July 2026"): a month window's
+  /// `startUtc` is 21:00 on the last day of the previous month in UTC, so
+  /// naming a period from that instant directly would put the wrong month on
+  /// screen for three hours' worth of every boundary.
+  static DateTime toRiyadhWallClock(DateTime utc) =>
+      utc.toUtc().add(riyadhUtcOffset);
+
   /// Interprets [local] — a wall-clock reading with no offset, which is what
   /// most bank SMS print — as a Riyadh local time, and returns the
   /// corresponding UTC instant.

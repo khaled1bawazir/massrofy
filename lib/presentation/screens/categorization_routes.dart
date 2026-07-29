@@ -55,9 +55,11 @@ import '../providers/ingestion_providers.dart';
 import '../providers/ledger_providers.dart';
 import '../widgets/category_picker_sheet.dart';
 import '../widgets/category_widgets.dart';
+import '../widgets/scoped_snack_bar.dart';
 import 'category_management_screen.dart';
 import 'complete_unparsed_screen.dart';
 import 'learned_rules_screen.dart';
+import 'ledger_routes.dart';
 import 'needs_review_screen.dart';
 import 'recently_deleted_screen.dart';
 import 'transaction_detail_screen.dart';
@@ -220,35 +222,41 @@ Future<void> correctTransactionCategory({
     return;
   }
 
-  final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
-  messenger.hideCurrentSnackBar();
-  messenger.showSnackBar(
-    SnackBar(
-      // AC-D5.3 — *"the merchant-wide option creates/updates the rule and
-      // STATES HOW MANY existing transactions were affected."* The two
-      // sentences are different because the facts are: a one-off says what it
-      // did to one row and makes no claim about the rest.
-      content: Text(
+  // **KHA-115.** This used to be a raw `messenger.showSnackBar(SnackBar(...))`
+  // with no `duration`, and the resulting bar sat on screen for nine minutes
+  // across four route changes carrying a live Undo that silently reverted a
+  // three-row correction when it was tapped by accident.
+  //
+  // The cause was **not** the missing duration: Flutter defaults
+  // `SnackBar.persist` to `action != null`, so *any* actionable snackbar is
+  // immortal until its action is tapped. `showScopedSnackBar` passes
+  // `persist: false` explicitly and binds the Undo to this route — see
+  // `widgets/scoped_snack_bar.dart` for the full analysis. It is the only
+  // sanctioned way to raise an actionable snackbar in this app, and
+  // `test/source_hygiene_test.dart` fails the build if a second one appears.
+  showScopedSnackBar(
+    context: context,
+    // AC-D5.3 — *"the merchant-wide option creates/updates the rule and
+    // STATES HOW MANY existing transactions were affected."* The two
+    // sentences are different because the facts are: a one-off says what it
+    // did to one row and makes no claim about the rest.
+    message:
         correction.otherTransactionsUpdated > 0 &&
-                correction.merchantName != null
-            ? l10n.correctionAppliedToMany(
-                correction.totalTransactionsUpdated,
-                correction.merchantName!,
-              )
-            : l10n.correctionAppliedToOne,
-      ),
-      action: correction.undo.isRestorable
-          ? SnackBarAction(
-              label: l10n.commonUndo,
-              onPressed: () async {
-                // AC-C5.2 — every affected row goes back to *its own* prior
-                // category, and the rule change goes back too (§6.4's "undo
-                // reverts the rule change, not just this transaction").
-                await service.undo(correction.undo);
-              },
-            )
-          : null,
-    ),
+            correction.merchantName != null
+        ? l10n.correctionAppliedToMany(
+            correction.totalTransactionsUpdated,
+            correction.merchantName!,
+          )
+        : l10n.correctionAppliedToOne,
+    actionLabel: correction.undo.isRestorable ? l10n.commonUndo : null,
+    onAction: correction.undo.isRestorable
+        ? () async {
+            // AC-C5.2 — every affected row goes back to *its own* prior
+            // category, and the rule change goes back too (§6.4's "undo
+            // reverts the rule change, not just this transaction").
+            await service.undo(correction.undo);
+          }
+        : null,
   );
 }
 
@@ -696,6 +704,12 @@ class TransactionDetailHost extends ConsumerWidget {
     final AsyncValue<CategoryResolver> resolver = ref.watch(
       categoryResolverProvider,
     );
+    // AC-B1.2. Null while it loads, which renders the same "no original text"
+    // line a manual entry gets — a one-frame understatement, never a wrong
+    // claim about a figure.
+    final String? originalMessageText = ref
+        .watch(originalMessageTextProvider(transactionId))
+        .value;
 
     return sessionAsync.when(
       loading: () => Scaffold(
@@ -713,29 +727,33 @@ class TransactionDetailHost extends ConsumerWidget {
             body: const CategoryLockedState(),
           );
         }
-        return StreamBuilder<List<TransactionRow>>(
-          // Watching the live list rather than reading one row once: a
-          // correction made from this screen has to be visible on this screen,
-          // and a one-shot read would leave the chip showing the old category
-          // until the user navigated away and back.
-          stream: session.transactionDao.watchLive(),
+        return StreamBuilder<TransactionRow?>(
+          // Watching rather than reading one row once: a correction made from
+          // this screen has to be visible on this screen, and a one-shot read
+          // would leave the chip showing the old category until the user
+          // navigated away and back.
+          //
+          // **KHA-114 — `watchById`, not `watchLive`.** `watchLive` excludes
+          // soft-deleted rows, so wiring `onDelete` while watching it would
+          // have made the row vanish the instant it was deleted, leaving the
+          // screen's deleted banner and its Restore button unreachable in the
+          // running app. That is the same never-constructed shape KHA-114 was
+          // filed about, and fixing only the callbacks would have reproduced it
+          // one level down. See `TransactionDao.watchById`.
+          stream: session.transactionDao.watchById(transactionId),
           builder:
-              (
-                BuildContext context,
-                AsyncSnapshot<List<TransactionRow>> snapshot,
-              ) {
+              (BuildContext context, AsyncSnapshot<TransactionRow?> snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return Scaffold(
                     appBar: AppBar(title: Text(l10n.transactionDetailTitle)),
                     body: const Center(child: CircularProgressIndicator()),
                   );
                 }
-                final TransactionRow? row = snapshot.data
-                    ?.where((TransactionRow r) => r.id == transactionId)
-                    .firstOrNull;
+                final TransactionRow? row = snapshot.data;
                 if (row == null) {
-                  // Deleted, or merged away, while this screen was open. Saying
-                  // so beats rendering a blank detail screen.
+                  // Erased, or merged away, while this screen was open. A soft
+                  // *delete* no longer lands here — that is the point of
+                  // `watchById` — so this is now genuinely "gone", not "hidden".
                   return Scaffold(
                     appBar: AppBar(title: Text(l10n.transactionDetailTitle)),
                     body: CategoryEmptyState(
@@ -774,6 +792,34 @@ class TransactionDetailHost extends ConsumerWidget {
                     transactionId: transactionId,
                     autoConfirmDelay: autoConfirmDelay,
                   ),
+                  // **KHA-114 — the three callbacks this construction site was
+                  // missing.**
+                  //
+                  // `TransactionDetailScreen` renders Edit/Delete/Restore only
+                  // when a callback is supplied, on the rule that *"a delete
+                  // affordance that silently does nothing in a banking app is a
+                  // trust failure, not a stub"*. This host supplied none of
+                  // them, so AC-B6.2's confirm-and-soft-delete flow was fully
+                  // built, fully tested, and impossible for a user to trigger —
+                  // and S-44 Recently Deleted, which P4b deliberately routed,
+                  // could never contain anything. A screen promising "you can
+                  // bring it back" that nothing can ever fill is worse than no
+                  // screen.
+                  //
+                  // The confirmation dialog stays where it is: the screen owns
+                  // it, because a confirmation is a presentation obligation and
+                  // putting it in the service would make it skippable by any
+                  // other caller. This host only performs the write.
+                  onEdit: () => openTransactionEdit(context, transactionId),
+                  onDelete: () => _softDelete(context, ref, transactionId),
+                  onRestore: () => _restore(context, ref, transactionId),
+                  // AC-B1.2 — *"the original SMS text is viewable so the user
+                  // can verify the parse"*. Also previously unsupplied here,
+                  // which meant every SMS-derived transaction rendered the
+                  // manual-entry copy ("no original message"). It is redacted
+                  // at the ingestion boundary (ADR-013), so what is shown has
+                  // no PAN left in it to leak.
+                  originalMessageText: originalMessageText,
                   loadCategoryProvenance: () async {
                     final CategorizationService? service = await ref.read(
                       categorizationServiceProvider.future,
@@ -792,5 +838,66 @@ class TransactionDetailHost extends ConsumerWidget {
         );
       },
     );
+  }
+
+  /// **AC-B6.1/B6.2/B6.4** — the write half of the soft delete.
+  ///
+  /// The screen has already obtained the explicit confirmation by the time this
+  /// runs (`TransactionDetailScreen._confirmDelete`), so there is deliberately
+  /// no second dialog here: two confirmations for one destructive act trains
+  /// people to dismiss both.
+  ///
+  /// Named `softDelete` all the way down so nobody reaches for it thinking it
+  /// destroys anything. The screen stays open on the now-deleted row rather
+  /// than popping — the row keeps rendering, with its "this counts toward
+  /// nothing" banner and a Restore button, which is a more reassuring answer
+  /// than a screen that vanishes.
+  Future<void> _softDelete(
+    BuildContext context,
+    WidgetRef ref,
+    int transactionId,
+  ) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final TransactionEditService? edits = await ref.read(
+      transactionEditServiceProvider.future,
+    );
+    if (edits == null || !context.mounted) {
+      return;
+    }
+    await edits.softDelete(transactionId);
+    if (!context.mounted) {
+      return;
+    }
+    // Names *where it went*, because "deleted" on its own reads as destroyed —
+    // and a user who believes deletion is permanent hesitates over correcting a
+    // wrong row, which is how a ledger drifts away from reality.
+    showScopedSnackBar(
+      context: context,
+      message: l10n.txnDeletedToRecentlyDeleted,
+    );
+  }
+
+  /// **AC-B8.2** — restores a soft-deleted transaction, history intact.
+  ///
+  /// Reachable from this screen as well as from S-44, because S-11 is where a
+  /// user lands when they follow "you can find it under Recently deleted" and
+  /// then open the row.
+  Future<void> _restore(
+    BuildContext context,
+    WidgetRef ref,
+    int transactionId,
+  ) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final TransactionEditService? edits = await ref.read(
+      transactionEditServiceProvider.future,
+    );
+    if (edits == null || !context.mounted) {
+      return;
+    }
+    await edits.restore(transactionId);
+    if (!context.mounted) {
+      return;
+    }
+    showScopedSnackBar(context: context, message: l10n.txnRestoredConfirmation);
   }
 }

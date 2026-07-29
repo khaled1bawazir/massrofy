@@ -20,6 +20,7 @@ import '../../core/crypto/lockout_state_repository.dart';
 import '../../core/crypto/passphrase_key_deriver.dart';
 import '../../core/logging/diagnostic_ring_buffer.dart';
 import '../../core/logging/safe_logger.dart';
+import '../../data/dao/app_settings_dao.dart';
 import '../../data/dao/audit_log_dao.dart';
 import '../../data/dao/raw_message_dao.dart';
 import '../../data/dao/transaction_dao.dart';
@@ -137,11 +138,21 @@ class UnlockedDatabaseSession {
   final TransactionDao transactionDao;
   final RawMessageDao rawMessageDao;
 
+  /// P5a (KHA-113). Carries the `onboarding_complete` flag the SMS-permission
+  /// gate needs to tell "never asked" from "asked and declined" — see
+  /// `app_settings_dao.dart`. It lives on the *unlocked* session like every
+  /// other DAO because the settings row is inside the encrypted database
+  /// (ADR-003/ADR-005), so there is nothing to read before the lock gate has
+  /// been passed. That ordering is intentional: onboarding is a post-unlock
+  /// journey.
+  final AppSettingsDao appSettingsDao;
+
   const UnlockedDatabaseSession({
     required this.database,
     required this.auditLogDao,
     required this.transactionDao,
     required this.rawMessageDao,
+    required this.appSettingsDao,
   });
 }
 
@@ -219,5 +230,6 @@ final FutureProvider<UnlockedDatabaseSession?> unlockedDatabaseSessionProvider =
         auditLogDao: auditLogDao,
         transactionDao: transactionDao,
         rawMessageDao: rawMessageDao,
+        appSettingsDao: AppSettingsDao(database),
       );
     });

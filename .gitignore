@@ -24,6 +24,10 @@ coverage/
 
 # Android
 android/.gradle/
+# Kotlin build-tool scratch dir, created by any local `gradle`/`flutter build`
+# run (e.g. the ADR-001 release-manifest guard in .github/scripts). Pure build
+# output; it is not ignored by `build/` above because it sits outside it.
+android/.kotlin/
 android/captures/
 android/gradlew
 android/gradlew.bat

@@ -52,11 +52,22 @@ class SmsLimitedModeScreen extends StatelessWidget {
 
   final VoidCallback onAddManually;
 
+  /// **P5a (KHA-113) — the way into the app itself.**
+  ///
+  /// Without this the screen had two buttons that both lead somewhere *else*
+  /// (the OS dialog, system Settings) and one that opens a form, and a user who
+  /// wanted none of those had nowhere to go. Point 3 above says the app must
+  /// never be a dead end; before this route existed, S-04 had no construction
+  /// site at all and the claim was untested. Null keeps the action off the
+  /// screen for any caller that is not the onboarding gate.
+  final VoidCallback? onContinue;
+
   const SmsLimitedModeScreen({
     required this.status,
     required this.onRequestPermission,
     required this.onOpenSettings,
     required this.onAddManually,
+    this.onContinue,
     super.key,
   });
 
@@ -115,10 +126,19 @@ class SmsLimitedModeScreen extends StatelessWidget {
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton(
+                    key: const Key('smsLimited.addManually'),
                     onPressed: onAddManually,
                     child: Text(l10n.smsLimitedModeAddManually),
                   ),
                 ),
+                if (onContinue != null) ...<Widget>[
+                  const SizedBox(height: 4),
+                  TextButton(
+                    key: const Key('smsLimited.continue'),
+                    onPressed: onContinue,
+                    child: Text(l10n.smsLimitedModeContinue),
+                  ),
+                ],
               ],
             ),
           ),

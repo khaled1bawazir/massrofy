@@ -48,11 +48,47 @@ class AppLocalizationsAr extends AppLocalizations {
   String get lockGateUnlockButtonSemanticLabel => 'افتح القفل ببصمتك';
 
   @override
-  String get homePlaceholderTitle => 'الرئيسية';
+  String get navHome => 'الرئيسية';
 
   @override
-  String get homePlaceholderBody =>
-      'هذه نسخة الأساس (Foundation) من مصروفي. رصد الرسائل والتصنيف والتقارير تُبنى في مراحل لاحقة — هذه الشاشة تثبت فقط أن التطبيق يعمل، ويُفتح قفله، ويقرأ ويكتب في مخزنه المشفّر بشكل صحيح.';
+  String get navTransactions => 'المعاملات';
+
+  @override
+  String get navMore => 'المزيد';
+
+  @override
+  String get homeThisMonth => 'هذا الشهر';
+
+  @override
+  String get homeNoSpendThisMonth => 'لا توجد معاملات مسجلة بعد هذا الشهر';
+
+  @override
+  String get homeEmptyTitle => 'لا توجد معاملات بعد';
+
+  @override
+  String get homeEmptyBody =>
+      'بمجرد أن يرسل بنكك رسالة معاملة، ستظهر هنا تلقائياً. يمكنك أيضاً إضافة معاملة نقدية يدوياً.';
+
+  @override
+  String get homeAddManually => 'إضافة معاملة يدوياً';
+
+  @override
+  String get homeRecentTransactions => 'أحدث المعاملات';
+
+  @override
+  String get homeViewAll => 'عرض الكل';
+
+  @override
+  String get homeLockNow => 'قفل الآن';
+
+  @override
+  String get periodPreviousMonth => 'الشهر السابق';
+
+  @override
+  String get periodNextMonth => 'الشهر التالي';
+
+  @override
+  String get periodCurrentMonth => 'هذا الشهر';
 
   @override
   String get smsRationaleTitle => 'لماذا يحتاج مصروفي إلى إذن الرسائل';
@@ -598,7 +634,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get txnEditSaved => 'تم حفظ التعديلات';
 
   @override
-  String get txnEditNoChanges => 'لم يتم تغيير أي شيء';
+  String get txnEditNoChanges => 'لم يتغيّر شيء';
 
   @override
   String txnEditOriginalValue(String value) {
@@ -1237,4 +1273,62 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get completionMessageGone => 'لم تعد هذه الرسالة في قائمة المراجعة';
+
+  @override
+  String get txnListTotalForPeriod => 'الإجمالي';
+
+  @override
+  String get txnListEmptyTitle => 'لا توجد معاملات بعد';
+
+  @override
+  String get txnListEmptyBody =>
+      'تظهر المعاملات هنا بمجرد وصول رسائل بنكك. يمكنك أيضاً إضافة معاملة يدوياً.';
+
+  @override
+  String get txnListEmptyForPeriodTitle => 'لا شيء في هذا الشهر';
+
+  @override
+  String get txnListEmptyForPeriodBody =>
+      'لا توجد معاملات في الشهر الذي تعرضه. استخدم الأسهم بالأعلى لعرض شهر آخر.';
+
+  @override
+  String txnListUnreadableNote(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'تعذّرت قراءة $count معاملة وهي غير محتسبة في الإجمالي',
+      many: 'تعذّرت قراءة $count معاملة وهي غير محتسبة في الإجمالي',
+      few: 'تعذّرت قراءة $count معاملات وهي غير محتسبة في الإجمالي',
+      two: 'تعذّرت قراءة معاملتين وهما غير محتسبتين في الإجمالي',
+      one: 'تعذّرت قراءة معاملة واحدة وهي غير محتسبة في الإجمالي',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get txnDeletedToRecentlyDeleted => 'نُقلت إلى المحذوفة مؤخراً';
+
+  @override
+  String get txnRestoredConfirmation => 'تمت استعادة المعاملة';
+
+  @override
+  String get txnEditSavedConfirmation => 'تم تحديث المعاملة';
+
+  @override
+  String get txnEditTargetMissing => 'لم تعد هذه المعاملة هنا';
+
+  @override
+  String get smsLimitedModeContinue => 'المتابعة إلى مصروفي';
+
+  @override
+  String get moreSectionData => 'أموالك';
+
+  @override
+  String get moreSectionOrganise => 'التنظيم';
+
+  @override
+  String get moreSectionApp => 'التطبيق';
+
+  @override
+  String get moreReportsComingSoon => 'التقارير تصل في الإصدار القادم';
 }

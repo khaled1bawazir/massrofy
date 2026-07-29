@@ -84,4 +84,47 @@ void main() {
           '${offenders.join(', ')}',
     );
   });
+
+  /// **KHA-115's guard.**
+  ///
+  /// Flutter's `SnackBar` constructor does `persist = persist ?? action != null`,
+  /// so **any** snackbar carrying a `SnackBarAction` stays on screen forever
+  /// unless `persist: false` is passed explicitly. That is how a category
+  /// correction's *Undo* ended up floating over four unrelated screens for nine
+  /// minutes and silently reverting real work when it was tapped by accident.
+  ///
+  /// The fix lives in one place — `showScopedSnackBar` — and this test is what
+  /// keeps it the only place. A lint cannot express "pass this argument", and a
+  /// comment asking the next author to remember is exactly the kind of rule
+  /// `docs/lessons.md` records failing twice. So the rule is mechanical: if a
+  /// second `SnackBarAction` appears in `lib/`, the build fails and the message
+  /// says what to do instead.
+  test('SnackBarAction is constructed in exactly one place — the KHA-115 '
+      'stuck-snackbar defect cannot be reintroduced by a new call site', () {
+    const String sanctioned = 'scoped_snack_bar.dart';
+
+    final List<String> offenders = <String>[];
+    for (final File file in Directory(
+      'lib',
+    ).listSync(recursive: true).whereType<File>()) {
+      if (!file.path.endsWith('.dart') || file.path.endsWith(sanctioned)) {
+        continue;
+      }
+      final String source = file.readAsStringSync();
+      if (source.contains('SnackBarAction(')) {
+        offenders.add(file.path);
+      }
+    }
+
+    expect(
+      offenders,
+      isEmpty,
+      reason:
+          'a SnackBar with an action defaults to persist: true and will never '
+          'dismiss itself (KHA-115). Raise it through '
+          'showScopedSnackBar(...) in lib/presentation/widgets/'
+          '$sanctioned instead, which passes persist: false and scopes the '
+          'action to the route that raised it: ${offenders.join(', ')}',
+    );
+  });
 }
