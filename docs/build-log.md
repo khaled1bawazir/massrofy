@@ -392,3 +392,345 @@ P4a (KHA-30 + KHA-31) follows on the merged result. **P4b does not start until K
 are closed** — that is now enforced by Linear blocking links, not just by a merge commit.
 
 ---
+
+## 2026-07-29 — Phase P4a → P4b boundary (fourth supervision turn)
+
+**Supervisor:** manager (opus). **`main` at time of check:** `ad5688a`. **Open PRs: none.**
+
+**Working-tree warning, recorded because it nearly mattered.** The local checkout is on
+`feature/p2-sms-ingestion-parsing`, two phases stale, and its `docs/defects.md` and `docs/lessons.md`
+are missing the PR #27/#28/#29 content. Per the 2026-07-28 lesson, code and issue state were taken
+from the GitHub API and Linear, never from the checkout. Before editing `docs/build-plan.md` and
+`docs/build-log.md` I confirmed via `list_commits --path` that both files were last touched on
+`main` by `a4791d4` (PR #23) — i.e. the local copies of *these two files specifically* are current
+even though neighbouring files are not. That check is the only reason editing them here is safe.
+
+### What I verified from evidence, not memory
+
+| Claim | Verified how | Result |
+|---|---|---|
+| P3b-3 merged | GitHub `main` → `81b1147` (PR #24) | ✅ `QA: PASS 24`, CI 6/6, 1040 tests passing |
+| P4a merged | GitHub `main` → `42db8ff` (PR #27) | ✅ schema v7, `QA: PASS 27`, CI re-run 6/6 on post-QA-merge head `c9715a5` |
+| KHA-87 closed | Linear `stateHistory` | ✅ Done 07:52:44. QA re-verified by execution: `report.fees.base` stays `9.2`, `report.spend.base` stays `150` |
+| KHA-88 closed | Linear `stateHistory` | ❌ **Open.** Done 07:52:44 → **Backlog 07:53:49**. Auto-closed by the merge, reopened 65 seconds later. The KHA-64 failure mode, caught in a minute instead of a phase |
+| KHA-88's remaining scope | KHA-94 body + PR #24 merge commit | ⚠️ **Larger than PR #24 states**, and QA says so explicitly. The single-scalar link is now the **input to a safety guard** |
+| KHA-94 state | Linear `get_issue` | ⬜ Backlog, **High**, `blocks` KHA-32 + KHA-33 |
+| KHA-98 state | Linear `get_issue` | ⬜ Backlog, **High**, `needs-architecture-decision`, `owner-solution-architect`, `blocks` KHA-32/33/97 |
+| KHA-98 needs an ADR, or is it engineer-fixable? | `docs/architecture.md` ADR-008 text quoted in the issue | 🔴 **Needs the ADR.** The noise list including **"city names"** is what ADR-008 mandates; QA's preferred fix is to delete it |
+| A reviewer gate exists beyond Linear | PR #24 merge commit body | ⚠️ **Yes, and it was prose only:** *"KHA-94 and KHA-96's O-QA-11 must be closed BEFORE P4b code starts."* Now promoted to `blocks` links |
+| Is any P4 work genuinely unblocked? | KHA-34 `blockedBy` | ⚠️ **KHA-34 was link-unblocked** — its only blocker, KHA-31, is closed. Substantively it is not. Corrected (see below) |
+| Milestone sweep (standing rule) | Linear KHA-98…105, KHA-92…96 | ✅ **All clean.** Every one of the eight P4a QA issues carried the P4 milestone at creation — **the first gate where the manager did not have to backstop that rule** |
+
+### The finding that shaped this phase: the gate grew, and one of its members is a defect in an approved ADR
+
+v1.4 planned P4b behind a **two-issue** gate (KHA-87, KHA-88). It is now **seven**: KHA-88, KHA-94,
+KHA-96, KHA-98, KHA-99, KHA-101, KHA-102. Only one of the original two has closed.
+
+That is not plan decay — six of the seven were created *by the QA gates of the two PRs that merged
+since*, which is the design working. What matters is the character of the newcomers.
+
+**KHA-98 is the one that changes how this phase is staffed.** `MerchantKey.of('MAKKAH BAKERY')` and
+`MerchantKey.of('MADINAH BAKERY')` both return `'BAKERY'`, and the resulting match lands at **T1,
+confidence 1.00** — above every tier gate, above any value `autoApplyThreshold` could take. It is
+unreachable by tuning because it is not a matching-confidence bug at all; it is a *deterministic key
+collision manufactured by normalisation*. And the normalisation it is manufactured by is the one
+ADR-008 mandates in its own words: strip *"a configurable noise-token list (`BRANCH`, `STORE`,
+`FRC`, **city names**, terminal ids)"*.
+
+So the engineer did what the approved architecture said, and the approved architecture was wrong for
+an ordinary Saudi retail naming shape. **That is an ADR amendment, not a patch**, and it is why
+KHA-98 already carries `needs-architecture-decision` + `owner-solution-architect` — I am confirming
+that routing, not inventing it.
+
+Two further reasons the architect goes first, both found this turn rather than inherited:
+
+- **It is one question wearing three costumes.** KHA-98 (city tokens), KHA-99 (unbounded
+  trailing-digit stripping — QA's own note: *"same family as KHA-98 — a decision on one should
+  settle the other"*) and KHA-102 (`'***'` forming a usable key) all ask: **when may normalisation
+  assert that two different raw strings are the same business?** ADR-008 answers "whenever the strip
+  rules fire", with no corroboration requirement. Three engineer patches = three local answers and a
+  fourth case next phase.
+- **R-17, and it is time-boxed.** `merchant.merchant_key` is `UNIQUE` and *is* the identity, and P4a
+  wired the categorizer into ingestion — so changing `MerchantKey` re-keys rows. Today **no install
+  carries a `merchant` row**: R-15's gate blocks any device build while KHA-88 is open, and KHA-7 has
+  never run. The architect can therefore take "no migration, clean install" **provably**, exactly as
+  KHA-69's option (a) was taken on this same day. Miss the window and it becomes a migration that
+  cannot be computed from the data it is migrating, because the correct grouping is precisely what
+  was wrong.
+
+### Decision: P4a-1 — one PR, architect first, engineer second
+
+**Not P4b.** Six of seven gates are open, and two of them (KHA-98, KHA-94) are High.
+
+**Not KHA-34 either, even though its links said yes.** The learned-rules screen was startable by
+`blockedBy` alone — KHA-31 is closed and nothing else was linked. It must not start: it lists and
+bulk-re-applies rules keyed on the identity KHA-98/99/102 are about to redefine, and AC-D4.4's
+"re-apply to history" over a collapsed identity would rewrite categories across two unrelated
+businesses **and write one audit entry per transaction attesting to it**. Building it now buys
+rework of the screen, its tests, and its audit assertions. `blocks KHA-34` added from KHA-98, KHA-99,
+KHA-102, KHA-94 and KHA-96 so the tracker says what the reasoning says.
+
+**One PR, not two**, despite the two clusters being file-disjoint (identity: `merchant_key.dart`,
+`categorization_service.dart` · merge/undo: `transaction_merge.dart`, `transaction_dao.dart`).
+Splitting buys a second opus QA pass and a second opus review pass — which this log has now twice
+identified as the dominant recurring cost — to separate two clusters no reviewer will confuse. Both
+also need the *same cheap* verification: **invert probes already authored** (PROBE B/C/G2/U from
+`qa_pr27_probe_test.dart`; J1/K1 from `qa_pr24_probe_test.dart`), not a new adversarial surface.
+The two-PR cap holds: P4 is still P4a + P4b, and P4a-1 is P4a's debt exactly as P3b-3 was P3's.
+
+**The genuine parallel window, and it is the first since gate 2.** The merge/undo cluster
+(KHA-88/94/96) has no ADR dependency. R-9's "one mobile lane makes parallel a fiction" does not
+apply to an architect-and-engineer pair, so the engineer may begin that cluster while the architect
+writes. The identity cluster waits.
+
+### Cross-engineer conflicts
+
+None between engineers — still one implementer lane, and `docs/api.md` does not exist (ADR-001: no
+backend, no contract to drift). **But this turn has the closest thing yet to a contract conflict:**
+ADR-008 is a *contract between the architect and the engineer*, the engineer built to it correctly,
+and it is now changing underneath already-merged code. That is the same shape as an API contract
+moving after a client built against it, and it is handled the same way — the amendment lands first,
+then a named follow-up task (P4a-1's identity cluster) carries the already-merged code to it. Worth
+noting that this build's "no contract" property was true only until the architecture had to change.
+
+### What changed in the plan
+
+`docs/build-plan.md` → **v1.5**: P3b-3 and P4a marked merged with what each actually left open;
+**P4a-1** inserted as a new phase with its cluster table, the four-reason argument for architect-first,
+the architect's deliverable list, and its own exit check; **"The P4b gate, as it actually stands"**
+table added (7 rows, each a Linear link, plus the three tracker corrections made this turn); P4's
+exit check widened from two issues to seven, with a note that the AC-level clause *"a never-seen
+merchant is never confidently categorized by coincidence"* is what caught KHA-98 — the 2026-07-28 QA
+lesson paying out; **R-16** (identity asserted without corroboration) and **R-17** (the free re-key
+window) added, R-15 updated to half-paid; §4 gains the `P4a-1 → P4b` edge and the
+architect→engineer edge; §7.3 row 9 superseded and **row 10** added (ADR amendment FYI + the
+`/revise-design` branch point); §8 index rows rewritten for P3b-3, P4a, P4a-1, P4b and KHA-36. Both
+non-blocking corrections owed at v1.5 from PR #23's review are paid: the revision table and §7.3 are
+now in order.
+
+Linear, this turn: `blocks KHA-34` added from **KHA-98, KHA-99, KHA-102, KHA-94, KHA-96**;
+`blocks KHA-32` added from **KHA-96** (its O-QA-11 half is precisely the needs-review inbox losing
+items). Owner routing verified rather than changed — every gate issue already carries the correct
+`owner-*` label, and since all agents act under one Linear account, the label *is* the routing.
+
+### Cost note — this phase
+
+| Agent | Model tier | Ran |
+|---|---|---|
+| mobile-engineer | **opus** | P3b-3 (PR #24) and P4a (PR #27) authoring |
+| qa-tester | **opus** | Two gates: 17-probe second merge round (PR #26) and **35-probe** categorization round (PR #28), plus the §7d 27-AC traceability matrix |
+| code-reviewer | **opus** | PR #24, #26, #27, #29 merges; re-ran CI on the post-QA-merge head rather than citing QA's SHA |
+| manager (this turn) | **opus** | Supervision only: 3 docs read, 15 Linear calls, 5 GitHub calls, 5 Linear writes, 0 code |
+
+**Three economics observations.** First, **QA is still the most expensive agent and still the one
+earning its cost** — the 35-probe P4a round found the defect that reshaped this phase, and found it
+in an *approved architecture document*, which no cheaper check would have reached. Second, the
+QA-PR-based-on-the-code-branch change (lesson, 2026-07-29) **worked first try**: PR #28 merged into
+the P4a branch and rode to `main` as one squash commit, ending a six-PR streak of manual rescues —
+a real saving in orchestrator time, not just tidiness. Third, and less comfortable: **P4 has now
+produced three fix PRs' worth of work (P3b-3, P4a-1) against two feature PRs.** That ratio is the
+honest price of the adversarial QA posture on a money-handling product, and it is worth watching —
+if P4a-1's gate produces a P4a-2, that is the signal to stop and re-scope rather than loop again.
+Fix-loop count for this feature area: **round 2 of 3.**
+
+### Next dispatch
+
+**solution-architect (opus) → the ADR-008 merchant-identity amendment: KHA-98 (decision), settling
+KHA-99, KHA-102 and KHA-100's tier claim with it.** Docs only — a dated amendment beside ADR-008 in
+`docs/architecture.md`, not a rewrite. It must answer: the corroboration rule for collapsing two raw
+strings into one identity (bar = AC-D2.3 "match, or flag — never silently miscategorize"); city
+tokens, trailing digits, the non-alphanumeric fallback key, and whether T3 means *permutation* or
+*same token set*; the R-17 migration posture with its premise stated as KHA-69's was, plus the
+condition that the premise dies on first hardware install; and an explicit **yes/no on whether a
+"these are two different shops" split affordance is required** — if yes, that screen is not in
+`docs/design.md` and it triggers the first `/revise-design` round since gate 2. NFR-M3 applies:
+synthetic merchant strings only.
+
+Then **mobile-engineer (opus) → P4a-1**, one PR off `main` @ `ad5688a`: KHA-98/99/102/100 (identity,
+after the ADR) · KHA-101 (correction-surface unification) · KHA-88/94/96 (merge/undo remainder, may
+start immediately, no ADR dependency) · KHA-103/104/105 (cheap, same files). Schema **v8 only if the
+architect requires a re-key**. Invert every named probe in place. Then qa-tester for an explicit
+`QA: PASS`/`FAIL`, then code-reviewer to merge on green CI + `QA: PASS`.
+
+**P4b (KHA-32 + KHA-33 + KHA-34) does not start until all seven gate issues are closed.**
+
+---
+
+## 2026-07-29 — Phase P4a-1 → P4b boundary (fifth supervision turn)
+
+**Supervisor:** manager (opus). **`main` at time of check:** `c3c4cbf` (PR #30). **Open PRs: none.**
+
+### The finding that had to come first: the fourth turn's docs never landed
+
+The previous entry in this very file ends with a "Next dispatch" that was executed correctly — but the
+**documents describing it were never merged.** Verified with `list_commits --path`, not assumed:
+
+- `docs/build-plan.md` on `main`: last touched by **`a4791d4` (PR #23)** — the **v1.4** update.
+- `docs/build-log.md` on `main`: last touched by **`a4791d4` (PR #23)** — the fourth turn is absent.
+
+So `main`'s plan-of-record still described P4b as gated by **two** issues (KHA-87/88) while the real
+gate was **seven**, and none of KHA-94/96/98/99/100/101/102 appeared anywhere in it. The code-reviewer
+caught this at the PR #30 merge by reading `main` directly instead of trusting the previous turn's
+summary. That is the right instinct and it was right.
+
+**The irony worth recording: the fourth turn diagnosed the working-tree hazard correctly and still fell
+into a different one.** Its own entry says it confirmed both files were current on `main` before editing
+them — a careful check — and then the edits sat in a stale local checkout that nothing ever committed. It
+guarded against editing a stale file. It did not guard against the edited file never leaving the machine.
+
+**The build survived this only because of a v1.4 decision.** The seven-issue gate was also encoded as
+`blocks` links in Linear, and Linear *did* persist. The engineer and reviewer worked from the links, not
+from the plan file, so P4a-1 was scoped correctly anyway. That is the v1.4 lesson — *promote a reviewer's
+prose gate into Linear links* — paying out against a failure it was not written for. Prose in a document
+that may not land is not a control; a link is.
+
+**Rule now explicit in `docs/build-plan.md` §Revision history:** a supervision turn is finished when its
+docs are **merged to `main`**, not when they are written. The next turn's first evidence check is
+`git log` on `docs/build-plan.md`.
+
+### What I verified from evidence, not memory
+
+- **`main` = `c3c4cbf`**, PR #30 merged 12:59:36Z, message enumerating the eleven closed issues, `QA: PASS
+  30` on `3620388` (byte-identical `lib/` to the merged head), CI 6/6 green on `f906c94`.
+- **No schema change.** The merge commit states the set-valued link was derived from the existing
+  `merged_into_id` column via `TransactionDao.absorbedTransactionIds`. **v1.5 budgeted for a conditional
+  schema v8 and a re-key; neither was needed.** Schema stays **v7** and R-17's free window is unspent.
+- **KHA-106 and KHA-107 read in full in Linear.** KHA-106: `blocks` KHA-7 **and** KHA-53, `Backlog`,
+  High, `needs-architecture-decision`. KHA-107: `Backlog`, Low, no blocks, related to KHA-106 and KHA-31.
+- **KHA-7 read in full.** Still `Backlog`, Urgent, never run, `blockedBy` KHA-106 as of 12:30.
+- **KHA-32 relations read.** Its `blockedBy` set is the full nine — the gate was real and bidirectional.
+- **`ci.yml` lines 54-58 read directly:** `on: pull_request: branches: [main]` / `push: branches: [main]`.
+  The QA-PR-on-a-code-branch gap is confirmed at the source, not inferred.
+- **`.claude/agents/qa-tester.md` grepped:** no `flutter analyze` / `dart format` pre-PR instruction
+  exists. The gap is real, not an agent ignoring its brief.
+- **Could not read `docs/architecture.md` ADR-008 v1.3 directly.** The file is ~168 KB, over the GitHub
+  tool's response cap, and the local copy is stale (it predates the amendment entirely). My reading of the
+  corroboration rule and the migration posture therefore rests on **QA's verbatim citations** in KHA-106
+  and KHA-107 — which quote condition 1 (purity/determinism), condition 3 (residue-safety) and the
+  consequences list — plus PR #30's merge commit. Stated plainly rather than papered over: this is one
+  step removed from the primary source, and the KHA-106 decision should be taken by the architect reading
+  the ADR itself.
+
+### The decision that mattered: KHA-106 vs. KHA-7, resolved by reading what KHA-7 actually is
+
+The conflict as posed: KHA-106 `blocks` KHA-7, on the R-16 argument that running the device spike
+populates a real `merchant` table and closes the clean-migration window that this entire fix round
+existed to protect.
+
+**The R-16 argument is correct. Its target is wrong.** KHA-7's own "Do" section specifies a *throwaway
+spike app, not production code, not merged to main*, with a synthetic sender, and its done check ends
+*spike code is deleted or kept out of the product repo*. A standalone receiver harness has **no SQLCipher
+database, no `CategorizationService`, no `ensureMerchant` call and no `merchant` table.** It cannot write
+the rows whose absence is the premise. The window closes on a **product** install that ingests one SMS
+while unlocked — which is **KHA-53**, where the block is kept.
+
+`KHA-106 blocks KHA-7` removed. `KHA-106 blocks KHA-53` retained.
+
+**The genuine hazard was in my own document, not in the link.** `docs/build-plan.md` §7.3 row 5 told the
+human the spike "should wait for P3b-3 to land, then run" — wording that invites side-loading the product
+APK to satisfy KHA-7, which is precisely the action that spends the window. Rewritten in v1.6: KHA-7 is
+harness-only, and the "no product build on hardware" constraint now sits on KHA-53 alone.
+
+**Severity re-read, so nobody over-reacts to "High".** KHA-106's residual collides only strings sharing an
+**identical non-numeric prefix** and differing solely by a trailing 4+ digit run. Two unrelated businesses
+essentially never take that shape — that was KHA-98's case (`MAKKAH BAKERY` / `MADINAH BAKERY`), and it is
+closed. What survives merges two numbered outlets **of one chain**, which the learning loop usually wants
+merged. It is correctly filed as a **rule-integrity** defect: ADR-008 v1.3 states a normative
+residue-safety condition its own implementation does not meet, and that species of silent disagreement is
+exactly how KHA-98 got past three consecutive readers. It is not a money defect and it gates no feature.
+
+**Net: nothing is waiting on KHA-106 any more.** It rides with P4b, as the issue itself proposes.
+
+### Cross-engineer conflicts
+
+None this phase, and the reason is structural rather than lucky: there is one mobile lane (R-9), no web or
+backend surface (ADR-001), and the only genuinely two-agent edge — architect → engineer on merchant
+identity — was sequenced in v1.5 and executed in that order. No `docs/api.md` exists to drift.
+
+One near-conflict worth naming: **KHA-104 defends a writer that KHA-34 is about to add** (merchant rule
+category ids validated on write, dropped on read). P4a-1 fixed it in the file it already had open, one
+phase before the caller exists. That is the "cheap while the file is open" clustering paying off.
+
+### Process gaps triaged this turn
+
+1. **Linear batch-close — extended KHA-85, did not file a new issue, raised to High.** PR #30's title
+   listed eleven `KHA-nnn` numbers; the integration closed one, and **10 of 11 were transitioned by hand**.
+   This is the inverse of KHA-85's recorded failure (wrongful close of KHA-78) but the *same configuration
+   decision*, and KHA-85's own preferred remedy — option 1, turn auto-close off and have the reviewer
+   transition deliberately — resolves both directions at once. Splitting it into two tickets would invite
+   two half-answers. Raised Medium → High because it has now cost reviewer time twice and multi-issue PRs
+   are the normal shape here (P3b-3 closed 4, P4a-1 closed 11). Done check extended: *a PR that closes N
+   issues closes all N or none.*
+2. **QA-PR-has-no-CI — filed KHA-108 (Medium), did not dispatch devops.** Confirmed at source in
+   `ci.yml`. The QA-PR-on-the-code-branch pattern should stay — it ended a six-PR streak of manual base
+   rescues — so the fix is to widen the trigger (drop the `branches` filter on `pull_request`), checking
+   the interaction with the path-filtered emulator job and the `ci` fan-in first. The cheaper complement,
+   a pre-PR `flutter analyze` in `.claude/agents/qa-tester.md`, is an **agent-configuration change and
+   therefore the human's call, not mine** — flagged in the issue, not actioned. Cost of the gap this
+   round was one CI cycle plus a two-line commit, so it does not justify an opus devops dispatch on its
+   own: **batched with KHA-85 and KHA-67 into one devops sweep after P4b.**
+
+### What changed in the plan
+
+`docs/build-plan.md` → **v1.6**: the P4b gate table rewritten from seven open rows to nine closed rows
+with what actually fixed each, plus a new two-row table for KHA-106/107 and an explicit "read this
+severity precisely" note; P4a-1 marked merged with an outcome block recording that the one-PR/two-cluster
+bet paid and that schema v8 was never needed; **R-15 retired**, R-16 downgraded to Low-Medium residual,
+R-17 updated to "window unspent, and here is the precise expiry condition"; §4 gains the
+`KHA-106/107 → first P4b PR` edge and the explicit `KHA-7 is NOT sequenced behind KHA-106` correction;
+**§7.3 row 5 rewritten** (the wording that was the hazard) and **row 11 added**; P4's exit check updated —
+seven gate clauses discharged, replaced by the KHA-106/107 rider and O-QA-8's merge confirmation; §8 index
+rows rewritten for P0, P4a-1, P4b, P10 and a new Process/infrastructure row. Plus the ⚠️ process note on
+v1.5 never landing.
+
+Linear this turn: `KHA-106 blocks KHA-7` **removed** (KHA-53 retained), with the reasoning recorded as
+comments on both issues; `owner-solution-architect` added to KHA-106; KHA-85 commented and raised to High;
+**KHA-108 created** (owner devops, P4 milestone — milestoned at creation, per the standing rule).
+
+### Cost note — this phase
+
+| Agent | Model tier | Ran |
+|---|---|---|
+| solution-architect | **opus** | ADR-008 **v1.3** corroboration-rule amendment (docs only) |
+| mobile-engineer | **opus** | P4a-1 (PR #30) — eleven issues, two clusters, one PR |
+| qa-tester | **opus** | Third adversarial round, 18 probes, `QA: PASS 30`; filed KHA-106/107 |
+| code-reviewer | **opus** | PR #30 review + merge; caught the unlanded-plan divergence by reading `main` |
+| manager (this turn) | **opus** | Supervision only: 4 docs/config reads, 8 Linear calls, 6 GitHub calls, 7 Linear writes, 0 code |
+
+**Four economics observations.** First, **the architect-first routing was the cheapest good decision of
+the phase** — one docs-only pass produced a general rule that closed four issues (KHA-98/99/100/102) and
+pre-empted the fourth instance nobody had found yet. Compare three engineer patches inventing three local
+answers. Second, **the one-PR/two-cluster bet paid exactly as argued**: eleven issues through **one** opus
+QA pass and **one** opus review pass, against a v1.5 estimate of two of each if split. Third, **the fix
+ratio improved and the stop condition was not hit** — v1.5 said that if P4a-1's gate produced a P4a-2,
+that was the signal to stop and re-scope. It produced two *non-blocking* follow-ups instead, which is a
+normal tail, not a loop. **Fix-loop count for this feature area: round 3 of 3 — and it terminated.**
+Fourth, the cheapest defect-prevention in the whole build remains **inverting probes in place** rather
+than authoring new adversarial surfaces; three consecutive rounds have now used it.
+
+**One cost that is not an agent cost:** ten manual Linear transitions and one hand-authored fix commit by
+the human orchestrator. That is the human doing integration work the tooling should do, and it is what
+KHA-85 and KHA-108 exist to remove.
+
+### Next dispatch
+
+**mobile-engineer (opus) → P4b**, off `main` @ `c3c4cbf`, after a short **solution-architect (opus)**
+docs-only pass settling **KHA-106 + KHA-107** as a dated ADR-008 **v1.4** amendment. The architect goes
+first because KHA-106 carries `needs-architecture-decision` and two of its three options amend an APPROVED
+gate-2 document — an engineer may not quietly contradict one. If the architect takes option 3 (accept and
+document), both issues close with **zero code and zero QA cost**, and P4b proceeds unencumbered.
+
+P4b = **KHA-32** (confidence + needs-review flag and count) · **KHA-33** (correction flow, scope choice,
+bulk + undo) · **KHA-34** (learned-rules screen, re-apply to history) · **KHA-97** (category management:
+S-14 list, S-15 reassignment dialog, inline "+ New category"). Hard requirements carried in: **O-QA-8's
+merge confirmation ships before or with the route**; **one audit entry per affected transaction** on
+KHA-34's bulk historical re-apply (AC-D4.4); **AC-C1.3's sum invariant** re-tested after all four category
+operations. Then qa-tester for an explicit `QA: PASS`/`FAIL`, then code-reviewer to merge on green CI +
+`QA: PASS`.
+
+**In parallel, and costing no agent time: the human may now run KHA-7** — as a throwaway harness, never a
+Massrofy APK. See build-plan §7.3 row 5.
+
+**Deferred deliberately:** KHA-85 + KHA-108 + KHA-67 as one devops-engineer sweep after P4b.
+
+---

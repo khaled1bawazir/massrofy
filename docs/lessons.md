@@ -173,3 +173,25 @@ Format per entry:
   is routed / Y exists"), then find every issue that satisfies it — do not enumerate gated issues
   from the feature area you happened to be testing. And verify a reachability claim by grepping for
   the construction site, never from the fact that the widget exists in the tree.**
+
+- **[2026-07-29] [process] A supervision turn wrote build-plan.md v1.5 to the local working tree
+  and reported it as done — it was never committed, so `main`'s plan-of-record stayed v1.4 through
+  an entire fix round.** For that whole round, `main` said P4b was gated by two issues
+  (KHA-87/88) while the real gate, expanded mid-round by that same supervision turn, was seven
+  (+ KHA-94/96/98/99/101/102). The build did not actually drift, only because the gate had
+  *also* been written as Linear `blocks` links, which persisted independently of the file. A prose
+  plan sitting uncommitted on disk is indistinguishable, to every other agent reading `main`, from
+  a plan that was never updated at all. **-> A supervision turn's docs edit is not done when the
+  file is written — it is done when the PR merges. Land it before reporting the turn complete, or
+  hand off "land these two files" as the explicit first line of the next dispatch, the way this
+  turn's report did.** (Compounds the tracker-links lesson above: the link is what actually held.)
+
+- **[2026-07-29] [process] Closing many issues from one PR title auto-closes only the subset
+  Linear has an actual link for, not everything the title names.** PR #30's title listed all
+  eleven issues it closed; only KHA-88 (the one with an assignee/link relationship) auto-closed on
+  merge. The other ten sat in `In Review` until manually transitioned. This is the mirror image of
+  the KHA-64/78/90 problem (which is *wrongful* auto-close) — filed as an extension to **KHA-85**
+  rather than a new ticket, since the same integration setting (turn auto-close off, let the
+  reviewer transition deliberately) fixes both directions at once. **-> After merging a PR that
+  closes N issues, verify N issues actually moved, not that the merge succeeded — "the PR merged"
+  is not evidence "the tracker updated."**
