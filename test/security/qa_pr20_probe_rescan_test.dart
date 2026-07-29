@@ -112,8 +112,10 @@ void main() {
     test('an edited merchant is NOT reverted to the parser\'s text', () async {
       await pipeline.runIncremental();
       final int id = (await transactionDao.all()).single.id;
-      expect((await transactionDao.byId(id)).merchantRawText,
-          'BALAD COFFEE ROASTERS');
+      expect(
+        (await transactionDao.byId(id)).merchantRawText,
+        'BALAD COFFEE ROASTERS',
+      );
 
       await editService.edit(
         id,
