@@ -52,13 +52,19 @@ import 'package:drift/drift.dart';
 /// `mergedIntoId` / `mergedFromTransactionId` (ADR-017 D2). See each column's
 /// own doc comment for why it exists rather than being derivable.
 ///
-/// **Still not here, deliberately:** foreign keys to `Category` and
-/// `Merchant` (P4 owns those tables), `isExcluded`, the fee's
+/// **P4a (KHA-30, KHA-31) adds the categorization block:** `categorySource`,
+/// `categoryConfidence`, `categoryRuleId` and `merchantId`, plus real meaning
+/// for the `categoryId` column P1 created loose. See each column's own doc
+/// comment; the short version is that AC-D2.2 ("this was categorized
+/// automatically, and here is why") is a per-row question a list has to answer
+/// without a query per row.
+///
+/// **Still not here, deliberately:** `isExcluded`, and the fee's
 /// `parentTransactionId` child-row form (ADR-009's stronger variant of PRD
 /// §3.4's "own field" — the field form ships now because the parser produces
-/// one row per message, and the child-row form is a P4 reporting decision) and
-/// categorisation confidence (P4). Each arrives with the behaviour that gives
-/// it meaning, rather than as an unused column.
+/// one row per message, and the child-row form is a P4b reporting decision).
+/// Each arrives with the behaviour that gives it meaning, rather than as an
+/// unused column.
 ///
 /// The SQL table is named `transactions` (plural) rather than the singular
 /// domain word, specifically to avoid any ambiguity with SQLite's own
@@ -83,9 +89,73 @@ class Transactions extends Table {
   TextColumn get amountCurrency => text()();
   IntColumn get amountMinor => integer()();
 
-  /// Nullable, no FK target yet (the `Category` table is P4 work) —
-  /// intentionally loose in this P1-minimal table.
+  /// The category this transaction belongs to, or **NULL for uncategorized**.
+  ///
+  /// ## One storage representation of "uncategorized", not two (AC-C1.1)
+  ///
+  /// P4a's `category` table contains a row whose id is
+  /// `CategoryIds.uncategorized`, and it would have been possible to store
+  /// that id here instead of NULL. That is precisely what this codebase does
+  /// **not** do, because it would create two encodings of one fact — NULL from
+  /// every row written before P4, the literal id from every row written after
+  /// — and every future query would have to remember both. One of them
+  /// eventually would not.
+  ///
+  /// So: **NULL is the only stored form of uncategorized**, and the *domain*
+  /// makes it explicit at read time. `CategoryResolver.resolve` maps NULL — and
+  /// any id that no longer resolves — to the Uncategorized category, which is
+  /// what makes AC-C1.1's *"never a blank"* true for every row in the table
+  /// including the ones written in P1. `CategoryDao` normalises the
+  /// Uncategorized id back to NULL on write so the invariant cannot drift.
+  ///
+  /// Left without a SQL foreign key deliberately — see
+  /// `AppDatabase._installCategoryGuardTrigger` for the mechanism that
+  /// enforces AC-C3.3 instead, and why it is not a weakening.
   TextColumn get categoryId => text().nullable()();
+
+  // --- P4a: how the category got here (KHA-30, KHA-31, ADR-008) -------------
+
+  /// `user` | `rule` | `default` | `none` — architecture §4.2's
+  /// `categorySource`.
+  ///
+  /// **AC-D2.2 is the reason this is a column.** *"An auto-categorized
+  /// transaction indicates it was categorized automatically and, ideally,
+  /// why."* A list rendering a hundred rows cannot answer "was this
+  /// automatic?" by querying the audit trail per row, so the answer lives on
+  /// the row. The audit trail remains the authority on *when and by whom*
+  /// (NFR-A2); this column is the fast, denormalised statement of the current
+  /// state — the same division of labour as `userEditedFields`.
+  ///
+  /// NULL means no categorization decision has ever been recorded for this
+  /// row, which is the honest value for every transaction written before P4a.
+  TextColumn get categorySource => text().nullable()();
+
+  /// The matcher's confidence in [categoryId], `0.0`–`1.0`.
+  ///
+  /// **`REAL` is correct here and this is not an ADR-002 violation.**
+  /// Architecture §4.2 says so explicitly: *"`categoryConfidence` is `REAL` —
+  /// this is **not money**, so a float is correct here."* Nothing is ever
+  /// summed from this column and no amount is derived from it; it feeds one
+  /// comparison against `CategorizationConfig.autoApplyThreshold`.
+  RealColumn get categoryConfidence => real().nullable()();
+
+  /// `merchant_rule.id` of the rule that produced [categoryId], when a rule
+  /// did.
+  ///
+  /// Records *which* rule fired, so AC-D2.2's "ideally why" survives the rule
+  /// later being edited or deleted — the audit entry names it too, but a row
+  /// that can state its own provenance does not need a join to be explicable
+  /// (the same argument `mergedFromTransactionId` makes for NFR-A6).
+  IntColumn get categoryRuleId => integer().nullable()();
+
+  /// The resolved `merchant.id`, when the merchant pipeline recognised or
+  /// created one.
+  ///
+  /// Nullable because plenty of transactions name no merchant at all — a
+  /// transfer names a counterparty, an ATM withdrawal names nobody. Null is
+  /// AC-B1.3's explicit unknown, never "no merchant".
+  IntColumn get merchantId =>
+      integer().nullable().customConstraint('REFERENCES merchant(id)')();
 
   // --- P2: multi-currency, with the fee kept separate ----------------------
   //

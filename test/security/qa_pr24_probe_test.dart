@@ -834,6 +834,32 @@ void main() {
         // carried descriptive fields
         'merchant_raw_text', 'reference_number', 'counterparty_name',
         'occurred_at', 'instrument_id',
+        // P4a (KHA-30/31) — the categorization block. Deliberately neither
+        // compared nor carried, and this is a *recorded* decision rather than
+        // an omission:
+        //
+        //  - `category_id` was already on this list, and the merge's own
+        //    guard (`transaction_merge.dart`, D-QA-10) **refuses** a merge
+        //    whose losing row carries a user category the survivor does not
+        //    have, rather than stranding it. P4a leaves that behaviour exactly
+        //    as P3b-3 shipped it: refusing asks the user, which is the safe
+        //    direction, and rewriting the highest-risk merge path was not
+        //    worth the reward of one fewer confirmation.
+        //  - `category_source`, `category_confidence` and `category_rule_id`
+        //    describe *how* the survivor's own category was decided. Carrying
+        //    them from another row would attach the losing row's provenance to
+        //    the survivor's category — a statement about a decision that was
+        //    never made about it.
+        //  - `merchant_id` is derived from `merchant_raw_text`, which the
+        //    merge already handles; re-deriving is the categorizer's job, and
+        //    copying a merchant identity between rows is the silent merge
+        //    AC-D2.3 forbids.
+        //
+        // None of the four is money, and none can change a total: an
+        // uncategorized survivor still appears in the Uncategorized bucket, so
+        // AC-C1.3's reconciliation is unaffected either way.
+        'category_source', 'category_confidence', 'category_rule_id',
+        'merchant_id',
         // deliberately neither: not money, not a movement identity
         'id', 'amount_minor', 'category_id', 'counterparty_bank_name',
         'time_source', 'instrument_kind', 'instrument_masked_ref',

@@ -133,6 +133,29 @@ final class LedgerTransaction {
   final String? counterpartyBankName;
   final String? referenceNumber;
 
+  // --- P4a: the categorization block (KHA-30, KHA-31) -----------------------
+
+  /// The stored `category_id`. **Null means uncategorized** — one stored
+  /// representation, resolved to the explicit *Uncategorized* category at
+  /// display time by `CategoryResolver`, which is what makes AC-C1.1's "never
+  /// a blank" true (see `transaction_table.dart`).
+  final String? categoryId;
+
+  /// `user` | `rule` | `default` | `none`, or null for a row written before
+  /// any categorization decision existed. AC-D2.2's "was this automatic?".
+  final String? categorySource;
+
+  /// `0.0`–`1.0`, or null when nothing has judged this row. Not money, so a
+  /// double is correct here (architecture §4.2).
+  final double? categoryConfidence;
+
+  /// `merchant_rule.id` of the rule that produced [categoryId] — AC-D2.2's
+  /// "and ideally why".
+  final int? categoryRuleId;
+
+  /// The resolved merchant, or null when the message named none.
+  final int? merchantId;
+
   /// The bank's own inline conversion, where the message printed one
   /// (ADR-009 prefers it over anything derived).
   final Money? convertedAmount;
@@ -220,6 +243,11 @@ final class LedgerTransaction {
     this.counterpartyName,
     this.counterpartyBankName,
     this.referenceNumber,
+    this.categoryId,
+    this.categorySource,
+    this.categoryConfidence,
+    this.categoryRuleId,
+    this.merchantId,
     this.convertedAmount,
     this.feeAmount,
     this.fxRate,

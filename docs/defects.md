@@ -14,6 +14,50 @@ KHA-64 first half), PR #11, head `51bb730`. See `docs/test-plan.md` §1a, §6a a
 
 ## Summary
 
+### Pass 6 (PR #27, P4a — the categorization spine)
+
+**No defect was found that blocks merge. Verdict: `QA: PASS 27`.** Head
+`10df548`. Every claimed gate reproduced **on that exact SHA, by QA, locally**
+(the `docs/lessons.md` rule that a gate result is evidence only for the tree it
+was measured on): `flutter analyze` clean (5.4s), `dart format --set-exit-if-changed`
+clean — **207 files, 0 changed** (the PR body says 204; the discrepancy is in the
+count, not the result, and 207 is what head `10df548` actually contains),
+`flutter test` **1190 passing / 3 skipped / 1 failing**, ADR-002 money-type guard
+clean. Flutter 3.44.8 / Dart 3.12.2. The one failure is
+`privacy_overlay_release_mode_test.dart`, confirmed pre-existing and
+environmental rather than taken on trust: it **passes** when re-run with the
+`--dart-define=dart.vm.product=true` it requires, which CI supplies as its own
+step. Evidence: `docs/evidence/qa-pr27/`.
+
+**AC-C1.3 — the money-correctness invariant — holds under every attack QA could
+construct.** Eleven adversarial compositions the engineer's fixture did not
+cover: a refund filed under a *different* category from the purchase it reverses
+(the slice must go negative, and does), the two legs of an internal transfer
+split across two categories, a category holding only unconvertible foreign
+money, `includeEmptyCategories: true` over an entirely unconvertible period, all
+four category operations applied in sequence to the same live money, ten
+concurrent creates of one name, and a hand-corrupted `category_id`. Each was
+checked twice — once via `CategoryBreakdown.reconciles`, and once by QA
+re-summing the slices independently against a category-blind `LedgerTotals.spend`.
+
+**AC-C3.3's trigger genuinely replaces `FK RESTRICT`.** Attacked with raw SQL
+that never touches the DAO, an unfiltered `DELETE FROM category` (the case a
+DAO-only guard would miss), a *soft-deleted* referring transaction, a referring
+`merchant_rule` with no transaction involved, and the protected *Uncategorized*
+row. All five refused; the bulk delete rolled back completely rather than
+partially wiping the table.
+
+**Eight defects, none merge-blocking for this PR, four of them merge-blocking
+for the P4b surfaces** (KHA-98/99/101/102 → conditions recorded as `blocks`
+links in Linear, not only in prose — the `docs/lessons.md` lesson from PR #20).
+The two that matter most are the same shape and both contradict AC-D2.3's
+absolute bar: **normalisation can collapse two unrelated merchants into one
+identity at confidence 1.00**, above every tier gate and above any value
+`autoApplyThreshold` could take — via city-name noise stripping (D-QA-27-1) and
+via a punctuation-only placeholder key (D-QA-27-7). The mechanism in the first
+case is mandated by ADR-008, so it is escalated to solution-architect rather
+than filed as an engineer error.
+
 ### Pass 5 (PR #24, P3b-3 — the merge-safety gate)
 
 **No defect was found that blocks merge. Verdict: `QA: PASS 24`.** Head
@@ -160,6 +204,249 @@ for what did surface, correctly classified as risks and gaps rather than defects
 
 *(Convention: ID, title, severity, steps to reproduce with synthetic — never real
 — data per NFR-M3, expected vs. actual, story/AC broken, linked Linear issue.)*
+
+### Pass 6 (PR #27, P4a — KHA-30 categories + KHA-31 merchant rule store), head `10df548`
+
+**Verdict: `QA: PASS 27` — no merge-blocking defect.** Eight defects found, all
+reproduced by executed probes in `test/security/qa_pr27_probe_test.dart`
+(35 probes, all passing on head `10df548`; log:
+`docs/evidence/qa-pr27/probe-suite.log`).
+
+**Why none of them blocks this PR, stated precisely rather than assumed.** P4a
+routes no screen. Rules are created *only* by an explicit user action
+(`CategorizationService.applyUserCategory` / `MerchantDao.upsertRule`), and
+there is no shipped surface that calls either. So in a build of this branch, the
+matcher can never find a rule to apply, and the auto-categorization defects
+below (D-QA-27-1/2/3/6/7) cannot fire. **One consequence of P4a *is* live in a
+shipped build**: the categorizer is wired into ingestion
+(`ingestion_providers.dart`), so `merchant` rows are created and keyed from real
+SMS from this branch onward — which is why the merchant-identity half of
+D-QA-27-1/2/7 is recorded as a **data-shape** consequence that later phases
+inherit, not merely a future risk.
+
+**Conditional gate (the `docs/lessons.md` rule about gates that live only in
+prose — these are `blocks` links in Linear, not just this paragraph):**
+D-QA-27-1, D-QA-27-2, D-QA-27-4 and D-QA-27-7 are **merge-blocking for any PR
+that routes a categorization surface** — KHA-32 (review inbox), KHA-33
+(correction flow), KHA-34 (rules screen) or KHA-97 (category management) —
+because each of those is the first build in which a user can create a rule and
+therefore the first in which an automatic categorization can be wrong.
+
+### D-QA-27-1 — the city-name noise list silently merges two unrelated businesses into ONE merchant, then auto-categorizes at confidence 1.00
+
+- **Severity:** High (behaviour), **not merge-blocking for PR #27** — see the
+  gate above. Design/architecture-level: the mechanism is mandated by ADR-008,
+  so the fix is an architecture decision, not an engineer error.
+- **Found in:** pass 6 (PR #27), PROBE B in `test/security/qa_pr27_probe_test.dart`.
+- **Affects:** `MerchantKey.noiseTokens`; ADR-008's normalisation pipeline
+  ("strip a configurable noise-token list (`BRANCH`, `STORE`, `FRC`, city names,
+  terminal ids)"); **AC-D2.3**, risk R-5, KHA-31's own done check ("an unrelated
+  merchant not matching").
+- **Root cause.** The noise list removes six Saudi city names in both scripts.
+  The implementation defends this as *"a chain's branches are the chain"*, which
+  is right for `PANDA RIYADH` / `PANDA JEDDAH`. It is wrong whenever the city
+  name is the **distinguishing** token of two independent businesses — an
+  entirely ordinary Saudi retail naming shape. Both then produce the *same*
+  `merchant_key`, so the collision happens at **T1**, above every tier gate and
+  above any value `autoApplyThreshold` could take.
+- **Steps to reproduce** (synthetic):
+  1. `MerchantKey.of('MAKKAH BAKERY')` → `'BAKERY'`.
+  2. `MerchantKey.of('MADINAH BAKERY')` → `'BAKERY'` — the same key.
+  3. Ingest a purchase from `MAKKAH BAKERY`; user categorizes it as Dining
+     (`applyUserCategory`), which creates rule M→Dining.
+  4. Ingest a purchase from `MADINAH BAKERY` and run `categorizeTransaction`.
+- **Expected (AC-D2.3):** match, or flag as low-confidence. Two unrelated
+  merchants must not be matched.
+- **Actual:** `CategorizationResult.applied`, tier `userRule`, confidence
+  `1.00`, no review flag. `merchant` holds **one** row for both businesses
+  (`merchant_key` is `UNIQUE`), whose `canonical_name` is the first raw string
+  seen — so the user is shown "MAKKAH BAKERY" for money spent at the other shop.
+- **Why this is worse than a wrong category.** A wrong category is one tap to
+  fix. Here the *identity* is merged permanently and there is no split
+  affordance anywhere in the plan, so correcting one shop re-points the other's
+  future messages too. The codebase argues at length (`merchant_table.dart`,
+  `categorization_service.dart`) that it never asserts identity on a guess —
+  and this is not a guess, it is a deterministic collision manufactured by
+  normalisation, which is exactly why no confidence gate catches it.
+- **Fix direction (for solution-architect, not the engineer alone):** strip a
+  city token only when at least one *other* significant token survives **and**
+  the resulting key is already a known merchant; or drop city names from the
+  noise list and let T3's token-set tier handle `PANDA RIYADH` ↔ `PANDA JEDDAH`
+  (Jaccard 0.5 there, so it would flag rather than apply — which is the AC's
+  stated preference). Either way P4b needs a "these are two different shops"
+  affordance, because P4a is already creating the merged rows.
+- **Linear:** KHA-98.
+
+### D-QA-27-2 — unconditional trailing-digit stripping merges numbered sibling merchants at confidence 1.00
+
+- **Severity:** Medium, not merge-blocking (same gate as D-QA-27-1).
+- **Found in:** pass 6, PROBE C.
+- **Affects:** `MerchantKey.of` step 6; ADR-008; AC-D2.3.
+- **Root cause.** The trailing-digit strip is a `while` loop with no length,
+  count or context condition, so every trailing numeric token is removed no
+  matter how many there are or what proportion of the name they were. A merchant
+  whose identity *is* its number becomes indistinguishable from its siblings.
+- **Steps to reproduce:** `MerchantKey.of('QAMART 100')`,
+  `MerchantKey.of('QAMART 200')` and `MerchantKey.of('QAMART 100 200 300')` all
+  return `'QAMART'`. Teach a rule from the first; the second auto-applies at
+  T1/1.00.
+- **Expected:** the shapes ADR-008 names (a *store/terminal/reference* number
+  appended to a name) collapse; a number that is part of the name does not.
+- **Actual:** all numeric suffixes collapse unconditionally.
+- **Note.** The code correctly protects *leading* digits (`7 ELEVEN` survives),
+  so the asymmetry is deliberate and documented; what is undocumented is that
+  the trailing case has no bound.
+- **Linear:** KHA-99.
+
+### D-QA-27-3 — a repeated-token brand name reaches Jaccard 1.0 and auto-applies another merchant's rule at exactly the threshold
+
+- **Severity:** Low.
+- **Found in:** pass 6, PROBE D.
+- **Affects:** `MerchantMatcher._jaccard` / `_tokenSetConfidence`;
+  `CategorizationConfig.autoApplyThreshold`'s documented tuning rationale.
+- **Root cause.** The PR defends 0.85 with *"a token-set match applies only at
+  Jaccard 1.0 — i.e. the two strings contain the same tokens and differ only in
+  order, spacing, case, store number or noise words"*. Jaccard is computed over
+  **sets**, so token multiplicity is invisible: `QAFE QAFE` and `QAFE` have
+  identical token sets and therefore Jaccard 1.0, though they are two different
+  names rather than one name rearranged.
+- **Steps to reproduce:** `MerchantMatcher.match('QAFE QAFE', [candidate with
+  merchantKey 'QAFE' and a user rule])` → tier `tokenSet`, confidence `0.85`,
+  `canAutoApply == true`.
+- **Expected:** the documented rationale to hold literally, i.e. T3 auto-apply
+  only for a *permutation* of the same tokens.
+- **Actual:** it also fires for a multiset difference.
+- **Fix direction:** either compare multisets, or state the multiplicity case in
+  the rationale so a later tuner is not misled by it. Genuinely marginal in
+  effect — recorded because the *documented reason for the shipped threshold*
+  is slightly stronger than what the code does, and that rationale is what a
+  future tuner will read.
+- **Linear:** KHA-100.
+
+### D-QA-27-4 — categorizing through the edit form leaves the review flag raised and teaches no rule, so the two correction surfaces disagree
+
+- **Severity:** Medium. **Merge-blocking for KHA-32/33/97** (see gate above).
+- **Found in:** pass 6, PROBE U.
+- **Affects:** `TransactionDao.applyUserEdit` (P3b-2's shipped, already-routed
+  edit form, S-16) vs `TransactionDao.setUserCategory` /
+  `CategorizationService.applyUserCategory`; **AC-C4.3**, **AC-D1.1**,
+  **AC-D2.1**.
+- **Root cause.** Two user-facing writes can set a category. `applyUserEdit`
+  correctly moves the three provenance columns and marks the field user-owned,
+  but it does **not** call `_clearCategoryReviewFlag` and it does not go through
+  the service, so no rule is learned.
+- **Steps to reproduce** (synthetic):
+  1. Ingest a purchase from `QANDA`; run `categorizeTransaction` → the row is
+     flagged `needs_review = 1`, `review_reason = 'unknown_merchant'`.
+  2. `transactionDao.applyUserEdit(id: …, categoryId: Edited('dining'))`.
+- **Expected:** AC-C4.3 — *"when the user confirms or corrects the category, the
+  flag is cleared"*. AC-D1.1 — a rule M→C exists afterwards.
+- **Actual:** `needs_review` is still `1` with `review_reason =
+  'unknown_merchant'`, and `merchant_rule` is empty. A user who corrects the
+  category from the transaction detail screen gets neither the flag cleared nor
+  the learning loop.
+- **Reachability today:** the edit form is routed and shipped (P3b-2), but the
+  *categorizer* that raises the flag only started running in P4a, so the
+  combination first becomes user-visible when a categorization surface ships.
+- **Fix direction:** route every category write through one path. Simplest
+  correct shape: `applyUserEdit` calls `_clearCategoryReviewFlag`, and the
+  detail-screen category control calls `applyUserCategory` rather than
+  `applyUserEdit`.
+- **Linear:** KHA-101.
+
+### D-QA-27-5 — deleting a category with "set to Uncategorized" leaves transactions pointing at a `category_rule_id` that no longer exists
+
+- **Severity:** Low (no money effect; AC-C1.3 verified intact by the same probe).
+- **Found in:** pass 6, PROBE X.
+- **Affects:** `CategoryDao.deleteCategory`'s `replacementId == null` branch;
+  AC-D2.2 ("and, ideally, why"), NFR-A2.
+- **Root cause.** The branch deletes every `merchant_rule` naming the doomed
+  category (defensible and documented), but does not clear the
+  `category_rule_id` / `category_source` those rules wrote onto transactions.
+- **Steps to reproduce:** create a custom category; categorize one transaction
+  into it (creating a rule); let a second transaction auto-categorize from that
+  rule; delete the category with `SetToUncategorized()`.
+- **Expected:** a row whose category was cleared should not still claim a rule
+  as its provenance.
+- **Actual:** the row has `category_id = NULL`, `category_source = 'rule'` and
+  `category_rule_id = <deleted rule id>`. A detail screen answering *"why is
+  this categorized this way"* dereferences a rule that does not exist, and the
+  audit entry's `merchant_rule:<id>` is likewise unresolvable — literally *"a
+  rule put nothing here"*.
+- **Fix direction:** in the uncategorize branch, null `category_rule_id` and set
+  `category_source = 'none'` on the repointed rows, in the same statement that
+  already rewrites `category_id`.
+- **Linear:** KHA-103.
+
+### D-QA-27-6 — a merchant rule may name a category that does not exist, and the matcher will confidently apply it
+
+- **Severity:** Low (money-safe; the resolver renders it as Uncategorized and
+  AC-C1.3 was verified to hold with the dangling id present).
+- **Found in:** pass 6, PROBE Y.
+- **Affects:** `MerchantDao.upsertRule`, `TransactionDao.setUserCategory` — no
+  validation of `category_id` against `category` on **write**. The
+  `category_no_delete_while_in_use` trigger guards only the delete direction,
+  which the PR states plainly; what it does not state is that the write
+  direction has no validation at *any* layer, only a convention that callers
+  resolve first.
+- **Steps to reproduce:** `merchantDao.upsertRule(merchantId: …, categoryId:
+  'no_such_category', source: 'user', actor: 'user')`, then ingest a matching
+  transaction and run `categorizeTransaction`.
+- **Expected:** either the rule is rejected, or the match declines to apply an
+  unresolvable category.
+- **Actual:** `CategorizationResult.applied`; the row stores
+  `category_id = 'no_such_category'` and renders as Uncategorized. The row now
+  says "categorized" while displaying "Uncategorized" — AC-C1.1's *explicit*
+  state reached by accident rather than by decision.
+- **Fix direction:** validate in `upsertRule` (it already runs inside a
+  transaction and can `SELECT` the category), or have the matcher drop
+  candidates whose `categoryId` the resolver does not know.
+- **Linear:** KHA-104.
+
+### D-QA-27-7 — a punctuation-only merchant string forms a merchant identity, so every masked-merchant message collapses onto one rule
+
+- **Severity:** Medium. **Merge-blocking for KHA-32/33/97** (same gate).
+- **Found in:** pass 6, PROBE G2.
+- **Affects:** `MerchantKey.ofOrNull` / `MerchantKey.of`'s all-noise fallback.
+- **Root cause.** `ofOrNull` documents itself as the guard against *"inventing
+  an empty-string key [which] would make every such transaction the same
+  merchant — the single most damaging silent merge available in this design"*.
+  The guard tests `key.isEmpty`, but `of()` falls back to the **folded string**
+  when every token was noise or digits, and a string made only of separator
+  characters tokenises to nothing while folding to itself. It is therefore
+  non-empty and the guard misses it.
+- **Steps to reproduce:** `MerchantKey.ofOrNull('***')` returns `'***'`;
+  `MerchantKey.ofOrNull('-*-')` returns `'-*-'`. Ingest two unrelated purchases
+  whose merchant field is `***`, categorize the first, run the categorizer on
+  the second → `applied` at confidence `1.00`, and `merchant` holds one row.
+- **Expected:** the same treatment as no merchant text at all
+  (`skippedNoMerchant`), which is what the method's own doc promises.
+- **Actual:** a placeholder becomes an identity. Acquirer strings routinely
+  carry a placeholder where the merchant name was masked or absent, so one rule
+  would categorize every masked transaction across every bank.
+- **Fix direction:** require the fallback key to contain at least one letter or
+  digit before returning it; otherwise return null.
+- **Linear:** KHA-102.
+
+### D-QA-27-8 — `applyAutomaticCategory` unlinks an existing merchant when a caller omits `merchantId`
+
+- **Severity:** Low. No caller does this today.
+- **Found in:** pass 6, PROBE AC.
+- **Affects:** `TransactionDao.applyAutomaticCategory`.
+- **Root cause.** Its user-path sibling is careful — `setUserCategory` uses
+  `Value.absent()` when `merchantId` is null *"so a caller with no merchant
+  cannot accidentally unlink one that is already there"* — but the automatic
+  path writes `merchantId: Value<int?>(merchantId)` unconditionally, so the same
+  omission clears the link instead of leaving it alone.
+- **Steps to reproduce:** categorize a transaction so it carries a
+  `merchant_id`, then call `applyAutomaticCategory(id: …, categoryId: null,
+  confidence: 0.0, actorDetail: 'no_rule_matched')` with no `merchantId`.
+- **Expected:** the existing link is preserved.
+- **Actual:** `merchant_id` becomes `NULL`.
+- **Note.** Recorded now precisely because it is the *"unguarded path with no
+  caller yet"* shape KHA-79 was about — this codebase's own stated reason for
+  guarding both layers.
+- **Linear:** KHA-105.
 
 ### D-QA-14 — a half-written money triple reads as an ABSENCE, so the gap-fill overwrites a stored money value
 

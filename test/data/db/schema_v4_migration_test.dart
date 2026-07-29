@@ -24,6 +24,7 @@ import 'package:massrofy/data/db/app_database.dart';
 
 import '../../support/plain_test_database.dart';
 import 'schema_v5_migration_test.dart' show v5TransactionColumns;
+import 'schema_v7_migration_test.dart' show rewindPastV7;
 
 /// The columns v4 adds to `transactions`, in SQL naming.
 ///
@@ -106,6 +107,9 @@ void main() {
       // branch fail on "duplicate column name" — the migration would be
       // re-adding a column the rewind did not remove. Same reasoning as
       // `schema_v3_migration_test.dart`'s own rewind list.
+      //
+      // v7's tables and columns come off through `rewindPastV7`, which also
+      // sets `user_version`, so this file never needs to know what v7 added.
       for (final String column in <String>[
         ...v4TransactionColumns,
         ...v5TransactionColumns,
@@ -114,7 +118,7 @@ void main() {
           'ALTER TABLE transactions DROP COLUMN $column;',
         );
       }
-      await db.customStatement('PRAGMA user_version = 3;');
+      await rewindPastV7(db, toVersion: 3);
       await db.close();
 
       db = AppDatabase(NativeDatabase(dbFile));

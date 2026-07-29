@@ -32,6 +32,7 @@ import 'package:massrofy/data/db/app_database.dart';
 import '../../support/plain_test_database.dart';
 import 'schema_v4_migration_test.dart' show v4TransactionColumns;
 import 'schema_v5_migration_test.dart' show v5TransactionColumns;
+import 'schema_v7_migration_test.dart' show rewindPastV7;
 
 /// The columns v3 adds to `transactions`, in SQL naming.
 const List<String> _v3TransactionColumns = <String>[
@@ -196,6 +197,9 @@ void main() {
       // while claiming `user_version = 2` would make the v3→v4 branch fail
       // with "duplicate column name" — a test failure that looks like a
       // migration bug and is not one.
+      //
+      // v7's tables and columns come off through `rewindPastV7`, which also
+      // sets `user_version`, so this file never needs to know what v7 added.
       for (final String column in <String>[
         ..._v3TransactionColumns,
         ...v4TransactionColumns,
@@ -205,7 +209,7 @@ void main() {
           'ALTER TABLE transactions DROP COLUMN $column;',
         );
       }
-      await db.customStatement('PRAGMA user_version = 2;');
+      await rewindPastV7(db, toVersion: 2);
       await db.close();
 
       // Reopening runs `onUpgrade(2 -> 3)` for real.
