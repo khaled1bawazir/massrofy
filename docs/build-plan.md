@@ -51,6 +51,11 @@ backend and there is no web surface — this is architecture, not scheduling. Th
 
 ## 4. P5 — UI, reporting and privacy controls (Epics E, F) — ACTIVE
 
+**Entry gate: KHA-112 (emulator journey walk on `main@4177199`) must PASS before P5a
+starts.** This is the first phase with screens a human can actually reach past the lock
+gate; one undetected shell defect here becomes eight reworks across P5a-c. Emulator only,
+per §6.1 — no side-load onto the real phone with ingestion live.
+
 **Owner:** mobile-engineer. 8 issues. Split into three PRs — P3 (9 issues, one PR) and P4
 (split) both showed that a single large PR buys extra review rounds.
 
@@ -61,7 +66,9 @@ backend and there is no web surface — this is architecture, not scheduling. Th
 | **P5c — privacy & history** | KHA-39 privacy/export/erase-everything, KHA-40 change-history view, KHA-86 AC-B8.3 proof, KHA-41 a11y + RTL pass | Erase-everything leaves Recently Deleted empty and unrecoverable (KHA-86). Every screen renders in Arabic RTL and English LTR at the largest OS font size with no truncation. |
 
 **Sequencing:** P5a → P5b → P5c. KHA-41 runs last by construction — it audits the others.
-**KHA-36 is unblocked:** its only blocker, KHA-101, closed with PR #30.
+**KHA-36 is unblocked:** all three `blockedBy` links are closed — KHA-101 (PR #30), KHA-23,
+and KHA-6 (the stale gate-2 Penpot-frames ticket, closed 2026-07-29; the substantive design
+work it names was done via HTML mockups instead and human-approved at gate 2 long ago).
 
 **Banking-domain watch items for P5 review:**
 - No cached totals that can drift from the ledger (NFR-A6). If caching is needed for
@@ -108,10 +115,11 @@ Only constraints that are still load-bearing. Retired risks removed (see git for
    reviewer" is convention, not server-enforced. Compensating: code-reviewer is the only
    agent permitted to merge; manager is explicitly forbidden from merging.
 
-4. **Runtime verification gap — being closed now, see §7.** The app lock *has* been passed
-   on real hardware (KHA-71, KHA-75, both fixed and device-verified on an Honor Magic V5).
-   What has never happened is a journey walk **past** the lock, because until PR #34 there
-   were no screens past `HomePlaceholderScreen`.
+4. **Runtime verification gap — closed by KHA-112 (High, qa-tester), see §4 and §7.** The
+   app lock *has* been passed on real hardware (KHA-71, KHA-75, both fixed and
+   device-verified on an Honor Magic V5). What has never happened is a journey walk
+   **past** the lock, because until PR #34 there were no screens past
+   `HomePlaceholderScreen`. KHA-112 is the P5 entry gate — if it fails, P5a does not start.
 
 ---
 
@@ -119,8 +127,9 @@ Only constraints that are still load-bearing. Retired risks removed (see git for
 
 | Issue | Pri | Owner | Note |
 |---|---|---|---|
-| KHA-108 | Med | devops | CI never runs on a QA-artifact PR based on a code branch. Has now cost two QA rounds (PR #28, #35 showed zero checks). |
-| KHA-85 | High | devops | Linear PR linkback silently closes **future** work when a QA-artifact PR merges. |
+| KHA-112 | High | qa-tester | **P5 entry gate** — emulator journey walk on `main@4177199`. Gates P5a; see §4. |
+| KHA-108 | Med | devops | CI never runs on a QA-artifact PR based on a code branch. Fix in PR #37 (In Review). |
+| KHA-85 | — | devops | **Canceled** — accepted risk, no repo/workflow lever exists (Linear's fix is Business-tier only). Mitigation: code-reviewer verifies Linear state manually after every merge. |
 | KHA-109 | Med | architect | All-digit merchant strings key on their leading digit run. Inside the §6.1 window. |
 | KHA-110 | Low | mobile | Category picker "Recent" row renders but nothing supplies it. |
 | KHA-111 | Low | architect | ADR-008 v1.4's disclosed-cost description understates its scope. Doc-only; behaviour is correct. |
