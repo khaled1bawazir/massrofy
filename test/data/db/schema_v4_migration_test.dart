@@ -23,6 +23,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:massrofy/data/db/app_database.dart';
 
 import '../../support/plain_test_database.dart';
+import 'schema_v5_migration_test.dart' show v5TransactionColumns;
 
 /// The columns v4 adds to `transactions`, in SQL naming.
 ///
@@ -51,11 +52,13 @@ void main() {
     setUp(() => db = openPlainTestDatabase());
     tearDown(() async => db.close());
 
-    test('reports schemaVersion 4', () {
-      // The one place the *current* version is pinned. See the note in
-      // `schema_v3_migration_test.dart` about why the older files no longer
-      // assert an exact number.
-      expect(db.schemaVersion, 4);
+    test('reports a schema version of at least 4', () {
+      // No longer an exact number. `schema_v5_migration_test.dart` is now the
+      // one place the *current* version is pinned; this file's job is to
+      // assert that v4's own additions survive, which stays true at every
+      // later version. Pinning an exact number in every migration file means
+      // each new schema version breaks every older test for no reason.
+      expect(db.schemaVersion, greaterThanOrEqualTo(4));
     });
 
     test('every v4 column is present on transactions', () async {
@@ -98,7 +101,15 @@ void main() {
         "VALUES ('NORTHWIND SOFTWARE', '120', 'USD', 12000, '3.7510');",
       );
 
-      for (final String column in v4TransactionColumns) {
+      // Everything v4 *and later* added has to come off. Leaving v5's columns
+      // in place while claiming `user_version = 3` would make the v4→v5
+      // branch fail on "duplicate column name" — the migration would be
+      // re-adding a column the rewind did not remove. Same reasoning as
+      // `schema_v3_migration_test.dart`'s own rewind list.
+      for (final String column in <String>[
+        ...v4TransactionColumns,
+        ...v5TransactionColumns,
+      ]) {
         await db.customStatement(
           'ALTER TABLE transactions DROP COLUMN $column;',
         );

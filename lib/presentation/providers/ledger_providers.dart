@@ -24,12 +24,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/dao/bank_dao.dart';
 import '../../data/dao/instrument_dao.dart';
 import '../../data/db/app_database.dart';
+import '../../features/ingestion/review_queue.dart';
 import '../../features/ledger/bank_directory.dart';
 import '../../features/ledger/bank_tree.dart';
+import '../../features/ledger/internal_transfer.dart';
+import '../../features/ledger/internal_transfer_decision.dart';
 import '../../features/ledger/ledger_entity_resolver.dart';
 import '../../features/ledger/ledger_mapping.dart';
 import '../../features/ledger/ledger_transaction.dart';
+import '../../features/ledger/manual_entry.dart';
 import '../../features/ledger/period_totals.dart';
+import '../../features/ledger/transaction_edit.dart';
+import '../../features/ledger/transaction_merge.dart';
 import '../../features/ledger/unparsed_completion.dart';
 import '../../features/parsing/rule_pack.dart';
 import 'app_providers.dart';
@@ -238,3 +244,250 @@ unparsedCompletionServiceProvider = FutureProvider<UnparsedCompletionService?>((
     rawMessageDao: session.rawMessageDao,
   );
 });
+
+// -----------------------------------------------------------------------
+// P3b-2 — the mutation surface (KHA-26, KHA-64, KHA-74, KHA-78, KHA-80)
+//
+// Every service below writes to the ledger, so every one of them is null
+// while the app is locked. That is not defensive coding: ADR-005 makes the
+// lock cryptographic, so there is genuinely no database to write to, and a
+// screen holding a stale service across a lock event would be holding a
+// closed connection.
+// -----------------------------------------------------------------------
+
+/// **US-B4** — the manual-entry write path (KHA-26).
+final FutureProvider<ManualEntryService?> manualEntryServiceProvider =
+    FutureProvider<ManualEntryService?>((Ref ref) async {
+      final UnlockedDatabaseSession? session = await ref.watch(
+        unlockedDatabaseSessionProvider.future,
+      );
+      return session == null
+          ? null
+          : ManualEntryService(transactionDao: session.transactionDao);
+    });
+
+/// **US-B5/B6/B8** — edit, soft delete and restore (KHA-26).
+final FutureProvider<TransactionEditService?> transactionEditServiceProvider =
+    FutureProvider<TransactionEditService?>((Ref ref) async {
+      final UnlockedDatabaseSession? session = await ref.watch(
+        unlockedDatabaseSessionProvider.future,
+      );
+      return session == null
+          ? null
+          : TransactionEditService(
+              database: session.database,
+              transactionDao: session.transactionDao,
+            );
+    });
+
+/// **ADR-017 D2** — the enrichment merge (KHA-64).
+///
+/// This provider is the *only* place the merge service is constructed in
+/// production, which is what keeps risk R-8's "never automatic" property
+/// checkable: an automatic merge would need a background caller, and a
+/// background caller would need to appear here.
+final FutureProvider<TransactionMergeService?> transactionMergeServiceProvider =
+    FutureProvider<TransactionMergeService?>((Ref ref) async {
+      final UnlockedDatabaseSession? session = await ref.watch(
+        unlockedDatabaseSessionProvider.future,
+      );
+      return session == null
+          ? null
+          : TransactionMergeService(
+              database: session.database,
+              transactionDao: session.transactionDao,
+            );
+    });
+
+/// **AC-B11.2** — the user's verdict on an internal transfer (KHA-78).
+final FutureProvider<InternalTransferDecisionService?>
+internalTransferDecisionServiceProvider =
+    FutureProvider<InternalTransferDecisionService?>((Ref ref) async {
+      final UnlockedDatabaseSession? session = await ref.watch(
+        unlockedDatabaseSessionProvider.future,
+      );
+      return session == null
+          ? null
+          : InternalTransferDecisionService(
+              transactionDao: session.transactionDao,
+            );
+    });
+
+/// **S-44 — Recently Deleted** (US-B8), including rows a merge absorbed.
+///
+/// [RecentlyDeletedView.mergedInto] lets the screen label a merged row as
+/// merged rather than as deleted; see `recently_deleted_screen.dart` for why
+/// that distinction matters to a user looking for reassurance that nothing was
+/// lost.
+final StreamProvider<RecentlyDeletedView> recentlyDeletedProvider =
+    StreamProvider<RecentlyDeletedView>((Ref ref) async* {
+      final UnlockedDatabaseSession? session = await ref.watch(
+        unlockedDatabaseSessionProvider.future,
+      );
+      if (session == null) {
+        yield RecentlyDeletedView.empty;
+        return;
+      }
+      final LedgerDaos? daos = await ref.watch(ledgerDaosProvider.future);
+
+      await for (final List<TransactionRow> rows
+          in session.transactionDao.watchDeleted()) {
+        final Map<int, LedgerInstrument> byId = <int, LedgerInstrument>{
+          if (daos != null)
+            for (final InstrumentRow row in await daos.instrumentDao.all())
+              row.id: toLedgerInstrument(row),
+        };
+        yield RecentlyDeletedView(
+          transactions: toLedgerTransactions(rows, instrumentsById: byId),
+          mergedInto: <int, int>{
+            for (final TransactionRow row in rows)
+              if (row.mergedIntoId != null) row.id: row.mergedIntoId!,
+          },
+        );
+      }
+    });
+
+/// What S-44 renders.
+class RecentlyDeletedView {
+  final List<LedgerTransaction> transactions;
+
+  /// Transaction id → the survivor it was merged into. Absent for rows the
+  /// user deleted directly.
+  final Map<int, int> mergedInto;
+
+  const RecentlyDeletedView({
+    required this.transactions,
+    required this.mergedInto,
+  });
+
+  static const RecentlyDeletedView empty = RecentlyDeletedView(
+    transactions: <LedgerTransaction>[],
+    mergedInto: <int, int>{},
+  );
+}
+
+/// **S-18's transfer tab and data-integrity banner** — AC-B11.2 (KHA-78,
+/// KHA-80) and KHA-74.
+///
+/// ## Why this is derived here rather than read from a column
+///
+/// The transfer states are **derived at read time** over the whole live set
+/// (`internal_transfer.dart` explains why: the two legs routinely arrive hours
+/// apart, so a decision taken at ingestion would have to be revisited). The
+/// Needs Review inbox previously read only the persisted `needsReview` column,
+/// which is exactly why derived candidates never reached it — KHA-78's
+/// finding. Running the detector here, over the same stream every total is
+/// computed from, is what makes the inbox agree with the figures.
+///
+/// A transfer with a **persisted** decision is absent from this list, because
+/// `InternalTransferAnalysis` suppresses both the derived state and the
+/// unpairable reason once the user has ruled. That is the durability KHA-78
+/// asks for, observed from the outside.
+final StreamProvider<ReviewInboxView> reviewInboxProvider =
+    StreamProvider<ReviewInboxView>((Ref ref) async* {
+      final UnlockedDatabaseSession? session = await ref.watch(
+        unlockedDatabaseSessionProvider.future,
+      );
+      if (session == null) {
+        yield ReviewInboxView.empty;
+        return;
+      }
+      final LedgerDaos? daos = await ref.watch(ledgerDaosProvider.future);
+
+      await for (final List<TransactionRow> rows
+          in session.transactionDao.watchLive()) {
+        final Map<int, LedgerInstrument> byId = <int, LedgerInstrument>{
+          if (daos != null)
+            for (final InstrumentRow row in await daos.instrumentDao.all())
+              row.id: toLedgerInstrument(row),
+        };
+
+        // KHA-74: `mapLedgerTransactions` reports what it could not read
+        // instead of dropping it silently.
+        final LedgerMappingOutcome outcome = mapLedgerTransactions(
+          rows,
+          instrumentsById: byId,
+        );
+        yield ReviewInboxView(
+          transfers: buildTransferReviewItems(outcome.transactions),
+          unreadable: outcome.unreadable,
+        );
+      }
+    });
+
+/// What S-18 needs beyond the two lists P2 already fed it.
+class ReviewInboxView {
+  final List<TransferReviewItem> transfers;
+  final List<UnreadableTransaction> unreadable;
+
+  const ReviewInboxView({required this.transfers, required this.unreadable});
+
+  static const ReviewInboxView empty = ReviewInboxView(
+    transfers: <TransferReviewItem>[],
+    unreadable: <UnreadableTransaction>[],
+  );
+}
+
+/// Turns the detector's output into review-inbox cards.
+///
+/// Exposed (rather than private) so it can be tested directly over a list of
+/// [LedgerTransaction]s with no database at all — the same discipline the rest
+/// of `features/ledger` follows.
+///
+/// A **pair** yields one card, not two: the two legs are one movement and one
+/// decision, and offering the same question twice would let a user confirm one
+/// side and reject the other. The outgoing leg carries the card because it is
+/// the one inflating the spend figure the user is looking at.
+List<TransferReviewItem> buildTransferReviewItems(
+  List<LedgerTransaction> transactions,
+) {
+  final InternalTransferAnalysis analysis = InternalTransferDetector.analyze(
+    transactions,
+  );
+  final Map<int, LedgerTransaction> byId = <int, LedgerTransaction>{
+    for (final LedgerTransaction txn in transactions) txn.id: txn,
+  };
+
+  final List<TransferReviewItem> items = <TransferReviewItem>[];
+
+  // KHA-78 — pairs the detector found but cannot prove.
+  for (final InternalTransferLink link in analysis.links) {
+    final LedgerTransaction? out = byId[link.outTransactionId];
+    if (out == null ||
+        analysis.stateFor(out) != InternalTransferState.candidate) {
+      continue;
+    }
+    items.add(
+      TransferReviewItem(
+        transactionId: link.outTransactionId,
+        counterpartTransactionId: link.inTransactionId,
+        groupId: link.groupId,
+        amount: out.amount.toCanonicalString(),
+        currencyCode: out.amount.currencyCode,
+        counterpartyName: out.counterpartyName,
+        occurredAt: out.occurredAt,
+      ),
+    );
+  }
+
+  // KHA-80 — transfers that could not be paired at all. One card per
+  // transaction, since by definition there is no pair to speak for.
+  for (final LedgerTransaction txn in transactions) {
+    final TransferReviewReason? reason = analysis.unpairableReasonFor(txn);
+    if (reason == null) {
+      continue;
+    }
+    items.add(
+      TransferReviewItem(
+        transactionId: txn.id,
+        amount: txn.amount.toCanonicalString(),
+        currencyCode: txn.amount.currencyCode,
+        counterpartyName: txn.counterpartyName,
+        occurredAt: txn.occurredAt,
+        unpairableReasonKey: TransferReviewReasonKey.forReason(reason),
+      ),
+    );
+  }
+
+  return items;
+}

@@ -139,3 +139,60 @@ final class FlaggedTransactionItem {
   @override
   String toString() => 'FlaggedTransactionItem(#$transactionId)';
 }
+
+/// **KHA-78 / KHA-80 — a transfer awaiting the user's judgement.**
+///
+/// A third item type, and a third tab, rather than more rows in the
+/// low-confidence list. design.md S-18's rule is *"never conflated"*, and the
+/// reason generalises: each tab asks the user one kind of question. Unparsed
+/// messages ask for **facts** the app is missing. Duplicate flags ask *"are
+/// these the same thing?"*. A transfer asks *"is this account yours?"* — a
+/// question about the world outside the app, which no amount of parsing could
+/// ever answer. Mixing it in with duplicates would put two unrelated decisions
+/// under one heading and make both slower.
+final class TransferReviewItem {
+  final int transactionId;
+
+  /// The other leg, when the detector found a pair (KHA-78's candidate case).
+  /// **Null for KHA-80's unpairable case** — a cross-currency near-match or a
+  /// leg whose instrument never resolved — where there is no second row to act
+  /// on together with this one.
+  final int? counterpartTransactionId;
+
+  /// `InternalTransferLink.groupId` for a pair; null when unpairable.
+  final String? groupId;
+
+  /// Exact decimal string plus currency, never a `double` (ADR-002).
+  final String amount;
+  final String currencyCode;
+
+  final String? counterpartyName;
+  final DateTime? occurredAt;
+
+  /// Null for a paired candidate (the app found a partner but cannot prove
+  /// it); set for KHA-80's unpairable cases, so the card can explain which
+  /// specific thing stopped the match.
+  final String? unpairableReasonKey;
+
+  const TransferReviewItem({
+    required this.transactionId,
+    required this.amount,
+    required this.currencyCode,
+    this.counterpartTransactionId,
+    this.groupId,
+    this.counterpartyName,
+    this.occurredAt,
+    this.unpairableReasonKey,
+  });
+
+  /// True when both legs are known, so confirming can exclude the pair.
+  ///
+  /// When false, only rejection is offered — see
+  /// `InternalTransferDecisionService.dismissUnpairable` for why confirming a
+  /// single leg would produce figures that reconcile with nothing.
+  bool get isPair => counterpartTransactionId != null && groupId != null;
+
+  /// No amount, no counterparty (NFR-S4).
+  @override
+  String toString() => 'TransferReviewItem(#$transactionId, pair: $isPair)';
+}

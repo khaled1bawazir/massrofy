@@ -104,4 +104,42 @@ abstract final class TransactionType {
   /// The two transfer types, which are the only ones an internal-transfer
   /// pair can be made of (`internal_transfer.dart`).
   static const Set<String> transferTypes = <String>{transferOut, transferIn};
+
+  /// Types that a **data-entry form** should record with `affectsSpend:
+  /// false` (US-B10/B11).
+  ///
+  /// ## This is the form's default, not the classifier's answer
+  ///
+  /// `SpendClassification` is what actually decides whether a movement counts
+  /// toward spend, and it derives that from the type and direction rather than
+  /// trusting the stored boolean — a rule pack may say "this is not spend" and
+  /// be believed, but may not say "this internal transfer *is* spend". This
+  /// set exists only so a form writing a new row starts it out with a sensible
+  /// `affects_spend` value instead of asking the person a question that has an
+  /// objective answer.
+  ///
+  /// **[transferOut] is deliberately absent**, and it was wrongly present in
+  /// P3a's S-19 form. A transfer moves the user's own money only when it is
+  /// *internal*, and whether it is internal is a property of the **pair**,
+  /// which a form filling in one leg cannot possibly know (AC-B11.2, risk
+  /// R-7). Including it meant every hand-entered outgoing transfer — including
+  /// a genuine payment to a third party — was silently dropped from spend.
+  static const Set<String> nonSpendTypes = <String>{
+    cardRepayment,
+    transferIn,
+    salaryIncome,
+    // AC-B10.2 — cash out is not spend until the user records what it bought.
+    withdrawal,
+  };
+
+  /// The types whose natural direction is money *arriving* (US-B7, AC-B10.1).
+  ///
+  /// A form uses this to set the direction control alongside the type, because
+  /// direction is the only place the sign lives and getting it wrong is
+  /// getting the total wrong (`lib/core/money/sign_convention.dart`).
+  static const Set<String> creditTypes = <String>{
+    refund,
+    transferIn,
+    salaryIncome,
+  };
 }

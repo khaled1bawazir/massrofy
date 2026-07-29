@@ -31,6 +31,7 @@ import 'package:massrofy/data/db/app_database.dart';
 
 import '../../support/plain_test_database.dart';
 import 'schema_v4_migration_test.dart' show v4TransactionColumns;
+import 'schema_v5_migration_test.dart' show v5TransactionColumns;
 
 /// The columns v3 adds to `transactions`, in SQL naming.
 const List<String> _v3TransactionColumns = <String>[
@@ -198,6 +199,7 @@ void main() {
       for (final String column in <String>[
         ..._v3TransactionColumns,
         ...v4TransactionColumns,
+        ...v5TransactionColumns,
       ]) {
         await db.customStatement(
           'ALTER TABLE transactions DROP COLUMN $column;',

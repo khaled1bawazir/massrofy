@@ -532,4 +532,225 @@ class AppLocalizationsAr extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get manualEntryTitle => 'إضافة معاملة';
+
+  @override
+  String get manualEntryIntro =>
+      'للنقد، أو لأي معاملة لم يرسل بنكك رسالة عنها.';
+
+  @override
+  String get manualEntrySave => 'حفظ المعاملة';
+
+  @override
+  String get manualEntryAmountLabel => 'المبلغ';
+
+  @override
+  String get manualEntryAmountMissing => 'أدخل المبلغ لحفظ هذه المعاملة';
+
+  @override
+  String get manualEntryAmountUnparsable =>
+      'هذا ليس مبلغاً يمكن للتطبيق قراءته — استخدم أرقاماً وفاصلة عشرية واحدة على الأكثر';
+
+  @override
+  String get manualEntryCurrencyLabel => 'العملة';
+
+  @override
+  String get manualEntryCurrencyMissing =>
+      'أدخل رمز عملة من ثلاثة أحرف، مثل SAR';
+
+  @override
+  String get manualEntryDateLabel => 'وقت حدوثها';
+
+  @override
+  String get manualEntryDateMissing => 'اختر تاريخ ووقت حدوث المعاملة';
+
+  @override
+  String get manualEntryTypeLabel => 'نوع المعاملة';
+
+  @override
+  String get manualEntryTypeMissing => 'اختر نوع هذه المعاملة';
+
+  @override
+  String get manualEntryMerchantLabel => 'المتجر أو الوصف';
+
+  @override
+  String get manualEntrySourceLabel => 'الدفع عبر';
+
+  @override
+  String get manualEntrySourceCash => 'نقداً';
+
+  @override
+  String get manualEntryCashNote =>
+      'المعاملات النقدية تُحتسب في إجمالياتك تماماً كمعاملات البطاقة.';
+
+  @override
+  String get manualEntrySaved => 'تمت إضافة المعاملة';
+
+  @override
+  String get txnEditTitle => 'تعديل المعاملة';
+
+  @override
+  String get txnEditSave => 'حفظ التعديلات';
+
+  @override
+  String get txnEditSaved => 'تم حفظ التعديلات';
+
+  @override
+  String get txnEditNoChanges => 'لم يتم تغيير أي شيء';
+
+  @override
+  String txnEditOriginalValue(String value) {
+    return 'القيمة المكتشفة أصلاً: $value';
+  }
+
+  @override
+  String get txnEditOriginalValueEmpty => 'القيمة المكتشفة أصلاً: لا شيء';
+
+  @override
+  String get txnEditProtectedFromRescan =>
+      'تعديلك محفوظ — إعادة قراءة الرسالة لن تستبدله';
+
+  @override
+  String get txnDeleteAction => 'حذف';
+
+  @override
+  String get txnDeleteConfirmTitle => 'حذف هذه المعاملة؟';
+
+  @override
+  String get txnDeleteConfirmBody =>
+      'ستُزال من قوائمك وإجمالياتك، وتُنقل إلى المحذوفات مؤخراً. يمكنك استعادتها من هناك.';
+
+  @override
+  String get txnDeleteConfirmCancel => 'الاحتفاظ بها';
+
+  @override
+  String get txnDeleteConfirmAccept => 'حذف';
+
+  @override
+  String get txnDeleted => 'تم حذف المعاملة';
+
+  @override
+  String get txnDeletedUndo => 'تراجع';
+
+  @override
+  String get txnRestoreAction => 'استعادة';
+
+  @override
+  String get txnRestored => 'تمت استعادة المعاملة';
+
+  @override
+  String get recentlyDeletedTitle => 'المحذوفات مؤخراً';
+
+  @override
+  String get recentlyDeletedIntro =>
+      'تُحفظ المعاملات المحذوفة هنا ولا تُحتسب في أي إجمالي. «محو كل شيء» وحده يزيلها نهائياً.';
+
+  @override
+  String get recentlyDeletedEmpty => 'لم يُحذف أي شيء';
+
+  @override
+  String get recentlyDeletedEmptyBody =>
+      'ستظهر هنا المعاملات التي تحذفها كي تتمكن من استعادتها.';
+
+  @override
+  String recentlyDeletedOn(String when) {
+    return 'حُذفت $when';
+  }
+
+  @override
+  String recentlyDeletedMergedInto(int id) {
+    return 'دُمجت في المعاملة رقم $id';
+  }
+
+  @override
+  String get reviewTransferCandidateTitle =>
+      'هل كان هذا تحويلاً إلى حسابك الخاص؟';
+
+  @override
+  String get reviewTransferConfirm => 'نعم، إلى حسابي';
+
+  @override
+  String get reviewTransferReject => 'لا، إلى شخص آخر';
+
+  @override
+  String get reviewTransferConfirmed => 'مستثنى من الإنفاق — طرفا التحويل معاً';
+
+  @override
+  String get reviewTransferRejected => 'احتُسب كدفعة — لن نسأل عن هذه مرة أخرى';
+
+  @override
+  String get reviewTransferCrossCurrency =>
+      'حدث تحويل بعملة أخرى في الوقت نفسه تقريباً. لا يمكننا مطابقتهما دون اختراع سعر صرف، لذلك ما زال كلاهما محتسباً.';
+
+  @override
+  String get reviewTransferUnresolvedInstrument =>
+      'وصل تحويل مطابق في الوقت نفسه تقريباً، لكن تعذّر علينا تحديد الحساب الذي وصل إليه، لذلك ما زال هذا محتسباً كإنفاق.';
+
+  @override
+  String get reviewTransferDismiss => 'ليس تحويلاً داخلياً';
+
+  @override
+  String get reviewDuplicateTitle => 'هل هاتان المعاملتان نفس المعاملة؟';
+
+  @override
+  String get reviewDuplicateBody =>
+      'كلتاهما محتسبة في إجمالياتك حتى تقرر. الدمج يُبقي واحدة وينقل الأخرى إلى المحذوفات مؤخراً — لا يُتلف شيء.';
+
+  @override
+  String get reviewDuplicateMerge => 'نعم، ادمجهما';
+
+  @override
+  String get reviewDuplicateKeepBoth => 'لا، احتفظ بكلتيهما';
+
+  @override
+  String get reviewDuplicateMerged =>
+      'تم الدمج — معاملة واحدة الآن، ويمكن تتبّعها إلى كلتا الرسالتين';
+
+  @override
+  String get reviewDuplicateKeptBoth => 'تم الاحتفاظ بكلتيهما';
+
+  @override
+  String get reviewMergeRefusedAmount =>
+      'المبلغان مختلفان، لذلك لا يمكن أن تكونا نفس المعاملة';
+
+  @override
+  String get reviewMergeRefusedDirection =>
+      'إحداهما وارد والأخرى صادر، لذلك لا يمكن دمجهما';
+
+  @override
+  String get reviewMergeRefusedType =>
+      'هاتان معاملتان من نوعين مختلفين، لذلك لا يمكن دمجهما';
+
+  @override
+  String get reviewMergeRefusedState =>
+      'إحداهما لم تعد نشطة، لذلك لا يوجد ما يُدمج';
+
+  @override
+  String get reviewDataProblemTitle => 'تعذّرت قراءة إحدى المعاملات';
+
+  @override
+  String reviewDataProblemBody(int id) {
+    return 'المعاملة رقم $id مخزَّنة بمبلغ لا يستطيع التطبيق قراءته، لذلك هي غائبة عن إجمالياتك. لم يُغيَّر أو يُحذف أي شيء. استعادة نسخة احتياطية هي أأمن طريقة لاستردادها.';
+  }
+
+  @override
+  String reviewDataProblemCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count معاملة غائبة عن إجمالياتك',
+      many: '$count معاملة غائبة عن إجمالياتك',
+      few: '$count معاملات غائبة عن إجمالياتك',
+      two: 'معاملتان غائبتان عن إجمالياتك',
+      one: 'معاملة واحدة غائبة عن إجمالياتك',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String needsReviewTabTransfers(int count) {
+    return 'تحويلات ($count)';
+  }
 }

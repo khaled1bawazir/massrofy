@@ -79,56 +79,75 @@ void main() {
       expect(await dao.all(), isEmpty);
     });
 
-    test('**GAP**: TransactionDao.create() still stores a negative amount, '
-        'with a valid audit entry — the invariant is NOT enforced at every '
-        'write boundary', () async {
-      // The PR body says "There is no negative number anywhere in the
-      // transaction table" and "TransactionDao refuses a negative magnitude
-      // at the write boundary". `create()` is a third public write path on
-      // the same DAO and it carries no `checkMovementAmount` guard.
-      final int id = await dao.create(
-        amount: Money.parse('-1.500', currency: 'KWD'),
-        actor: 'user',
-      );
-      final TransactionRow row = await dao.byId(id);
-
-      // If this expectation ever fails, the gap has been closed and this
-      // probe should be deleted.
+    // -------------------------------------------------------------------
+    // **CLOSED IN P3b-2 (KHA-79).** These two probes originally documented
+    // the gap: `create()` was a third public write path with no
+    // `checkMovementAmount` guard, so a negative magnitude reached the
+    // transactions table carrying a well-formed audit entry, indistinguishable
+    // downstream from a legitimate row.
+    //
+    // The probes are **kept and inverted rather than deleted**, deliberately.
+    // A defect that was found once can be reintroduced, and the cheapest
+    // guard against that is the reproduction that found it, still running,
+    // now asserting the opposite. Deleting them would leave the fix defended
+    // only by tests written by the person who wrote the fix.
+    // -------------------------------------------------------------------
+    test('CLOSED (KHA-79): TransactionDao.create() now rejects a negative '
+        'amount — the invariant holds at every write boundary', () async {
+      // Note the assertion form. `checkMovementAmount` throws synchronously,
+      // before the Future is constructed, so `expectLater(future, ...)` would
+      // not catch it — a trap QA hit while writing the original probe.
       expect(
-        row.amountAmount,
-        '-1.5',
-        reason: 'a negative magnitude reached the transactions table',
+        () => dao.create(
+          amount: Money.parse('-1.500', currency: 'KWD'),
+          actor: 'user',
+        ),
+        throwsA(isA<ArgumentError>()),
       );
-      expect(row.amountMinor, -1500);
 
-      // And it is indistinguishable from a legitimate row: the audit entry
-      // is well-formed, so nothing downstream can tell it apart.
-      expect(
-        await auditLogDao.queryFor('transaction', id.toString()),
-        isNotEmpty,
-      );
+      // And the rejection is total: no row, and no audit entry to make a bad
+      // row look legitimate.
+      expect(await dao.all(), isEmpty);
+      expect(await auditLogDao.queryFor('transaction', '1'), isEmpty);
     });
 
-    test('a negative row written through create() then inverts a spend '
-        'total — the exact O-QA-2 shape, still reachable', () async {
-      await dao.create(
-        amount: Money.parse('-50.00', currency: 'SAR'),
-        actor: 'user',
-      );
-      // Modelled as the mapper would present it: a debit carrying a negative
-      // magnitude. `signedForSpend` applies +1 for a debit, so the stored
-      // sign survives into the total.
-      final PeriodTotals totals = LedgerTotals.spend(<LedgerTransaction>[
+    test('CLOSED (KHA-79): the O-QA-2 sign-inversion shape is no longer '
+        'reachable through any DAO write path', () async {
+      // Every public write path on this DAO is now guarded. The arithmetic
+      // below is what a negative magnitude WOULD do to a total if one ever
+      // reached storage — kept as the statement of why the guard matters,
+      // constructed as a pure domain value rather than from the database,
+      // because the database can no longer produce it.
+      final PeriodTotals hypothetical = LedgerTotals.spend(<LedgerTransaction>[
         tx(id: 1, amount: '-50.00', at: DateTime.utc(2026, 7, 20)),
       ], period: july2026);
       expect(
-        totals.base!.toCanonicalString(),
+        hypothetical.base!.toCanonicalString(),
         '-50',
         reason:
-            'a debit of a negative amount still reduces spend — the defect '
-            'O-QA-2 described, unreachable via ingestion/completion but '
-            'reachable via create()',
+            'a debit carrying a negative magnitude would still invert spend — '
+            'which is precisely why no write path may store one',
       );
+
+      // The reachable half: all three DAO write paths refuse it.
+      expect(
+        () => dao.create(
+          amount: Money.parse('-50.00', currency: 'SAR'),
+          actor: 'user',
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+      expect(
+        () => dao.insertManual(
+          amount: Money.parse('-50.00', currency: 'SAR'),
+          occurredAt: DateTime.utc(2026, 7, 20),
+          direction: 'debit',
+          transactionType: 'pos_purchase',
+          affectsSpend: true,
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+      expect(await dao.all(), isEmpty);
     });
   });
 
@@ -233,15 +252,21 @@ void main() {
         '2000',
         reason: 'unpaired: over-stated, which is the documented safe bias',
       );
-      // But it is NOT flagged for review, so the user is never told this
-      // figure may include a transfer to themselves.
+      // **CLOSED IN P3b-2 (KHA-80).** The over-statement was always the safe
+      // direction to be wrong in, but AC-B11.2 asks for "flagged for review
+      // rather than silently classified either way" — and the flag did not
+      // exist, so the user was never told the figure might include a transfer
+      // to themselves. `InternalTransferDetector`'s near-match pass now
+      // raises `TransferReviewReason.unresolvedInstrument` for exactly this
+      // shape. Both legs are counted: the outgoing one inflates spend, the
+      // incoming one inflates income.
       expect(
         report.needsReviewCount,
-        0,
+        2,
         reason:
-            'PROBE FINDING: an unpaired half-resolved transfer is silently '
-            'counted as spend with no review flag (AC-B11.2 says an '
-            'undeterminable transfer is flagged, not classified)',
+            'AC-B11.2: an undeterminable transfer is flagged, not silently '
+            'classified. Both legs carry the flag because both figures are '
+            'affected.',
       );
     });
 
@@ -299,7 +324,7 @@ void main() {
     });
 
     test('a cross-currency internal transfer is deliberately not paired and '
-        'counts as spend, unflagged', () {
+        'counts as spend — now WITH the review flag it always promised', () {
       // Documented in internal_transfer.dart: pairing them needs a rate.
       final PeriodReport report = LedgerTotals.report(<LedgerTransaction>[
         tx(
@@ -321,13 +346,18 @@ void main() {
           at: DateTime.utc(2026, 7, 10, 9, 5),
         ),
       ], period: july2026);
+      // Still counted, and still on no invented rate — ADR-009 holds.
       expect(report.spend.base!.toCanonicalString(), '2000');
+      // **CLOSED IN P3b-2 (KHA-80).** `internal_transfer.dart` had always
+      // claimed in its own doc comment that these "stay visible as spend AND
+      // as a review item"; the review item half did not exist. It does now,
+      // as `TransferReviewReason.crossCurrencyNearMatch`, on both legs.
       expect(
         report.needsReviewCount,
-        0,
+        2,
         reason:
-            'PROBE FINDING: internal_transfer.dart says these "stay visible '
-            'as spend AND as a review item"; the review item does not exist',
+            'the doc comment\'s promise is now kept: visible as spend AND as '
+            'a review item',
       );
     });
 

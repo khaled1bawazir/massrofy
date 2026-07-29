@@ -98,6 +98,70 @@ abstract final class InternalTransferState {
 const String reviewReasonPossibleInternalTransfer =
     'possible_internal_transfer';
 
+/// **KHA-80 — why a transfer could not even become a candidate.**
+///
+/// Distinct from [InternalTransferState], and the distinction is the whole
+/// issue: a *candidate* is a pair the detector found but cannot prove, and it
+/// was already flagged. These are transfers the detector could not **pair at
+/// all**, which fell through into ordinary spend carrying no flag whatsoever —
+/// even though `_evidenceFor`'s own doc comment promised one for the
+/// cross-currency case.
+///
+/// The user-visible consequence of leaving this unflagged is worse than it
+/// sounds. The direction of the arithmetic error is safe (spend is
+/// over-stated, never under-stated, which is this app's deliberate bias), but
+/// AC-B11.2 asks for *"flagged for review rather than silently classified
+/// either way"* and an unflagged over-statement is invisible rather than
+/// correctable. The user is simply never told the figure may include a
+/// movement to their own account.
+///
+/// ## The rule is evidence-based, not blanket, and that is deliberate
+///
+/// A flag is only raised when a **near-match partner actually exists**: an
+/// opposite-direction transfer, within the pairing window, on a different
+/// instrument, disqualified by exactly one axis. A lone outgoing transfer with
+/// nothing resembling a counterpart anywhere is correctly classified as a
+/// third-party payment and is *not* flagged.
+///
+/// The alternative — flagging every transfer whose instrument did not resolve
+/// — was rejected. Early in the app's life that is most of them (risk R-7's
+/// bootstrapping problem), and a review inbox that lists everything is a
+/// review inbox nobody opens. A flag that fires on evidence keeps the queue
+/// worth reading.
+enum TransferReviewReason {
+  /// The two legs match on direction, instrument-distinctness and time, but
+  /// are denominated in **different currencies**, so no pair can be formed
+  /// without inventing a rate — which ADR-009 forbids.
+  ///
+  /// Both legs stay visible as spend. This flag is the "as a review item" half
+  /// of the promise `_evidenceFor` has always made in its doc comment.
+  crossCurrencyNearMatch,
+
+  /// The legs match on amount, currency, direction and time, but **one of them
+  /// landed on no resolvable instrument** (its message carried too few digits
+  /// to key on), so the app cannot say the movement stayed between the user's
+  /// own accounts.
+  ///
+  /// Risk R-7 in its purest form, and the common case on a new install.
+  unresolvedInstrument,
+}
+
+/// The `reviewReason` constants for [TransferReviewReason], mirroring
+/// [reviewReasonPossibleInternalTransfer]'s role: a machine-readable key the
+/// UI maps to localised copy. A cross-currency near-match and a
+/// missing-instrument near-match need *different sentences* — "we found a
+/// matching transfer in another currency" versus "we could not tell which
+/// account this reached" — so they are not collapsed into one reason.
+abstract final class TransferReviewReasonKey {
+  static const String crossCurrency = 'transfer_cross_currency_near_match';
+  static const String unresolvedInstrument = 'transfer_unresolved_instrument';
+
+  static String forReason(TransferReviewReason reason) => switch (reason) {
+    TransferReviewReason.crossCurrencyNearMatch => crossCurrency,
+    TransferReviewReason.unresolvedInstrument => unresolvedInstrument,
+  };
+}
+
 /// What made a pair believable. Carried so the UI can explain *why* a total
 /// excluded something — NFR-A6 again: a figure the user cannot interrogate is
 /// a figure they cannot trust.
@@ -151,14 +215,20 @@ final class InternalTransferAnalysis {
   /// Transaction id → the link it belongs to.
   final Map<int, InternalTransferLink> _linkById;
 
+  /// **KHA-80.** Transaction id → why this transfer could not be paired at
+  /// all. Only transfers that are *not* in [links] can appear here.
+  final Map<int, TransferReviewReason> _unpairableById;
+
   final List<InternalTransferLink> links;
 
   const InternalTransferAnalysis._({
     required Map<int, String> derivedStateById,
     required Map<int, InternalTransferLink> linkById,
+    required Map<int, TransferReviewReason> unpairableById,
     required this.links,
   }) : _derivedStateById = derivedStateById,
-       _linkById = linkById;
+       _linkById = linkById,
+       _unpairableById = unpairableById;
 
   /// Nothing matched. Used as the neutral value when a caller has no
   /// transaction list to analyse (e.g. a per-instrument view that must not
@@ -166,6 +236,7 @@ final class InternalTransferAnalysis {
   static const InternalTransferAnalysis empty = InternalTransferAnalysis._(
     derivedStateById: <int, String>{},
     linkById: <int, InternalTransferLink>{},
+    unpairableById: <int, TransferReviewReason>{},
     links: <InternalTransferLink>[],
   );
 
@@ -191,6 +262,21 @@ final class InternalTransferAnalysis {
 
   /// The link [transactionId] belongs to, or null.
   InternalTransferLink? linkFor(int transactionId) => _linkById[transactionId];
+
+  /// **KHA-80 / AC-B11.2** — why [transaction] could not be paired, or null if
+  /// it was paired or is not a transfer at all.
+  ///
+  /// A persisted decision suppresses this, for the same reason it outranks a
+  /// derived state in [stateFor]: once the user has said "this is external",
+  /// re-raising a review flag on the same movement every time the screen
+  /// rebuilds is the app arguing with them.
+  TransferReviewReason? unpairableReasonFor(LedgerTransaction transaction) {
+    final String? persisted = transaction.internalTransferState;
+    if (persisted != null && InternalTransferState.isKnown(persisted)) {
+      return null;
+    }
+    return _unpairableById[transaction.id];
+  }
 
   bool get isEmpty => links.isEmpty;
 }
@@ -221,6 +307,12 @@ abstract final class InternalTransferDetector {
     final List<LedgerTransaction> outgoing = <LedgerTransaction>[];
     final List<LedgerTransaction> incoming = <LedgerTransaction>[];
 
+    // KHA-80: every live, dated transfer, *including* the ones that cannot
+    // pair. The pairing lists below deliberately exclude those; the
+    // near-match pass at the end needs to see them, because a transfer that
+    // cannot pair is exactly what it is looking for.
+    final List<LedgerTransaction> allTransfers = <LedgerTransaction>[];
+
     for (final LedgerTransaction txn in transactions) {
       // A deleted transaction is out of every total (US-B8), so it must not
       // pair either — pairing it would exclude a live transfer on the
@@ -229,11 +321,19 @@ abstract final class InternalTransferDetector {
           !TransactionType.transferTypes.contains(txn.transactionType)) {
         continue;
       }
-      // Both legs must have landed on a *known* instrument. A transfer whose
-      // instrument could not be resolved (too few digits to key on) tells us
-      // nothing about whose account it hit, and guessing from a name is
-      // exactly what AC-B11.2 forbids.
-      if (txn.instrument == null || txn.occurredAt == null) {
+      // An undated transfer cannot be windowed against anything, so it is
+      // beyond both pairing and near-matching.
+      if (txn.occurredAt == null) {
+        continue;
+      }
+      allTransfers.add(txn);
+
+      // Both legs must have landed on a *known* instrument to **pair**. A
+      // transfer whose instrument could not be resolved (too few digits to key
+      // on) tells us nothing about whose account it hit, and guessing from a
+      // name is exactly what AC-B11.2 forbids. It is not discarded, though —
+      // it goes to the near-match pass, which is KHA-80's fix.
+      if (txn.instrument == null) {
         continue;
       }
       if (txn.transactionType == TransactionType.transferOut) {
@@ -310,8 +410,112 @@ abstract final class InternalTransferDetector {
     return InternalTransferAnalysis._(
       derivedStateById: stateById,
       linkById: linkById,
+      unpairableById: _findUnpairable(
+        allTransfers,
+        paired: used,
+        window: window,
+      ),
       links: links,
     );
+  }
+
+  /// **KHA-80** — the near-match pass, run over the transfers pairing left
+  /// behind.
+  ///
+  /// Only transfers not in [paired] are considered, so a movement the app
+  /// already understands is never second-guessed. For each remaining transfer
+  /// it looks for a partner that matched on **every axis except one**, and
+  /// reports which axis failed.
+  ///
+  /// Both sides of a near-match are flagged, not just the outgoing one. The
+  /// outgoing leg is the one inflating spend, but the incoming leg is
+  /// classified as *income* (`SpendClassification`), so leaving it unflagged
+  /// would over-state income by the same movement — one unexplained figure
+  /// traded for another.
+  static Map<int, TransferReviewReason> _findUnpairable(
+    List<LedgerTransaction> transfers, {
+    required Set<int> paired,
+    required Duration window,
+  }) {
+    final Map<int, TransferReviewReason> reasons =
+        <int, TransferReviewReason>{};
+
+    for (final LedgerTransaction a in transfers) {
+      if (paired.contains(a.id) ||
+          a.transactionType != TransactionType.transferOut) {
+        continue;
+      }
+      for (final LedgerTransaction b in transfers) {
+        if (paired.contains(b.id) ||
+            b.transactionType != TransactionType.transferIn) {
+          continue;
+        }
+        final TransferReviewReason? reason = _nearMatchReason(
+          out: a,
+          inbound: b,
+          window: window,
+        );
+        if (reason == null) {
+          continue;
+        }
+        // Recorded for both legs. `putIfAbsent` keeps the first (strongest,
+        // by enum declaration order) reason rather than letting a later,
+        // weaker near-match overwrite it.
+        reasons.putIfAbsent(a.id, () => reason);
+        reasons.putIfAbsent(b.id, () => reason);
+      }
+    }
+    return reasons;
+  }
+
+  /// What single axis stopped [out] and [inbound] from pairing, or null when
+  /// they are not a near-match at all (more than one axis differs, or they
+  /// were never comparable).
+  static TransferReviewReason? _nearMatchReason({
+    required LedgerTransaction out,
+    required LedgerTransaction inbound,
+    required Duration window,
+  }) {
+    // Time is a precondition of both cases, not an axis that may fail: two
+    // transfers a month apart are unrelated, not a near-match.
+    if (out.occurredAt!.difference(inbound.occurredAt!).abs() > window) {
+      return null;
+    }
+
+    final LedgerInstrument? outInstrument = out.instrument;
+    final LedgerInstrument? inInstrument = inbound.instrument;
+
+    // --- Case (a): both instruments known, but the currencies differ -------
+    //
+    // 2,000.00 SAR out of the current account and 533.19 USD into savings,
+    // minutes apart, is overwhelmingly one movement — but pairing it needs a
+    // rate, and ADR-009 forbids inventing one. Both legs stay in their totals;
+    // the user is told why.
+    if (outInstrument != null && inInstrument != null) {
+      if (outInstrument.id == inInstrument.id) {
+        return null;
+      }
+      if (out.amount.currencyCode != inbound.amount.currencyCode) {
+        return TransferReviewReason.crossCurrencyNearMatch;
+      }
+      // Same currency and both instruments known: `_evidenceFor` already had
+      // its chance at this pair. If it declined, the amounts differ, and two
+      // different amounts are two different movements — not a near-match.
+      return null;
+    }
+
+    // --- Case (b): exactly one side has no resolved instrument -------------
+    //
+    // Risk R-7's bootstrapping problem. The amounts must match exactly here:
+    // without a resolved instrument on one side, amount-and-time is the only
+    // evidence there is, and loosening it would flag unrelated movements.
+    if (outInstrument == null && inInstrument == null) {
+      return null;
+    }
+    if (out.amount != inbound.amount) {
+      return null;
+    }
+    return TransferReviewReason.unresolvedInstrument;
   }
 
   /// The deterministic group id for a pair.
@@ -339,6 +543,12 @@ abstract final class InternalTransferDetector {
     // deliberately *not* matched here: pairing them needs a rate, and
     // inventing one is forbidden (ADR-009). They stay visible as spend and
     // as a review item rather than being netted on a guessed rate.
+    //
+    // **KHA-80:** the "as a review item" half of that sentence was a promise
+    // this file did not keep until P3b-2 — a cross-currency near-match fell
+    // through to ordinary spend with no flag at all. [_findUnpairable] is the
+    // implementation, and `TransferReviewReason.crossCurrencyNearMatch` is
+    // what it produces for exactly this branch.
     if (out.amount != inbound.amount) {
       return null;
     }
