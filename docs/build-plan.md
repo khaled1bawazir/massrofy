@@ -1,8 +1,8 @@
 STATUS: LIVE — gate 2 passed, build in progress
 # Massrofy — Build Plan
 
-**Version:** 1.3
-**Date:** 2026-07-27 (v1.0) · last supervised 2026-07-28 (v1.3)
+**Version:** 1.4
+**Date:** 2026-07-27 (v1.0) · last supervised 2026-07-29 (v1.4)
 **Author:** manager agent (v1.0 planning; v1.1+ build supervision)
 **Source of truth:** `docs/PRD.md` v0.3, STATUS: Approved
 **Linear project:** [Massrofy — Personal Spending Tracker from Bank SMS](https://linear.app/khaledbawazir/project/massrofy-personal-spending-tracker-from-bank-sms-1c491affcc87) (team `KHA`)
@@ -23,6 +23,7 @@ STATUS: LIVE — gate 2 passed, build in progress
 | 1.0 | 2026-07-27 | Original plan, written before gate 2. |
 | 1.1 | 2026-07-28 | Gate 2 closed; P1 and P2 merged. |
 | 1.2 | 2026-07-28 | **P3 supervision.** §2.1 backend question closed by ADR-001. P3 scope corrected — two work items inherited from P2 were missing (KHA-64, KHA-66) and P3 is now recommended as two PRs. §8 issue index refreshed (issues now run past KHA-53). §9 records the team-v2 QA merge gate. R-1 restated as unpaid P0 debt. |
+| 1.4 | 2026-07-29 | **P3→P4 supervision. P3 is complete** (P3b-1 = PR #18, P3b-2 = PR #20, both through engineer → QA → reviewer; KHA-69 recorded as option (a), dated). **P4 split into two PRs, and the seam is forced rather than chosen** — code-reviewer's PR #20 gate makes KHA-87/KHA-88 merge-blocking for any PR that routes `NeedsReviewScreen`, `RecentlyDeletedScreen` or `TransactionDetailScreen`, and P4's own ACs (AC-C2.2, AC-C4.1/4.2) cannot be met without routing two of those three. New **P3b-3** fix PR inserted ahead of P4. New **R-15** (defects held safe only by absent navigation). KHA-32's `needs-architecture-decision` label removed — ADR-008 answers A-7 with a named constant. KHA-87/88 had **no milestone**, the same failure as the v1.3 lesson, now filed under P4. |
 | 1.3 | 2026-07-28 | **P3a→P3b supervision.** P3a merged (PR #11). **KHA-24 found already shipped inside P3a** and closed — P3b is one issue smaller than v1.2 planned. **KHA-64 found wrongly auto-closed by the Linear/GitHub integration** and reopened; its D2 half is genuinely unbuilt. Three QA/review-born issues (KHA-69, KHA-70, KHA-74) had no milestone and are now in P3b. P3b re-split into **two PRs by coupling, not by issue count** — totals-semantics first, mutation-surface second, with reasoning recorded. New **R-14**: no human has ever unlocked this app on real hardware (KHA-75), which both raises device risk and, today, makes KHA-69's option (a) provably correct. |
 
 ---
@@ -215,7 +216,16 @@ a real SMS on a physical device reaches the data layer within seconds.
 
 ### P3 — Domain model: banks, instruments, transactions (Epic B)
 **Owner:** mobile-engineer. Sequential after P2 (needs real parsed output to model against).
-**Status (2026-07-28): P3a merged; P3b is the remaining work, re-split into two PRs — see below.**
+
+> **STATUS (2026-07-29): P3 IS COMPLETE — with two High defects deliberately left open.**
+> P3a = PR #11, P3b-1 = PR #18 (schema v4, KHA-27/28/29/70), P3b-2 = PR #20 (schema v5,
+> KHA-26/64/66/74/78/79/80). Each went engineer → QA (with a real adversarial probe suite:
+> 18 attacks on P3a, 11 probes on P3b-1, 37 merge-focused probes on P3b-2) → code-reviewer.
+> **KHA-69 is recorded** in `docs/architecture.md` as option (a), dated 2026-07-29, closing the
+> last non-code artifact in the P3b exit check. The two open defects — **KHA-87** and
+> **KHA-88** — are carried into P3b-3 below, and they now gate P4. See **R-15**.
+
+**Historical (2026-07-28): P3a merged; P3b was the remaining work, re-split into two PRs — see below.**
 PR #11 (`8e549d8`) landed the domain spine: KHA-23, KHA-25, KHA-24 and KHA-64's first half.
 QA verified it at 17/20 full PASS, 3 partial, **0 FAIL**, with an 18-attack adversarial pass
 (PR #15) in which every attack was repelled or detected.
@@ -317,8 +327,63 @@ including the ones that are decisions rather than code.
 
 ---
 
+### P3b-3 — Pay the merge/undo debt *(added 2026-07-29; runs before P4a)*
+**Owner:** mobile-engineer. One PR. Issues: **KHA-87, KHA-88, KHA-89** — plus **KHA-90's O-QA-5**
+(make `mergeDuplicatePair`'s `actor` a required argument) and **O-QA-7** (one over-claiming
+sentence in `ledger_mapping.dart`). Leave KHA-90's O-QA-6 and O-QA-9 alone.
+
+**KHA-89 was added to this PR on evidence, not tidiness.** It lives in the same two files
+(`transaction_merge.dart`'s `MergePlan.between` and `transaction_dao.dart`'s
+`mergeDuplicatePair`) and its D-QA-10 is the *third* instance of the same root cause as KHA-87:
+`MergePlan.between`'s refusal set covers amount, currency, direction and type, and nothing else —
+so money columns are dropped (KHA-87) **and** a user's correction on the losing row is discarded
+for the parser's value (D-QA-10). One fix to the refusal set answers both. Splitting them means
+two engineers' passes and two QA passes over one function. D-QA-11 (a copied user value arrives
+without its protected status) is in `mergeDuplicatePair`, which KHA-88 is already opening.
+
+**O-QA-8 is deliberately NOT here — it is a P4b requirement, listed below.** `NeedsReviewScreen`
+fires `onMerge!(item)` on a **single tap**, while soft delete has a real `AlertDialog`
+(`transaction_detail_screen.dart:166`, AC-B6.2). The riskiest operation in the product is one tap
+and the safer one is two. That is harmless while nothing routes the screen, and it becomes an R-8
+problem the moment KHA-32 does.
+
+This is not new feature work. It is P3b-2's known debt, and it is scheduled here — ahead of P4
+rather than at P5 — for four reasons, in descending weight:
+
+1. **It gates P4b.** See R-15 and the P4 section below. P4b cannot start until this is paid.
+2. **`transaction_dao.dart` is quiet right now.** KHA-88 lives at `restore()` (lines ~263–325)
+   and `mergeDuplicatePair` (~1009–1140). P4a will touch the same DAO for AC-C3.3's
+   delete-with-reassign and for writing `categoryId`/`categoryConfidence`/`needsReview`. Fixing
+   the DAO before P4a means the fix is not rebased over a categorization rewrite of the same file.
+3. **Schema numbering stays uncontended.** KHA-88's done-check leaves open whether
+   `merged_from_transaction_id` becomes a set (needs a table, hence **v6**) or a second merge
+   into the same survivor is refused (needs nothing). Running it alone lets it take v6 *if it
+   needs it* and lets P4a take the next number unconditionally, instead of two branches both
+   claiming v6 and the loser renumbering. **P4a claims v7 regardless** — a gap in the sequence is
+   cheaper than a collision.
+4. **The QA pass is cheap here.** Both issues' done-checks say *invert* the existing probes
+   (A1/A2, B2/B3/B4/B6, F6) rather than delete them. QA re-runs a suite it already authored; it
+   does not have to design a new adversarial surface. This is the least expensive opus QA pass
+   available in the whole build, and it is the one that unblocks the most.
+
+**Watch item for the reviewer:** KHA-87 offers three defensible fixes and explicitly names (b) —
+add the money-bearing columns to `MergePlan.between`'s refusal set — as the cheapest and most
+conservative, because it matches that file's own stated principle verbatim: *"Two records that
+disagree about a value are not a merge candidate; they are a question for the user."* Prefer (b)
+unless the engineer argues otherwise on evidence. It is the option that cannot lose money, only
+decline to merge.
+
+**Exit check:** probes A1/A2 and B2/B3/B4/B6/F6 are **inverted and passing**; a merge either
+carries or refuses every money-bearing column, with a test that pins the comparison set so the
+next column added to `transactions` cannot silently join the "neither compared nor carried" set;
+`restore()` clears the survivor's pointer **only when it names the row being restored** and
+appends an audit entry against the survivor (NFR-A2); the chain/enrichment-reversal decisions are
+written down and the doc comments and test names match whichever way they went.
+
+---
+
 ### P4 — Categorization and learning loop (Epics C, D)
-**Owner:** mobile-engineer. Sequential after P3.
+**Owner:** mobile-engineer. Sequential after P3 **and after P3b-3**.
 
 Category model with a default starter list (OQ-18 — the list is proposed by the designer in
 P0, not invented in code); the categorization engine with a confidence notion and needs-review
@@ -328,9 +393,105 @@ messages — PRD §3.4); user-correction-always-wins precedence; the correction 
 "this one only / this and future" scope choice; bulk categorize with undo; the learned-rules
 management screen.
 
+#### Nothing here is blocked on a decision — both inputs already exist (verified 2026-07-29)
+
+Checked before planning, because P4's two issues most likely to stall both looked blocked and
+neither is:
+
+- **KHA-30 was "blocked on the design's default category list".** `docs/design.md` **§4**
+  resolves OQ-18/D-2: **13 categories** (10 spending + 3 money-movement, including *Loan &
+  Installments* and *Fees & Charges* as their own categories per PRD §3.4's hint), with
+  *Uncategorized* as a system category that always exists and can be neither deleted nor renamed.
+  Seed that list. Do not invent one, and do not "improve" it in code.
+- **KHA-32 carried `needs-architecture-decision`. It is stale and the label is removed.**
+  **ADR-008** answers A-7 in full — the normalisation pipeline, the `MerchantAlias` table, and a
+  four-tier match table (T1 user rule 1.00 · T2 seed rule 0.90 · T3 token-set Jaccard ≥ 0.80 →
+  0.60–0.85 · T4 Damerau-Levenshtein ≥ 0.90 → ≤ 0.60, **never** auto-apply · no match → 0.00 +
+  `needsReview`). The threshold is `autoApplyThreshold`, **a single named constant in
+  `CategorizationConfig`, initial value 0.85**, and the ADR states in its own words that the
+  *value* is "a build-phase tuning parameter to be set against the corpus in P4, not a product
+  commitment". So it is the engineer's to tune, with the tuning evidence recorded in the PR — not
+  an escalation.
+
+#### Split: two PRs, and this time the seam is *forced*, not chosen
+
+P3's evidence is now unambiguous — P2 monolithic = 4 review rounds / 5 blockers; P3a spine = 0
+blockers; P3b-1 and P3b-2 split by coupling = also clean. So P4 splits. What is different is
+that P4's seam was not a judgement call: **code-reviewer's PR #20 gate draws it.**
+
+> "KHA-87 and KHA-88 are merge-blocking for any PR that routes `NeedsReviewScreen`,
+> `RecentlyDeletedScreen` or `TransactionDetailScreen`, and for any build that reaches a device."
+
+That is binding, and P4 walks straight into it. All three screens **already exist on `main`**
+(`lib/presentation/screens/needs_review_screen.dart`, `recently_deleted_screen.dart`,
+`transaction_detail_screen.dart`); the app shell simply routes to `HomePlaceholderScreen` and
+never reaches them. And P4's own acceptance criteria cannot be met without reaching two of them:
+
+- **AC-C2.2** requires the correction to complete "without leaving the transaction context, in no
+  more than two screens", and `docs/design.md` §6 implements it as a chip tap on **S-11
+  Transaction Detail** opening the `CategoryPicker` sheet (S-12/13) — 2 taps, 0 screen changes.
+  There is no way to satisfy "without leaving the transaction context" without a transaction
+  context. **KHA-33 routes `TransactionDetailScreen`.**
+- **AC-C4.1/4.2** put the needs-review indicator and count in front of the user, and design.md
+  §S-18 lands them as the **Low-confidence tab of the Needs Review Inbox**, alongside the
+  existing Unparsed tab. **KHA-32 routes `NeedsReviewScreen`.**
+
+So the gate does not merely "affect" P4 — it bisects it, and the bisection line falls exactly
+where a spine/behaviours split would have fallen anyway. That is the useful finding: the seam is
+over-determined, so take it with confidence.
+
+| PR | Issues | Schema | Inside the KHA-87/88 gate? | Why these belong together |
+|---|---|---|---|---|
+| **P4a — the categorization spine** | **KHA-30** (category model, seeded 13-item list, custom categories, delete-with-reassign) · **KHA-31** (merchant normalisation, `Merchant`/`MerchantAlias`/`MerchantRule`, tiered matching, user-wins precedence) | **v7** | **NO** | Pure data + domain. New tables, a new `features/categorization/` module, zero navigation changes, no screen routed. KHA-31 is `blockedBy` KHA-30 in Linear and every other P4 issue is `blockedBy` KHA-31 — this is the literal bottleneck, and it is also the part with the real intellectual risk (R-5, cross-script matching). It deserves a QA pass whose whole attention is on matching correctness, uncontaminated by UI. |
+| **P4b — the learning loop's user surface** | **KHA-32** (confidence, needs-review flag + count) · **KHA-33** (correction flow, scope choice, bulk + undo) · **KHA-34** (learned-rules screen, re-apply to history) | v7 (no new schema expected) | **YES — routes `NeedsReviewScreen` and `TransactionDetailScreen`** | All three are the same surface over the P4a store, and all three write audit entries — KHA-33's corrections and undos, KHA-34's bulk historical re-apply (one entry *per affected transaction*, AC-D4.4). One `security-sensitive` reviewer pass over one audit surface, exactly as P3b-2 was grouped. Splitting KHA-34 off would mean a third opus QA + review pass for a screen that shares its store and its audit invariants with KHA-33. |
+
+Three PRs are in flight for this phase area (P3b-3, P4a, P4b), but **P4 itself is still two** —
+the cap from the v1.3 lesson holds. P3b-3 is P3's debt being paid, not P4 fragmenting.
+
+**Order is load-bearing: P3b-3 → P4a → P4b.** P4a can technically start before P3b-3 lands
+(file-disjoint, and it is not gated), but there is only one mobile-engineer lane (R-9), so
+"parallel" here is fiction — sequence it and take the clean DAO and the uncontended schema number.
+
+#### Banking-domain watch items for P4 review
+
+- **AC-C1.3 is a reconciliation guarantee, not a display detail.** Category totals *including
+  Uncategorized* must sum to the period total, and P3b-1 has already made that sum currency-aware
+  (unconverted rows are excluded from base totals and reported separately). Any category
+  operation — create, rename, delete-with-reassign, delete-with-uncategorize — that can break the
+  invariant is a defect, and the done-check requires a test after **each** of those four.
+- **Every automatic categorization writes an audit entry attributed to the SYSTEM, naming the
+  rule that fired** (NFR-A2, AC-F5.2). The user must always be able to answer "why is this in
+  this category?". A bulk historical re-apply that writes no history is a defect (AC-D4.4).
+- **AC-D3.1/D3.2 — user correction always wins.** No automatic re-learning may silently overwrite
+  an explicit user choice, and per ADR-008 an automatic match must **never** create or mutate a
+  rule; only explicit user action does.
+- **AC-D2.4 — a never-seen merchant must never be confidently categorized by coincidence.** T4
+  exists precisely to be surfaced as "did you mean…" rather than applied. The observable bar is
+  *match, or flag; never silently miscategorize.*
+- **AC-C5.2 — bulk undo restores each transaction's own prior category**, not a default. And undo
+  is a new event that writes its own audit entries, never an erasure of the previous ones
+  (NFR-A3). This is the same property KHA-88 just failed on the merge path; do not re-fail it here.
+- **P4b inherits O-QA-8 (KHA-90) as a hard requirement, not an observation.** The moment KHA-32
+  routes `NeedsReviewScreen`, that screen's single-tap `onMerge!(item)` becomes a live one-tap
+  merge — the operation this plan itself calls the highest-risk in P3, with no confirmation, while
+  the strictly safer soft delete requires a dialog. R-8's "user-confirmed, never automatic"
+  guarantee currently rests on a caller that does not exist yet; KHA-32 is that caller.
+  **P4b must ship the merge confirmation before or with the route.** Same for
+  `onKeepBothDuplicates` and `onTransferVerdict`, and for the four P3b-2 providers O-QA-9 lists as
+  constructed-but-never-watched — those are the loose ends whoever wires navigation picks up.
+- **NFR-M3 still applies to the tuning corpus.** `autoApplyThreshold` is tuned against
+  *synthetic* merchant strings. No real merchant string from the user's SMS enters the repository,
+  a test fixture, or a PR body.
+
 **Exit check:** the electric-bill case (AC-D2.1) passes end to end; a correction updates the
 rule and the next matching transaction arrives pre-categorized without user action; a
-never-seen merchant is never assigned a confident category by coincidence (AC-D2.4).
+never-seen merchant is never assigned a confident category by coincidence (AC-D2.4); the
+category-sum invariant (AC-C1.3) holds after create, rename, delete-with-reassign and
+delete-with-uncategorize; a one-off correction does **not** become a rule and the previously
+learned rule still applies to the next transaction (AC-D5.2); a rules-screen edit with
+"re-apply to history" writes **one audit entry per affected transaction**; and — the artifact
+this phase must not lose — **KHA-87 and KHA-88 are closed before P4b merges**, since P4b is the
+PR that routes the screens the gate names.
 
 ---
 
@@ -462,6 +623,10 @@ P10 Review · merge · staging APK
 - P1 → P2: the money type and audit trail must exist before any transaction is written.
 - P2 → P3: model the domain against real parser output, not against guesses.
 - P3 → P4: the learning loop needs a stable merchant field to key on.
+- **P3b-3 → P4b** *(added 2026-07-29)*: KHA-87/88 must close before any PR routes
+  `NeedsReviewScreen`, `RecentlyDeletedScreen` or `TransactionDetailScreen` — which P4b does by
+  necessity, not by choice (AC-C2.2 and AC-C4.1/4.2). See **R-15**. Sequenced as
+  **P3b-3 → P4a → P4b**; P4a is not gated but shares the lane, so it runs second, not concurrently.
 - P4 → P7: reconciliation must reuse the learning loop, not fork it.
 
 ### Safe to run in parallel
@@ -552,6 +717,7 @@ stated explicitly rather than assumed.
 | **R-12** *(added 2026-07-28)* | **The P0 device spike (KHA-7) was never run, and it is the one task no agent can do.** It needs the user's real phone. P0's exit check was written as "the human marks both gate-2 docs APPROVED", which the build satisfied — but §P0 also called the spike "not optional", and that half was never enforced. Two phases of ingestion code now rest on its unverified assumptions, and PR #2's own "Honest limits" says so plainly. | If the broadcast turns out to be suppressed on the target OEM, the fix is a *default* change (ADR-006 Layer 3 becomes default-on), not a redesign — so the blast radius is bounded. But it stays unknown until someone runs it, and it is compounding: every phase adds code above it. | **Escalate to the human now, not at P10.** It does not block P3 (domain modelling is pure logic over already-parsed output). It *should* block the P10 staging sign-off. KHA-58's `ingest.skipped.locked` diagnostic is a partial substitute — it makes "locked, working as designed" distinguishable from "broadcast never arrived" from the outside. **Owner: human (device) + mobile-engineer (harness).** |
 | **R-14** *(added 2026-07-28)* | **Nobody has ever successfully unlocked this app on real hardware.** Two consecutive real-device blockers on first run: KHA-71 (the app lock could never show a prompt — fixed, PR #13) and now **KHA-75, Urgent and open** (a correct fingerprint *and* a correct device PIN both report "auth failed", most likely first-run Keystore key provisioning throwing and being swallowed by a `catch (_)`). Nine merged PRs of product code have never been executed end-to-end by a human. | Every device-facing assumption in the build is unverified at once — not just SMS latency (R-12) but the app lock, the Keystore, and SQLCipher key provisioning on this OEM's TEE. The pattern is that each real-device session finds a new first-run blocker, which suggests more remain. | KHA-75 is being diagnosed on an emulator repro now. **Do not treat P3b progress as progress toward a usable product** — the domain model is being built above a gate no user has passed. One upside, recorded because it is load-bearing elsewhere: since the DB key is provisioned *behind* that gate, no encrypted database and therefore **no audit rows can exist on any real install**, which is what makes KHA-69's option (a) provably correct today rather than merely plausible. **Owner: mobile-engineer (KHA-75) + human (device).** |
 | **R-13** *(added 2026-07-28)* | **No branch protection on this repo (KHA-55)** — GitHub free plan. The `/build` design leans on "green CI + strict reviewer" as the merge gate, but nothing *server-side* enforces it: a green `ci` check is a convention, not a requirement. | An agent could in principle merge a red or unreviewed PR, and the design's central safety claim would not hold. | Accepted risk, recorded in the user's notes. Compensating controls: code-reviewer is the only agent permitted to merge, the team-v2 `QA: PASS` gate adds a second independent verdict, and **manager is explicitly forbidden from merging** even when told to break deadlocks. Revisit if the repo ever moves to a paid plan. |
+| **R-15** *(added 2026-07-29)* | **Two High-severity money/audit defects are live in `main` and are held harmless by nothing but the absence of a navigation route.** KHA-87: resolving a duplicate silently drops the absorbed row's FX fee and converted amount out of the reported figures. KHA-88: `restore()` clears the survivor's merge pointer without checking which row it names, and appends no audit entry against the survivor — an NFR-A2 gap on **every** merge undo. Both shipped in PR #20 with QA and code-reviewer's explicit, correct agreement that no shipped code path can reach them today: the app shell routes only to `HomePlaceholderScreen`. | The mitigation is one line of routing code away from evaporating, and it evaporates **silently** — nothing fails, nothing warns; a total just becomes wrong. The failure mode is KHA-74's ("money absent from a total with no signal") through a new write path, which is the class of defect this product can least afford. | **This is not an accepted risk, it is a scheduled one.** code-reviewer recorded a binding gate at PR #20: KHA-87/88 block any PR routing `NeedsReviewScreen`, `RecentlyDeletedScreen` or `TransactionDetailScreen`, **and any build reaching a device**. That gate is honoured here as **P3b-3**, sequenced ahead of P4a, and both issues are now blocking-linked in Linear to KHA-32 and KHA-33. Note the second clause too: **R-12's device spike and R-14's real-device runs are also inside this gate** — no APK goes to hardware until it is paid. **Owner: mobile-engineer.** |
 
 ---
 
@@ -612,10 +778,11 @@ These are **flags, not answers**. Planning is not the place to decide them.
 | 2 | **Confirm the backend posture** in §2.1 once the ADR lands. | ✅ Settled: ADR-001 chose no backend, CI-enforced. |
 | 3 | **Decide on PDF statement import** (R-6): must-have for v1, or CSV-first with PDF in v1.1? | ⬜ **STILL OPEN.** Not yet needed — P7 is several phases away — but it should be answered before P7 is planned, not during it. |
 | 4 | More real SMS samples are still welcome (residual OQ-2) — other banks, and edge cases like declines and partial refunds. Share the *structure*, never the raw text (NFR-M3). | ⬜ Standing invitation. Directly reduces R-4. |
-| 5 | **Run the KHA-7 background-SMS spike on your real device** (**R-12**, added 2026-07-28). | 🔴 **NEEDED — no agent can do this.** Two phases of ingestion code rest on assumptions it was meant to verify. Does not block P3; should block the P10 staging sign-off. |
+| 5 | **Run the KHA-7 background-SMS spike on your real device** (**R-12**, added 2026-07-28). | 🔴 **STILL NEEDED — no agent can do this.** Three phases of code now rest on assumptions it was meant to verify. It does not block P4. **Note the new constraint (R-15): the gate code-reviewer set at PR #20 blocks "any build that reaches a device" until KHA-87/88 are fixed — so this spike should wait for P3b-3 to land, then run.** That is a sequencing improvement, not a further delay: it means when you do run it, you are running a build whose merge/undo paths are sound. |
 | 6 | **NFR-R1 has been renegotiated downward** since you approved the PRD: ADR-018 (H-13) changes the promise to "seconds while unlocked; seconds from unlock, with nothing lost, while locked." | ⬜ **Please confirm you accept this**, since it alters a promise in an approved document. |
-| 7 | **KHA-75 blocks all real-device use** (R-14) — no one has unlocked the app on hardware yet. | 🔴 **In flight now.** A mobile-engineer is running an emulator repro. If it cannot reproduce off-device, this needs an `adb logcat` capture from you during a repro on the Honor Magic V5. |
-| 8 | **KHA-69's decision should be taken now, while it is free.** The audit-chain fix is forward-only, so pre-P3a audit rows would stay permanently unverifiable. Option (a) — "confirm no install carrying pre-P3a audit rows exists" — is **provably true today**, because the database key is provisioned behind the app-lock gate that KHA-75 shows nobody has ever passed: no unlock, no database, no audit rows. | ⬜ **Recommend option (a)**, recorded and dated in the v3 migration comment next to ADR-010, with the standing condition that the P10 staging APK goes onto a **clean install**. This window closes the moment someone unlocks a pre-P3a build. |
+| 7 | **KHA-75 blocks all real-device use** (R-14) — no one has unlocked the app on hardware yet. | ✅ **FIXED (PR #17).** Root cause was ours, not the OEM's: `KeystoreChannel.intListArg` read byte arguments as `List<Integer>` while Flutter encodes a Dart `Uint8List` as typed data that Kotlin decodes as `byte[]`, so every wrap/unwrap threw `ClassCastException` on **every** Android device. QA verified all four unlock journeys on a real API-35 device with PIN and fingerprint enrolled. R-14's premise is retired; R-15 now carries the "don't ship to a device yet" constraint for a different reason. |
+| 9 | **Nothing is asked of you for P4.** Recorded explicitly so the absence is deliberate: both of P4's apparent blockers turned out to be already answered (design.md §4's category list; ADR-008's `autoApplyThreshold = 0.85`), and every remaining P4 choice is an engineering one. The build proceeds without you until P7's PDF question (#3) or a real-device run (#5). | ⬜ No action needed. |
+| 8 | **KHA-69's decision should be taken now, while it is free.** The audit-chain fix is forward-only, so pre-P3a audit rows would stay permanently unverifiable. Option (a) — "confirm no install carrying pre-P3a audit rows exists" — is **provably true today**, because the database key is provisioned behind the app-lock gate that KHA-75 shows nobody has ever passed: no unlock, no database, no audit rows. | ✅ **DONE — option (a) taken, recorded and dated 2026-07-29** in `docs/architecture.md` next to ADR-010, with the standing condition that the P10 staging APK goes onto a **clean install**. Taken inside the window; it closed on the same day PR #17 made the first successful hardware unlock possible. KHA-53/P10 is unblocked. |
 
 ---
 
@@ -652,9 +819,11 @@ Every issue carries its PRD story and AC references, and a "Done check" that QA 
 | P1 — Foundation | KHA-8 CI · KHA-9 signed APK · KHA-10 scaffold/RTL · KHA-11 money type · KHA-12 encrypted store · KHA-13 masking/redaction · KHA-14 audit trail · KHA-15 app lock — **all ✅ merged (PR #1)** | devops, mobile |
 | P2 — Ingestion (A) | KHA-16 permissions · KHA-17 background receiver · KHA-18 classifier · KHA-19 parser engine · KHA-20 historical import · KHA-21 dedup · KHA-22 review queue — **all ✅ merged (PR #2)**; +KHA-54 sanitizer gaps ✅ · KHA-58 `ingest.skipped.locked` diagnostic ⬜ | mobile |
 | P3a — Domain spine (B) | KHA-23 bank/instrument hierarchy ✅ · KHA-24 card↔account link ✅ *(shipped inside P3a; was stale in Backlog until 2026-07-28)* · KHA-25 transaction record ✅ · KHA-64 first half (S-19 / AC-A4.2) ✅ — **merged PR #11** | mobile |
-| P3b-1 — What a total means (B) | KHA-27 multi-currency (owns **KHA-70** fxRateDate/fxRateSource/conversionPending) · KHA-28 refunds/credits · KHA-29 income/ATM/internal transfers — ⬜ Backlog | mobile |
-| P3b-2 — Mutation surface (B) | KHA-26 manual/edit/soft-delete/restore (owns **O-QA-2** negative-amount validation) · **KHA-64 second half — ADR-017 D2 enrichment merge** (reopened; auto-close was wrong) · KHA-66 AC-A4.3 regression test · **KHA-74** unparsable amount silently drops a row · **KHA-69** audit chain forward-only decision *(`security-sensitive`, blocks KHA-53/P10)* — ⬜ Backlog | mobile |
-| P4 — Learning (C, D) | KHA-30 categories · KHA-31 merchant rule store · KHA-32 confidence/flagging · KHA-33 correction flow · KHA-34 rules screen | mobile |
+| P3b-1 — What a total means (B) | KHA-27 multi-currency (owns **KHA-70**) · KHA-28 refunds/credits · KHA-29 income/ATM/internal transfers — **all ✅ merged (PR #18, schema v4)**; follow-ups KHA-79 ✅, KHA-80 ✅, KHA-81 ⬜ | mobile |
+| P3b-2 — Mutation surface (B) | KHA-26 ✅ · **KHA-64 second half — ADR-017 D2 enrichment merge** ✅ · KHA-66 ✅ · KHA-74 ✅ · **KHA-69** audit-chain decision ✅ *(option (a), recorded and dated 2026-07-29 in `docs/architecture.md`; unblocks KHA-53/P10)* · KHA-78/79/80 ✅ — **all merged (PR #20, schema v5)** | mobile |
+| **P3b-3 — Merge/undo debt** *(new, 2026-07-29)* | **KHA-87** merge drops the FX fee + converted amount *(High, `security-sensitive`)* · **KHA-88** `restore()` corrupts the survivor's merge link and audits nothing against it *(High, `security-sensitive`)* · **KHA-89** user intent lost on the merge's losing side *(Medium — same two files, same root cause as KHA-87)* · **KHA-90** O-QA-5 + O-QA-7 only. All ⬜ Backlog. **KHA-87/88 block P4b — see R-15.** KHA-90's **O-QA-8** is a P4b requirement, not P3b-3 work | mobile |
+| P4a — Categorization spine (C, D) | KHA-30 category model + seeded 13-item list (design.md §4) · KHA-31 merchant rule store, normalisation, alias table, tiered matching (ADR-008) — ⬜ Backlog. **Schema v7.** Not gated | mobile |
+| P4b — Learning-loop surface (C, D) | KHA-32 confidence/flagging *(`needs-architecture-decision` removed — ADR-008 answers A-7)* · KHA-33 correction flow + scope choice + bulk/undo · KHA-34 rules screen + re-apply to history — ⬜ Backlog. **Gated: routes `NeedsReviewScreen` + `TransactionDetailScreen`, so KHA-87/88 must close first** | mobile |
 | P5 — UI (E, F) | KHA-35 dashboard · KHA-36 list/bank screens · KHA-37 reports · KHA-38 search/filter · KHA-39 privacy controls · KHA-40 change history · KHA-41 a11y/RTL pass | mobile |
 | P6 — Budgets (G) | KHA-42 budgets · KHA-43 alerts | mobile |
 | P7 — Statements (H) | KHA-44 CSV/PDF import · KHA-45 reconciliation | mobile |

@@ -257,3 +257,138 @@ parallel windows in a build that R-9 says is otherwise single-lane. **KHA-75 kee
 if the two ever contend:** P3b builds domain model above a gate no human has passed (R-14).
 
 ---
+
+## 2026-07-29 — Phase P4 entry (P3 closed; P3b-3 inserted ahead of it)
+
+**Supervisor:** manager (opus). **`main` at time of check:** `4f49513`.
+
+**Note on this file:** the P3b-1 → P3b-2 turn was never logged here — the previous entry is the
+P3a→P3b turn and the next thing that happened was two merged PRs. This entry covers both
+outcomes so the narrative has no hole. That gap is itself a small process finding: a supervision
+turn that dispatches without appending leaves the log claiming an older reality than Linear does.
+
+### What I verified from evidence, not memory
+
+| Claim | Verified how | Result |
+|---|---|---|
+| P3b-1 merged | GitHub `main` history → `ad9d95a` (PR #18) | ✅ schema v4; KHA-27/28/29/70; CI 6/6; `QA: PASS 18` at `3ba320d` |
+| P3b-2 merged | GitHub `main` history → `c7be7a0` (PR #20) | ✅ schema v5; KHA-26/64/66/69/74/78/79/80; CI 6/6 incl. emulator; `QA: PASS 20` |
+| KHA-75 actually fixed | `56e9cbe` (PR #17) merge commit | ✅ root cause was a Kotlin/Flutter byte-encoding mismatch in `KeystoreChannel`, **not** an OEM/TEE fault. Four unlock journeys verified on real API-35 hardware. **R-14's premise is retired.** |
+| KHA-69 recorded | build-plan §7.3 row 8 + architecture.md | ✅ option (a), dated 2026-07-29. Last non-code artifact of the P3b exit check. KHA-53/P10 unblocked |
+| KHA-87/88 state | Linear `get_issue` | ⚠️ Backlog, High, `security-sensitive` — **and no milestone at all** |
+| Other issues born in the same gate | Linear `get_issue` KHA-89, KHA-90 | ⚠️ **also milestone-less — 4 of 4 from the PR #20 gate.** And KHA-89 shares KHA-87's root cause in the same two files, so it joins P3b-3; KHA-90's O-QA-8 (one-tap merge, no dialog) turns out to be a P4b requirement |
+| The three gated screens exist | GitHub `lib/presentation/screens/` @ `4f49513` | ⚠️ **all three are already on `main`** — `needs_review_screen.dart` (23.9 KB), `recently_deleted_screen.dart` (6.7 KB), `transaction_detail_screen.dart` (27.3 KB). Only the *route* is missing |
+| KHA-30 blocked on design | `docs/design.md` §4 | ✅ **not blocked** — 13 categories resolved (OQ-18/D-2), incl. Loan & Installments and Fees & Charges |
+| KHA-32 blocked on the architect | `docs/architecture.md` ADR-008 | ✅ **not blocked** — A-7 answered; `autoApplyThreshold` is a named constant, initial 0.85, and the ADR says the value is a build-phase tuning parameter. Label removed |
+
+### The finding that shaped this phase: the gate bisects P4, and P4's own ACs walk into it
+
+code-reviewer's PR #20 merge commit records a binding gate: *"KHA-87 and KHA-88 are
+merge-blocking for any PR that routes `NeedsReviewScreen`, `RecentlyDeletedScreen` or
+`TransactionDetailScreen`, and for any build that reaches a device."*
+
+The briefing asked whether that touches P4, on the reasoning that P4 is categorization, not those
+screens. **It does, and not marginally — it cuts P4 in half.** Two independent ACs force it:
+
+- **AC-C2.2** requires the correction to complete "without leaving the transaction context, in no
+  more than two screens". design.md §6 implements exactly that as a chip tap on **S-11 Transaction
+  Detail** opening the `CategoryPicker` sheet — 2 taps, 0 screen changes. You cannot satisfy
+  "without leaving the transaction context" without a transaction context. **KHA-33 routes
+  `TransactionDetailScreen`.**
+- **AC-C4.1/4.2** put the needs-review indicator and count in front of the user; design.md §S-18
+  lands them as the **Low-confidence tab** of the existing Needs Review Inbox. **KHA-32 routes
+  `NeedsReviewScreen`.**
+
+Worth stating plainly because it is the interesting part: the gate's line and a spine/behaviours
+split line **fall in the same place**. KHA-30/31 are pure data and domain with no navigation;
+KHA-32/33/34 are the surface. The seam is over-determined — two independent arguments pick it —
+which is the strongest form of evidence a sequencing decision gets. Take it and stop deliberating.
+
+KHA-87's own text agrees, in QA's words: *"It must not survive into P4, and it must be fixed
+before any build reaches a device."*
+
+### Decision: P3b-3 → P4a → P4b
+
+**P3b-3 (new)** — KHA-87 + KHA-88, one small PR, P3's debt rather than P4 fragmenting. Scheduled
+ahead of P4a, not after it, for four reasons in descending weight: (1) it gates P4b; (2)
+`transaction_dao.dart` is quiet now and P4a will touch the same file for AC-C3.3's
+delete-with-reassign — fix the DAO before a categorization rewrite lands on top of it; (3) schema
+numbering: KHA-88's fix *may* need a table (if `merged_from_transaction_id` becomes a set), so let
+it take v6 if it needs it and give **P4a v7 unconditionally** — a gap in the sequence is cheaper
+than a collision and a renumber; (4) the QA pass is the cheapest in the build, because both
+done-checks say *invert* the existing probes (A1/A2, B2/B3/B4/B6, F6) rather than author a new
+adversarial surface. Cheapest gate, unblocks the most.
+
+**P4a — the spine.** KHA-30 + KHA-31. Schema v7. Not gated, no navigation. KHA-31 is where the
+genuine intellectual risk lives (R-5, cross-script matching), and it deserves a QA pass looking
+only at matching correctness with no UI in the frame.
+
+**P4b — the surface.** KHA-32 + KHA-33 + KHA-34. Gated. Grouped because all three write audit
+entries over the same store — KHA-33's corrections and undos, KHA-34's bulk historical re-apply
+(one entry *per affected transaction*, AC-D4.4) — so one `security-sensitive` reviewer pass covers
+one audit surface, exactly as P3b-2 was grouped. Splitting KHA-34 out would buy a third opus
+QA + review pass for a screen sharing both the store and the invariants.
+
+**P4 is still two PRs.** The v1.3 cap holds; P3b-3 is P3 paying its debt.
+
+Sequential, not parallel: P4a is file-disjoint from P3b-3 and ungated, but R-9's single
+mobile-engineer lane makes "parallel" fiction here. Sequence it and take the clean DAO.
+
+### Cross-engineer conflicts
+
+None. There is one implementer lane and no open contract change since P3b-2 — `docs/api.md` does
+not exist in this product (ADR-001: no backend, no API surface), so the usual frontend/mobile
+contract-drift risk cannot arise here.
+
+### What changed in the plan
+
+`docs/build-plan.md` → **v1.4**: P3 marked complete with its two open defects named; **P3b-3**
+inserted as a new phase section; P4 rewritten with the forced split, the two "already answered"
+inputs, the gate analysis and six banking-domain watch items; **R-15** added (High defects held
+safe only by absent navigation); §4 gains the `P3b-3 → P4b` sequential edge; §7.3 rows 5, 7 and 8
+updated (KHA-7 should now wait for P3b-3 and then run; KHA-75 fixed; KHA-69 done) and a new row 9
+recording that **nothing is asked of the human for P4**.
+
+Linear: KHA-87 and KHA-88 given the **P4 milestone** (they had none) and blocking links to KHA-32
+and KHA-33, so the gate is enforced by the tracker rather than by a merge commit nobody re-reads.
+KHA-32's stale `needs-architecture-decision` label removed with a comment citing ADR-008's
+threshold, so the engineer does not re-derive a confidence model.
+
+### Cost note — this phase
+
+| Agent | Model tier | Ran |
+|---|---|---|
+| mobile-engineer | **opus** | P3b-1 (PR #18) and P3b-2 (PR #20) authoring; KHA-75 fix (PR #17) |
+| qa-tester | **opus** | Three gates: 11-probe suite on PR #18, **37-probe** merge-focused suite on PR #20 (PR #22), plus real-device runtime verification on PR #17 |
+| code-reviewer | **opus** | PR #17, #18, #20, #22 merges; two rounds on #22 |
+| manager (this turn) | **opus** | Supervision only: 4 docs read, 8 Linear calls, 4 GitHub reads, 1 docs PR. No code |
+
+**Two economics observations.** First, the split is still paying: P3b-1 and P3b-2 each merged
+without a rework round, against P2's four. Second, and newly visible — **QA is now the most
+expensive agent in the build, not the engineer.** PR #20's gate produced 37 adversarial probes and
+found both High defects that shape this entire phase; that is the pass earning its cost. But it
+means P3b-3's *cheap* QA pass (invert existing probes) is a genuine saving worth sequencing for,
+which is reason (4) above.
+
+### Next dispatch
+
+**mobile-engineer (opus) → P3b-3: KHA-87 + KHA-88 + KHA-89 + KHA-90's O-QA-5/O-QA-7**, branched
+off `main` @ `4f49513`, one PR.
+
+KHA-89 joined on evidence: its D-QA-10 is the same root cause as KHA-87 — `MergePlan.between`'s
+refusal set covers amount, currency, direction and type and nothing else, which is why money
+columns vanish (KHA-87) *and* why a user's correction on the losing row is discarded for the
+parser's value (D-QA-10). One fix to that set answers both; splitting them buys two engineer
+passes and two QA passes over one function. Applying the new milestone-sweep lesson is what
+surfaced it — a good early return on that lesson.
+
+Prefer KHA-87 fix option (b) — add the money-bearing columns to `MergePlan.between`'s refusal set
+— unless the engineer argues otherwise on evidence; it matches that file's own stated principle
+and it cannot lose money, only decline to merge. Invert the existing probes rather than delete
+them. Take schema **v6 only if needed**; **P4a takes v7 regardless.** Then qa-tester for an
+explicit `QA: PASS`/`FAIL`, then code-reviewer to merge on green CI + `QA: PASS`.
+
+P4a (KHA-30 + KHA-31) follows on the merged result. **P4b does not start until KHA-87 and KHA-88
+are closed** — that is now enforced by Linear blocking links, not just by a merge commit.
+
+---
