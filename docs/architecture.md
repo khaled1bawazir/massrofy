@@ -2,8 +2,8 @@ STATUS: APPROVED
 
 # Massrofy — Architecture Decision Record
 
-**Version:** 1.3
-**Date:** 2026-07-29 (v1.2: 2026-07-29; v1.1: 2026-07-28; v1.0: 2026-07-27)
+**Version:** 1.4
+**Date:** 2026-07-29 (v1.3: 2026-07-29; v1.2: 2026-07-29; v1.1: 2026-07-28; v1.0: 2026-07-27)
 **Author:** solution-architect agent (phase 3 — architecture, human gate 2)
 **Sources of truth:** `docs/PRD.md` v0.3 (STATUS: Approved), `docs/build-plan.md` v1.0
 **Repository state at v1.0:** greenfield. **At v1.1:** P1 merged (`9d1487c`), P2 open as PR #2.
@@ -30,12 +30,23 @@ Every pattern in this document is established here, not inherited.
 > re-approval: this decision requires one new UI affordance that `docs/design.md` does not
 > contain, so it triggers the project's first `/revise-design` round since gate 2 — see H-15.**
 
+> **v1.4 is an amendment to v1.3's own amendment, and it exists because I got one clause wrong.**
+> It resolves **KHA-106** (High) and **KHA-107** (Low), found by qa-tester at the PR #30 gate. v1.3
+> stated a corroboration rule and then, three paragraphs later, shipped a corroboration *signal*
+> that violates it: stripping a trailing run of four or more digits with nothing else to support it
+> reduces `QAMART 1000` and `QAMART 2000` to one key at confidence 1.00 — the same High-severity
+> shape v1.3 was written to close. That signal is **withdrawn**, and the digit strip is made
+> order-insensitive in the same change. The status line stays `APPROVED`; no new human gate is
+> triggered and H-15 is unaffected. **This amendment is documentation, but the decision it records
+> requires a small code change that must land before any APK reaches a device — see R-16.**
+
 ---
 
 ## Changelog
 
 | Version | Date | Change |
 |---|---|---|
+| **1.4** | 2026-07-29 | **ADR-008 amended again — KHA-106/KHA-107 decided together.** v1.3's trailing-digit **corroboration signal (ii) (“≥4 digits, no other corroboration”) is WITHDRAWN**; adjacency to a structural marker is now the *only* corroborator, because no length threshold can be made residue-safe — for any N, two strings sharing a prefix and carrying different N-digit runs always reduce to the same key (KHA-106). `CategorizationConfig.referenceDigitRunMinLength` is **deleted**, not retuned. The strip is redefined on **the last digit run that is trailing modulo structural noise**, with adjacency read on **either side** of the run, so `PANDA STORE 1234` and `PANDA 1234 STORE` produce one key (KHA-107); swapping steps 6 and 7 is rejected because it would destroy the only surviving corroborator. Withdrawing signal (ii) also makes `MerchantKey.of` genuinely **idempotent**, so the doc comment's claimed invariant becomes true rather than being corrected away. Cost, disclosed: `PANDA 1234` no longer equals `PANDA` — it is flagged, not merged. Docs-only here; the code change rides R-16's window. |
 | **1.3** | 2026-07-29 | **ADR-008 amended — KHA-98/99/100/102 decided.** A **corroboration rule** is stated normatively: a token may be stripped only if it is *type-level* incapable of distinguishing two businesses. Consequences, all settled: **city names are dropped from the noise list entirely** (option (b) — KHA-98); the **trailing-digit strip is bounded and corroborated** (at most one run, adjacency or ≥4 digits — KHA-99); the **all-noise fallback key is removed**, so a string that tokenises to nothing yields *no merchant identity* rather than a placeholder identity (KHA-102, going deliberately further than QA's stated fix direction); **T3 is redefined over the token multiset**, not the token set (KHA-100). A clean-migration posture is claimed with an explicit premise and an explicit expiry (new risk **R-16**). **P4b must ship a "these are two different shops" affordance** — new **H-15**, and a `/revise-design` round. No other ADR is touched. |
 | **1.2** | 2026-07-29 | **KHA-69 decided and recorded** — the audit-chain timestamp fix is forward-only, and **option (a)** is taken: no install carrying pre-P3a audit rows exists, so no migration is written. Recorded as a dated subsection under ADR-010, with the evidence (ADR-005 gates the DB key behind the lock; KHA-75 showed the lock had never succeeded on hardware; the first real-device unlock was on `56e9cbaa`, which already contains the fix) and with the binding standing condition that the P10 staging APK goes onto a clean install. No ADR is amended; nothing else changes. |
 | **1.1** | 2026-07-28 | **ADR-018 added** — resolves the ADR-005 (cryptographic app lock) vs ADR-006 (background ingestion) conflict raised as **KHA-56**. Background ingestion is suspended while the app is locked; NFR-R1 is restated as an unlocked-window commitment. ADR-005 and ADR-006 amended in place; ADR-006's latency table replaced with one carrying a lock-state axis. **ADR-013 rewritten** to ratify and make normative the widened PAN/secret detection raised as **KHA-57** (originating defect KHA-54) — and to close two defects of the same class that KHA-54's fix did **not** close (the greedy grouped-PAN window, and grouped IBANs). §6.8, §8.1 (H-6, H-13, H-14), §8.2 (O-5, O-6), §8.3 (R-1) and §9 updated to match. |
@@ -556,8 +567,10 @@ that breaks a previously-passing fixture fails the build.
 ### ADR-008 — Merchant normalisation is a canonical-key pipeline with an explicit **alias table**; matching is tiered and never silently wrong.
 
 **Answers A-7. Mitigates R-5. Serves US-D1..D5, AC-D2.3, AC-D2.4.**
-**Amended by the KHA-98 decision (v1.3, 2026-07-29)** — the dated subsection at the end of this
-ADR. Three things below are **superseded and annotated rather than deleted**, per this document's
+**Amended by the KHA-98 decision (v1.3, 2026-07-29) and then by the KHA-106/KHA-107 decision
+(v1.4, 2026-07-29)** — the two dated subsections at the end of this ADR, in order. **Read both:
+v1.4 withdraws one clause of v1.3** (the "≥4 digits" corroboration signal) and restates the
+trailing-digit step. Three things below are **superseded and annotated rather than deleted**, per this document's
 house style (ADR-006 does the same with its latency table), so that a reader who finds the old
 text quoted somewhere else can see that it was superseded and why: the noise-token list no longer
 contains city names, the trailing-digit strip is now bounded and corroborated, and **T3 is defined
@@ -642,7 +655,9 @@ of this decision that must outlive the specific fixes below.
 > **And the collapse bar, which is the answer to the manager's question "when is it safe to
 > collapse two raw strings into one identity?":** a machine may collapse two raw merchant strings
 > into one identity **only** when their difference is confined to (i) structural noise tokens of
-> the kind above, (ii) a digit run corroborated as a store/terminal/reference number, (iii)
+> the kind above, (ii) a digit run corroborated as a store/terminal/reference number **by a
+> structural marker word adjacent to it in the same string** (tightened by KHA-106, v1.4 —
+> corroboration means evidence carried by the input, never a prior about digit counts), (iii)
 > separators and whitespace, (iv) case, and (v) Arabic/Latin orthographic folding. **Every other
 > collapse is a user action** — a `MerchantAlias` link — recorded in the audit trail and
 > reversible. This is the same principle ADR-008 already applies to cross-script matching
@@ -699,6 +714,14 @@ both.** It deletes code rather than adding a lookup, and it fails toward asking 
 
 ##### Settled answer 2 — **trailing digits: BOUNDED and CORROBORATED (KHA-99)**
 
+> ⚠️ **Rule 3's signal (ii) below is WITHDRAWN by the KHA-106 decision (v1.4).** Rules 1, 2 and 4
+> stand; rule 3 now requires **adjacency and nothing else**, and the strip's *position* rule is
+> restated in v1.4 (KHA-107). The struck text is kept, not deleted, because it was quoted into
+> `merchant_key.dart` and into `CategorizationConfig` and a reader who meets it there must be able
+> to see that it was superseded and why. **Read settled answers 7 and 8 before this section's
+> consequence list — its last bullet is now only half true, and the case the list never showed is
+> the one that produced KHA-106.**
+
 The current step is a `while` loop with no bound, so `QAMART 100`, `QAMART 200` and
 `QAMART 100 200 300` all key as `QAMART` — the KHA-98 shape in a second guise. But unlike a city
 name, a digit run *does* have a recognisable reference shape, so the answer is not "drop it"; it
@@ -711,14 +734,17 @@ is "corroborate it". Normative:
    - **(i) Adjacency** — the token immediately before it is a structural noise token this pipeline
      is also stripping (`STORE`, `BRANCH`, `BR`, `TERMINAL`, `TERM`, `POS`, `FRC`, `فرع`, `محل`).
      This is PRD §3.4's actual observed shape: `PANDA STORE 1234`.
-   - **(ii) Length** — the run is **≥ 4 digits**. Four or more digits is a till, terminal or
-     reference id, not a branch number a human says out loud.
+   - ~~**(ii) Length** — the run is **≥ 4 digits**. Four or more digits is a till, terminal or
+     reference id, not a branch number a human says out loud.~~ **WITHDRAWN by KHA-106 (v1.4):
+     this signal collapses `QAMART 1000` and `QAMART 2000` onto one key at confidence 1.00, which
+     condition 3 of this ADR's own corroboration rule forbids. See settled answer 7.**
 4. **Leading digits keep their existing protection.** `7 ELEVEN` must survive. That asymmetry was
    already deliberate and already documented in `merchant_key.dart`; it stands.
 
-The `4` is a named constant beside `autoApplyThreshold` (suggested: `referenceDigitRunMinLength`),
+~~The `4` is a named constant beside `autoApplyThreshold` (suggested: `referenceDigitRunMinLength`),
 tunable against the corpus, with the same posture as **O-1**: the *value* is tuning, the *bar* is
-not. Consequences on synthetic input:
+not.~~ **Superseded by KHA-106 (v1.4): the constant is deleted, not retuned — the O-1 posture
+cannot protect a constant whose mere existence is the defect.** Consequences on synthetic input:
 
 - `QAMART 100` / `QAMART 200` → keys differ. Jaccard 0.33 → no T3. Damerau-Levenshtein ratio
   1 − 1/10 = **0.90**, which meets the T4 floor — so this pair surfaces as *"did you mean QAMART
@@ -726,8 +752,17 @@ not. Consequences on synthetic input:
   consolation:** the app says what it noticed and lets the person decide.
 - `CAFE 1` / `CAFE 2` → keys differ; DL ratio 0.83, below the T4 floor → `none` + `needsReview`.
 - `QAMART 100 200 300` → `QAMART 100 200 300` (rule 1 and rule 3 both decline).
-- `PANDA STORE 1234` → `PANDA` (adjacency corroboration). `PANDA 1234` → `PANDA` (length
-  corroboration). Both preserved.
+- `PANDA STORE 1234` → `PANDA` (adjacency corroboration) — **still true in v1.4.**
+  ~~`PANDA 1234` → `PANDA` (length corroboration).~~ **No longer true: KHA-106 (v1.4) withdraws
+  length corroboration, so `PANDA 1234` keys as `PANDA 1234` and is flagged against `PANDA` rather
+  than merged with it. That is the disclosed cost of settled answer 7.**
+
+> **What this list should have contained, and the reason this ADR needed a v1.4.** Every bullet
+> above pairs a stripped string with a *sibling that keeps its digits*, so the list reads as though
+> corroboration always separates siblings. It never showed the pair where corroboration fires on
+> **both** sides — `QAMART 1000` / `QAMART 2000` — which is the one case where the strip merges two
+> identities. A consequences list that only shows the cases the rule handles is not a consequences
+> list. When writing one, **pick the input that makes the rule fire twice.**
 
 ##### Settled answer 3 — **the all-noise fallback key is REMOVED (KHA-102)**
 
@@ -892,6 +927,240 @@ here.
   intentional to three consecutive readers.
 - `CategorizationConfig`'s 0.85 rationale updated to state the multiset semantics, since that
   rationale is what the next tuner reads.
+
+#### KHA-106 / KHA-107 decision — corroboration means **evidence in the string**, never a prior about digit counts; and the strip becomes order-insensitive. **Decided 2026-07-29.**
+
+**Status: DECIDED. Settles KHA-106 (High) and KHA-107 (Low) in one decision, as KHA-107 asks,
+because both change `MerchantKey.of` and their fixes interact — the obvious fix for one destroys
+the fix for the other. Amends settled answer 2 above; nothing else in the KHA-98 decision moves.
+Binding on the mobile-engineer's implementation; it is not a menu. All merchant strings here are
+synthetic (NFR-M3).**
+
+##### The defect, and it is mine
+
+v1.3 stated a rule and then violated it three paragraphs later. Condition 3 of the corroboration
+rule says stripping *"must never be able to reduce two strings that differ only in a proper noun,
+**or only in a number that is part of a name**, to the same key."* Signal (ii) of settled answer 2
+— strip a trailing run of ≥4 digits, no other corroboration required — does exactly that:
+
+| Input | v1.3 key | Result |
+|---|---|---|
+| `QAMART 1000` | `QAMART` | one `merchant` row (`merchant_key` is `UNIQUE`), canonical name = whichever arrived first |
+| `QAMART 2000` | `QAMART` | tier **T1**, confidence **1.00**, `needsReview` false |
+
+This is the KHA-98/KHA-99 shape unchanged: a **deterministic collision manufactured by
+normalisation, upstream of every tier**, which no threshold can gate. Pinned by **PROBE M2** in
+`test/security/qa_pr30_probe_test.dart`. The implementation is not at fault — it is a faithful
+rendering of my spec. **And this is an undisclosed consequence, not an accepted cost:** settled
+answer 2's consequence list showed `PANDA 1234 → PANDA` as a benefit and never showed the sibling
+pair. `PANDA RIYADH` is a documented cost because it was written down *with* its failure direction;
+this was not written down at all.
+
+##### Why no length threshold can be fixed — the general argument
+
+This matters more than the specific choice below, because the next person to reach for a digit
+heuristic needs to know it is not a tuning problem:
+
+> A length-only signal decides strippability **from the digit run alone**, and the residue it
+> leaves is **the prefix**. Therefore, for *any* threshold N, two strings that share a prefix and
+> carry different qualifying runs reduce to the same key. Sibling collapse is not a bad choice of
+> N — it is what a length signal **is**. Raising N to 5 or 6 only changes *which* siblings collide;
+> it never stops siblings colliding.
+
+So the only three moves available are: remove the signal, make the function impure, or accept the
+collision. That is precisely the option list KHA-106 offers, and it is exhaustive.
+
+##### The three options
+
+| Option | Assessment |
+|---|---|
+| **(1)** Drop signal (ii); adjacency corroboration always required | **CHOSEN.** Purity kept, determinism kept, the collision closed at its root rather than gated. It *deletes* a branch rather than adding one, and it fails toward asking the user. Its cost — `PANDA 1234` no longer equals `PANDA` — is real, is stated below, and points in the direction AC-D2.3 names. |
+| **(2)** Add a residue condition — strip only if no other **stored** key differs solely by a trailing digit run | **Rejected, on the same ground v1.3 rejected KHA-98 option (a), and the rejection is stronger here.** It fails condition 1: the identity function becomes a database lookup, so a `UNIQUE` identity column is computed by an **arrival-order-dependent** function. Worse, look at what it actually does: `QAMART 1000` arrives first, sees no sibling, and strips — so **the chain-level key `QAMART` is now owned by one numbered outlet**, and a later genuine bare `QAMART` string lands on that outlet's row at T1/1.00. The proposal moves the merge rather than removing it. It also destroys idempotence (see settled answer 8), since `of` would answer differently on Tuesday. |
+| **(3)** Accept and document the 4-digit-sibling cost | **Rejected, and the distinction is the load-bearing one in this whole ADR.** `PANDA RIYADH` is documentable because its failure direction is **refusal**: two rows that should be one, repairable in a single `MerchantAlias` action. This failure direction is **silence**: one row that should be two, at confidence 1.00, discovered only when the user notices the wrong shop's money in the wrong place. **We document costs that fail toward asking; we fix costs that fail toward silence.** Documenting a violation of a rule this document calls binding would make the rule advisory, and an advisory corroboration rule is the v1.0 token list again. |
+
+##### Settled answer 7 — **signal (ii) is WITHDRAWN. Adjacency is the only corroborator. (KHA-106)**
+
+Normative, replacing rule 3 of settled answer 2. Rules 1, 2 and 4 stand **unchanged**:
+
+> **Rule 3 (v1.4).** The candidate digit run is removed **only if a `referenceMarkerTokens` word is
+> adjacent to it** — immediately before **or** immediately after it in the token list (the "or
+> after" half is settled answer 8). There is no other corroboration signal, and in particular
+> **there is no signal derived from how many digits the run contains.**
+
+`CategorizationConfig.referenceDigitRunMinLength` is **deleted**, not raised to some safer number.
+A dormant tunable is an invitation to reopen a High-severity defect by editing a config file, and
+**O-1's posture — "the value is tuning, the bar is not" — cannot protect a constant whose mere
+existence is the bar.** (v1.3's doc comment said lowering it to 1 would restore KHA-99. The truth
+is that *every* value restores KHA-106.)
+
+**The precise reading of condition 3 that v1.3 left implicit, and that this decision turns on.**
+Adjacency corroboration still collapses `PANDA STORE 1234` and `PANDA STORE 5678` onto `PANDA`, and
+that is **not** a condition-3 violation:
+
+> Condition 3 forbids collapsing strings that differ only in a number **that is part of a name**. A
+> marker word beside the run is *the string itself stating that the run is not part of the name* —
+> evidence carried by the input, decidable from the token pair alone, so condition 1 (purity) is
+> intact. A bare digit run makes no such statement, so a machine that strips it is **guessing which
+> of the two kinds of number it is looking at**. That is the whole distinction:
+> **corroboration is evidence in the string; it is never a prior about digit counts.**
+
+**The asymmetry with the city decision, stated openly rather than left for a reader to find.** A
+numbered outlet under an explicit marker merges into its chain (`PANDA STORE 1234` → `PANDA`) while
+a city-named branch does not (`PANDA RIYADH` stays). The difference is not that numbers matter less
+than words; it is that `STORE` **states the role of the token beside it** and `RIYADH` states
+nothing about its own role. PRD §3.4 requires the first case to work. Where the marker's claim is
+wrong in fact — separately-owned franchises under one chain marker — the repair is the split
+affordance of settled answer 6, and the existence of that repair is what makes this line tolerable.
+
+**Consequences on synthetic input** (multiset Jaccard uses `|A∩B| / (|A|+|B|−|A∩B|)`; DL ratio is
+`1 − distance / maxLength`, both as shipped):
+
+| Pair | v1.3 keys | **v1.4 keys** | Tier reached | Outcome |
+|---|---|---|---|---|
+| `QAMART 1000` / `QAMART 2000` | `QAMART` / `QAMART` — **merged at 1.00** | `QAMART 1000` / `QAMART 2000` | Jaccard 1/3 = 0.33 (no T3); DL 1 − 1/11 ≈ **0.909** ≥ 0.90 | T4 *"did you mean QAMART 1000?"*, `canAutoApply` **false**. **The defect is closed, and the app says what it noticed.** |
+| `PANDA 1234` / `Panda` | `PANDA` / `PANDA` | `PANDA 1234` / `PANDA` | Jaccard 1/2 = 0.50 (no T3); DL 1 − 5/10 = 0.50 (no T4) | `MerchantMatch.none` + `needsReview`. **This is the cost of settled answer 7, and the only one.** |
+| `PANDA STORE 1234` / `Panda` | `PANDA` / `PANDA` | **unchanged** | T1/T2 exact | PRD §3.4's motivating case still works |
+| `QAMART 100` / `QAMART 200` | differ | **unchanged** | DL 0.90 | T4 suggestion, never auto-applied |
+| `CAFE 1` / `CAFE 2` | differ | **unchanged** | none | flagged |
+| `QAMART 100 200 300` | all runs kept | **unchanged** (rule 1) | — | — |
+| `7 ELEVEN` | kept | **unchanged** (rule 4) | — | — |
+
+The cost row is the same trade v1.3 already made for city names, in the same direction, for the
+same reason — **two rows that should be one is one user action; one row that should be two destroys
+the identity** — so the argument is not repeated here beyond the pointer.
+
+##### Settled answer 8 — **the strip is positioned modulo noise and reads adjacency on either side (KHA-107)**
+
+**First, a finding that changes what KHA-107 is.** Settled answer 7, on its own, makes
+`MerchantKey.of` genuinely idempotent. The proof is one line and belongs in the code:
+
+> Step 7 removes every `noiseTokens` word, and `referenceMarkerTokens ⊆ noiseTokens`. With signal
+> (ii) withdrawn, marker adjacency is the **only** corroborator. Therefore **no output of `of` can
+> ever contain a corroborator**, so step 6 is a no-op on a second pass and step 7 is too:
+> `of(of(x)) == of(x)`.
+
+So KHA-107's option 3 — correct the doc comment to admit an ordering dependence — would be
+documenting a defect whose cause we have just removed. The invariant becomes **true**, and the doc
+comment keeps its claim but must gain its *reason*, because the reason is fragile in a specific
+way: **idempotence holds only because every corroborator is itself stripped later in the pipeline.**
+Any future signal that survives step 7 (a length signal, a "digits following a letter" signal, a
+regex on the raw string) silently breaks it again. That warning goes in the code, and a test pins
+the invariant so it cannot be broken quietly.
+
+**Second, the behaviour KHA-107 actually reports, which idempotence does not fix.**
+`PANDA STORE 1234` → `PANDA` while `PANDA 1234 STORE` → `PANDA 1234`: the same three tokens in a
+different order produce two keys for one shop, against PRD §3.4's promise that all renderings of one
+shop reach one key. Pinned by **PROBE M1**. Decision — **fix it**, with the minimum change that does
+not widen the *class* of what may be stripped:
+
+> **Step 6 (v1.4, normative).**
+> 1. The **candidate** is the last all-digit token such that **every token after it is a
+>    `noiseTokens` word** — i.e. the run is trailing once structural noise is disregarded. If no
+>    such token exists, nothing is stripped.
+> 2. Refuse if the token immediately before the candidate is itself all-digit (rule 1, unchanged).
+> 3. Refuse unless at least one non-digit token remains afterwards (rule 2, unchanged — note this
+>    deliberately counts a noise token as a survivor, so `STORE 7` still yields **no key** via
+>    KHA-102 rather than the junk key `7`).
+> 4. Corroborate by adjacency **on either side** in the pre-strip token list: the token immediately
+>    before **or** immediately after the candidate is a `referenceMarkerTokens` word.
+> 5. Remove **at most one** token, ever — the candidate. Leading digits keep their protection
+>    (rule 4, unchanged): `7 ELEVEN` and `7 ELEVEN STORE` both survive, because `ELEVEN` is not a
+>    noise token, so `7` is never a candidate.
+
+**Why this is not a loosening of the bar.** Every additional strip it permits is corroborated by
+exactly the signal v1.3 already accepted — a structural marker beside the run. What changes is the
+marker's *position*, which is an accident of how one acquirer orders its tokens and carries no
+information about the number. Order-insensitivity is simply what "all renderings of one shop → one
+key" means when two renderings are permutations of each other.
+
+**Rejected alternatives, and the first one matters because it is the obvious move:**
+
+- **Swap steps 6 and 7 (noise-strip first).** **Rejected.** After step 7 the marker is *gone*, and
+  adjacency is now the only corroborator — so `PANDA STORE 1234` would key as `PANDA 1234` and
+  PRD §3.4's motivating case breaks. KHA-107 was right that the two decisions interact; the
+  interaction runs in the opposite direction from the one the issue suggested. **The digit strip
+  must run before the noise strip precisely because it consumes the noise tokens as evidence.**
+- **Iterate to a fixed point.** **Rejected.** Unnecessary once settled answer 7 lands (one pass is
+  already a fixed point), and a loop over a mutating token list is exactly how v1.0's unbounded
+  `while` became KHA-99. A rule that needs iteration to be stable is a rule whose single-pass
+  meaning nobody can state.
+- **Doc comment only.** **Rejected as insufficient**, per the finding above. Recorded honestly: this
+  is the *most* conservative option in the "strip less" sense, and it is the one thing in this
+  amendment a human could reasonably overrule. **The KHA-106 half is not optional; the KHA-107 half
+  is a correctness improvement riding in the same migration window** because doing it later costs a
+  re-key migration that doing it now does not.
+
+**Worked examples** (synthetic; this table is the regression suite):
+
+| Input | v1.3 key | **v1.4 key** | Why |
+|---|---|---|---|
+| `PANDA STORE 1234` | `PANDA` | `PANDA` | marker before the run |
+| `PANDA 1234 STORE` | `PANDA 1234` | **`PANDA`** | run is trailing modulo noise; marker after it. **KHA-107 closed** |
+| `PANDA 1234` | `PANDA` | **`PANDA 1234`** | no marker anywhere. **The disclosed cost** |
+| `QAMART 1000` / `QAMART 2000` | `QAMART` / `QAMART` | **`QAMART 1000` / `QAMART 2000`** | **KHA-106 closed** |
+| `QAMART 1000 STORE` / `QAMART 2000 STORE` | `QAMART 1000` / `QAMART 2000` | **both `QAMART`** | marker after the run ⇒ accepted signal-(i) collapse, identical to v1.3's `QAMART STORE 1000` / `QAMART STORE 2000`. **Disclosed, not hidden: reordering does change this shape** |
+| `QAMART 100 200 300` | unchanged | unchanged | rule 1 |
+| `7 ELEVEN` / `7 ELEVEN STORE` | `7 ELEVEN` | `7 ELEVEN` | `ELEVEN` is not noise ⇒ `7` is never a candidate |
+| `STORE 7` | no key | no key | strips, then all-noise ⇒ KHA-102 |
+| `1234 STORE` | `1234` | **no key** | candidate strips, remainder is all-noise ⇒ KHA-102. More conservative, and correct |
+| `***` / `-*-` | no key | no key | KHA-102, untouched |
+
+##### Settled answer 9 — **this document is docs-only; the decision needs code, and the window is R-16's**
+
+Stated plainly because the manager needs a scheduling answer:
+
+- **This amendment requires no P4a-2 PR of its own.** It is a documentation change to
+  `docs/architecture.md` and lands as such.
+- **The decision does require a code change** — both halves alter `MerchantKey.of`'s output, so both
+  sit inside **R-16**. The binding condition is not a phase label: **it must land before any APK
+  containing `lib/features/categorization/` is installed on hardware.** After that, R-16's premise
+  is void and this becomes a re-key migration that can split one merchant row into two, with
+  per-transaction re-attribution and one audit entry per row.
+- **It may ride with the first P4b PR** provided that PR lands before the device run. If P4b's first
+  PR is not the next thing to merge — or if the now-cleared KHA-7 device spike makes it plausible
+  that someone sideloads a product APK in the same session — then a **small dedicated PR touching
+  only `merchant_key.dart`, `categorization_config.dart` and their tests** is the right call. It is
+  a change of a few dozen lines against a migration of a few hundred. (KHA-7 is a throwaway harness
+  and does not itself populate `merchant`; R-16's expiry is written against *any* schema-v7 build
+  reaching a device, which is the real trigger and is a human action, not a code change.)
+
+**What the mobile-engineer must change** (no Dart is written here — this is the specification):
+
+1. `merchant_key.dart`, `_stripCorroboratedTrailingDigitRun` — delete the length branch; implement
+   candidate selection and two-sided adjacency exactly as settled answer 8 states; rules 1, 2 and 4
+   unchanged. The method's name is now slightly wrong ("trailing" is trailing-modulo-noise); rename
+   or document, your call.
+2. `merchant_key.dart` doc comments — restate rule 3; update the library-header pipeline diagram's
+   step 6 line; **keep** the idempotence claim on `of` and add its reason (*every corroborator is
+   itself a noise token, so no output can be corroborated*) plus the explicit warning that any
+   corroborator surviving step 7 breaks it.
+3. `categorization_config.dart` — **delete** `referenceDigitRunMinLength` and its doc comment
+   outright. Do not leave it unused.
+4. Tests, all from the worked-example table verbatim, plus: `of(of(x)) == of(x)` asserted over the
+   whole synthetic corpus (table-driven, not one case); `CanonicalText.fold` idempotence pinned,
+   since the proof above rests on it; `PANDA 1234` ≠ `PANDA` pinned **as a cost**, so a future
+   "improvement" that reintroduces length stripping fails CI rather than passing quietly.
+5. `test/security/qa_pr30_probe_test.dart` — PROBE M1 and M2 flip from defect-documenting to
+   invariant-asserting, per the convention the PR #27 probes already set.
+6. **No migration.** R-16's posture covers this change on the same premise and the same expiry.
+
+##### What this decision does **not** change
+
+Everything else in the KHA-98 decision: the corroboration rule itself, the city-token drop, the
+all-noise no-key rule (KHA-102), multiset T3 (KHA-100), `autoApplyThreshold` **0.85** (O-1 stands —
+nothing here is threshold tuning), the split/unlink affordance and **H-15**, tier semantics,
+`minimumFuzzyMatchKeyLength`, and rules 1, 2 and 4 of the digit strip. R-16's premise and expiry are
+unchanged — this amendment **adds to what the window must carry, it does not extend the window.**
+
+##### Noticed while deciding this, and deliberately **not** settled
+
+`1234 STORE 5678` keys as `1234` — an all-digit key — in both v1.3 and v1.4, so this decision
+neither creates nor removes it. But an all-digit key is a weak identity that two different banks'
+reference-only strings could share, which is KHA-102's class in a shape KHA-102 did not cover. **A
+recommendation, not a decision:** QA should probe it against the P4 synthetic corpus. If the shape
+occurs, the likely answer is *"a key must retain at least one non-digit token"* — and that is
+another change to `of`'s output, so it belongs **inside** R-16's window, i.e. decided before the
+device run rather than after it.
 
 ---
 
@@ -2193,7 +2462,7 @@ equivalents. This binds QA and production-support as much as engineering.
 
 | # | Item | Why deferred, and where it lands |
 |---|---|---|
-| **O-1** | **The numeric value of `autoApplyThreshold`** (residual OQ-14). Initial **0.85**, and the token-set/edit-distance constants alongside it | These must be **tuned against the synthetic corpus in P4**, not guessed in P0. Deciding a number now would be false precision. The architecture pins the *structure* — one named constant, one place, tiered matching where T4 can never auto-apply — so tuning never requires a redesign. The observable bar (AC-D2.3/D2.4: match or flag, never silently miscategorise) is enforced regardless of the value. **Reaffirmed at v1.3, with one correction to how the bar is guaranteed:** KHA-98 showed that the bar is *not* enforced by tier structure alone, because a normalisation collision arrives at T1 already merged and never meets a gate. The bar is now enforced by the tier structure **plus** the corroboration rule in ADR-008's KHA-98 subsection. 0.85 is unchanged; `referenceDigitRunMinLength = 4` joins it as a tunable with the same posture |
+| **O-1** | **The numeric value of `autoApplyThreshold`** (residual OQ-14). Initial **0.85**, and the token-set/edit-distance constants alongside it | These must be **tuned against the synthetic corpus in P4**, not guessed in P0. Deciding a number now would be false precision. The architecture pins the *structure* — one named constant, one place, tiered matching where T4 can never auto-apply — so tuning never requires a redesign. The observable bar (AC-D2.3/D2.4: match or flag, never silently miscategorise) is enforced regardless of the value. **Reaffirmed at v1.3, with one correction to how the bar is guaranteed:** KHA-98 showed that the bar is *not* enforced by tier structure alone, because a normalisation collision arrives at T1 already merged and never meets a gate. The bar is now enforced by the tier structure **plus** the corroboration rule in ADR-008's KHA-98 subsection. 0.85 is unchanged. ~~`referenceDigitRunMinLength = 4` joins it as a tunable with the same posture~~ — **retracted at v1.4 (KHA-106): that constant is deleted, not tuned. It was never an O-1-shaped tunable, because its existence *was* the bar rather than a setting of it; a corroboration signal that admits any value at all is unsafe at every value. O-1 covers thresholds that trade precision against recall, not switches that decide whether two businesses are one** |
 | **O-2** | **Rule-pack signing for imported packs.** v1 ships unsigned, mitigated by declarative-only rules, a regex timeout, mandatory user review of the diff, and no network permission | Signing needs a key-distribution story that only matters once packs are shared beyond the user. Revisit if that changes |
 | **O-3** | **Exact wording of the erase-all cloud-trash warning** (ADR-011) and the backup-freshness copy (ADR-012) | Designer's call (D-10), with the architectural facts fixed here |
 | **O-4** | Whether the diagnostic ring buffer should survive erase-all for post-mortem purposes | Currently: it is wiped, because AC-F3.1 says "all data". Raise only if production-support finds this blocking |
@@ -2208,8 +2477,8 @@ equivalents. This binds QA and production-support as much as engineering.
 | **R-2** backup key recovery | **Closed.** App-generated 128-bit Recovery Phrase, HKDF/Argon2id, salt in the cleartext envelope header, nothing device-bound required to restore (ADR-004, ADR-012). QA must test restore on a device that has never seen the original Keystore |
 | **R-3** exact decimal money | **Closed by construction.** `Money` cannot round-trip a float; cross-currency arithmetic throws; CI bans `double` in money paths and `SUM()` on money columns (ADR-002) |
 | **R-4** parser brittleness | **Mitigated.** Data-driven rule packs, importable without an APK reinstall, corpus regression in CI, review queue as the never-lose-a-message safety net (ADR-007) |
-| **R-5** cross-script merchant matching | **Re-characterised at v1.3, and the mitigation was incomplete as written.** The alias table and the never-auto-applying fuzzy tier stand. What v1.0 missed is that **the normalisation pipeline was itself a merge mechanism** — KHA-98/KHA-99/KHA-102 all merged unrelated merchants *upstream of every tier*, at confidence 1.00, where no gate exists. R-5's real surface was never only "too loose vs too strict matching"; it was also "too aggressive normalisation", which is invisible to every control the ADR named. Closed by the corroboration rule (ADR-008, KHA-98 decision), which bounds what normalisation may collapse and pushes everything else onto a user-created, auditable, **reversible** alias link |
-| **R-16** merchant re-key migration window *(added 2026-07-29; the manager's KHA-98 brief calls this "R-17" — **R-16 is the correct next free ID**: `docs/build-plan.md` v1.4 ends at R-15 and no R-16 or R-17 exists in either document)* | **Open, time-boxed, and it expires on a human action.** The KHA-98 fix changes `MerchantKey.of`'s output, which on a populated install would require a re-key migration that can *split* one merchant row into two — meaning re-attribution of historical transactions by `merchantRawText` and one audit entry per row. That migration is **not** written, on the stated premise that no install holds a `merchant` row (schema v7 landed today; no v7 build has reached a device; KHA-88 and the PR #20 device gate are still open). **The premise is procedural, not structural**, and a routed UI is not needed to break it — the categorizer is already bound into live ingestion, so one ingested SMS on an unlocked v7 install populates the table. Land the fix before the P3b-3 device run. Full expiry condition in ADR-008's KHA-98 subsection. **Owner: mobile-engineer (fix), manager (sequencing).** |
+| **R-5** cross-script merchant matching | **Re-characterised at v1.3, and the mitigation was incomplete as written.** The alias table and the never-auto-applying fuzzy tier stand. What v1.0 missed is that **the normalisation pipeline was itself a merge mechanism** — KHA-98/KHA-99/KHA-102 all merged unrelated merchants *upstream of every tier*, at confidence 1.00, where no gate exists. R-5's real surface was never only "too loose vs too strict matching"; it was also "too aggressive normalisation", which is invisible to every control the ADR named. Closed by the corroboration rule (ADR-008, KHA-98 decision), which bounds what normalisation may collapse and pushes everything else onto a user-created, auditable, **reversible** alias link. **v1.4 note:** the first attempt at that bound still contained a length heuristic that merged `QAMART 1000` with `QAMART 2000` at 1.00 (KHA-106) — evidence that this risk's real failure mode is *a plausible-sounding stripping heuristic*, and that the control that catches it is an adversarial probe over sibling strings, not review of the rule's prose |
+| **R-16** merchant re-key migration window *(added 2026-07-29; the manager's KHA-98 brief calls this "R-17" — **R-16 is the correct next free ID**: `docs/build-plan.md` v1.4 ends at R-15 and no R-16 or R-17 exists in either document)* | **Open, time-boxed, and it expires on a human action.** The KHA-98 fix changes `MerchantKey.of`'s output, which on a populated install would require a re-key migration that can *split* one merchant row into two — meaning re-attribution of historical transactions by `merchantRawText` and one audit entry per row. That migration is **not** written, on the stated premise that no install holds a `merchant` row (schema v7 landed today; no v7 build has reached a device; KHA-88 and the PR #20 device gate are still open). **The premise is procedural, not structural**, and a routed UI is not needed to break it — the categorizer is already bound into live ingestion, so one ingested SMS on an unlocked v7 install populates the table. Land the fix before the P3b-3 device run. Full expiry condition in ADR-008's KHA-98 subsection. **Owner: mobile-engineer (fix), manager (sequencing).** **Widened at v1.4 (2026-07-29):** the KHA-106/KHA-107 decision changes `MerchantKey.of`'s output again (length corroboration withdrawn; strip made order-insensitive), so **that change rides this same window** and is subject to the same expiry. The window is not extended — it now simply has to carry two changes instead of one, which is an argument for landing them together and soon. The KHA-7 device spike is now cleared to run; it is a throwaway harness and does not itself populate `merchant`, but the expiry is written against *any* schema-v7 build reaching hardware, so treat a spike session as the moment the window can close. |
 | **R-6** on-device PDF | **Recommend descope to v1.1**, behind a port so it costs nothing to add later (ADR-016). Human decision H-3 |
 | **R-7** internal-transfer bootstrap | **Mitigated.** Candidates never change totals until confirmed; unknown state is visible, not guessed (§4.2 `InternalTransferLink`) |
 | **R-8** auth-vs-posting duplicates | **Mitigated with an explicit bias.** Only exact-content duplicates are suppressed; everything else is flagged, never auto-removed (ADR-017) |
@@ -2231,7 +2500,7 @@ equivalents. This binds QA and production-support as much as engineering.
 | A-4 backup key derivation, escrow, recovery | **ADR-012** (+ ADR-004) — generated Recovery Phrase, no escrow |
 | A-5 exact-decimal money + CI enforcement | **ADR-002** |
 | A-6 parser rule model + data updates | **ADR-007** + §5.2 |
-| A-7 merchant normalisation, matching, confidence threshold | **ADR-008** + its **KHA-98 decision** (v1.3) — the corroboration rule is the normative answer to "what may normalisation collapse"; threshold value is residual **O-1** |
+| A-7 merchant normalisation, matching, confidence threshold | **ADR-008** + its **KHA-98 decision** (v1.3) + its **KHA-106/KHA-107 decision** (v1.4) — the corroboration rule is the normative answer to "what may normalisation collapse", and v1.4 fixes the one signal that violated it: corroboration must be **evidence carried by the string**, never a prior about digit counts. Threshold value is residual **O-1**; `referenceDigitRunMinLength` is no longer a tunable at all |
 | A-8 duplicate detection | **ADR-017** |
 | A-9 FX handling offline | **ADR-009** |
 | A-10 audit-trail enforcement boundary | **ADR-010** — stated, not over-claimed |
