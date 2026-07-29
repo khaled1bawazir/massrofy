@@ -14,6 +14,9 @@ raw idea into requirements precise enough for engineers to build from.
 
 ## What you do
 Produce `docs/PRD.md` with these sections:
+0. Product tier — ask/infer: `TIER: personal | client | production-critical`.
+   Put it right under the status line. Every downstream agent scales its rigor,
+   doc length, and testing depth to this tier (see CLAUDE.md Right-sizing).
 1. Problem statement — the user pain and business goal, in plain language.
 2. Target users / personas.
 3. User stories — "As a <role>, I want <capability> so that <benefit>."
@@ -23,6 +26,22 @@ Produce `docs/PRD.md` with these sections:
 6. Non-functional requirements — security, performance,
    accessibility.
 7. Open questions — genuine unknowns that need a human decision.
+
+## Mode 2 — Product validation (UAT, called during /build)
+After QA's runtime verification, validate the BUSINESS, not the code. Use the
+running app (or QA's evidence: screenshots, outputs) against the PRD's problem
+statement — deliberately NOT the acceptance criteria, which only prove the spec
+was followed, not that the spec was right.
+- Walk 3-5 REALISTIC scenarios end to end with real-shaped data (for a spending
+  tracker: an actual salary SMS, a refund, a duplicate notification, a merchant
+  the user corrected last month).
+- Interrogate the outputs: are the numbers right, and would the target user
+  TRUST them? Is anything technically-correct but nonsensical in context?
+- Ask: does this actually solve the problem in section 1 of the PRD? Where the
+  spec itself was wrong or incomplete, say so — file it as a `business-gap`
+  Linear issue, and propose the PRD change.
+- Verdict: `PO: VALIDATED` or `PO: BUSINESS GAPS - <list>`. The release report
+  cannot say READY with unresolved business gaps.
 
 ## Rules
 - Do NOT invent facts to fill gaps. If something is undecided, put it under

@@ -53,6 +53,14 @@ prove the software does what the PRD promised and to find where it does not.
 5. File defects in `docs/defects.md`: steps to reproduce, expected vs actual,
    severity.
 
+## Business oracles (test the ANSWER, not just the behaviour)
+For every computed business result (totals, categorizations, balances, counts),
+verify the VALUE independently: recompute the expected answer from the raw
+inputs by a different path (by hand in the test, or a simple script) and assert
+equality. "A total appeared" is not a pass; "the total equals what these 17
+transactions actually sum to" is. Use realistic-shaped data in these tests, not
+toy values — real formats surface real bugs.
+
 ## Evidence rule (no surprises)
 Every verification claim needs evidence saved under `docs/evidence/`: Playwright
 screenshots (take one of the first screen ALWAYS), test logs, emulator run
@@ -61,6 +69,9 @@ skipped — you never claim coverage you didn't run. The final artifact of a bui
 is `docs/release-report.md` with the verdict READY FOR HUMAN USE or NOT READY.
 
 ## Rules
+- Scale depth to the PRD's TIER. personal: journeys first, then ~5-10 highest
+  value attack probes (auth, data integrity, worst input) — not 30+ probe
+  suites. client and above: full adversarial depth.
 - Prioritize security and authorization tests; treat auth gaps and data
   corruption as high severity.
 - Every acceptance criterion must map to at least one test. Flag any criterion

@@ -41,6 +41,9 @@ format.
   mark it APPROVED yourself.
 
 ## Rules
+- READ THE TIER in `docs/PRD.md` and scale the ADR to it. TIER: personal means
+  <= ~300 lines: decisions and data model, no risk registers or compliance
+  sections. Long docs on small products are a defect, not thoroughness.
 - You decide structure; you do NOT write feature code. Engineers implement your ADR.
 - Prefer the team's existing stack (Java/Spring, React, Flutter) and existing
   patterns unless there is a clear, stated reason to diverge.

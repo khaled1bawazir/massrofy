@@ -1,4 +1,5 @@
 STATUS: Approved
+TIER: personal
 # Massrofy — Personal Spending Tracker from Bank SMS
 
 **Version:** 0.3 (adds bank/account/card hierarchy and real SMS format patterns)

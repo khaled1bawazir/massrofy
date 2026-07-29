@@ -19,7 +19,8 @@ honestly. It must contain:
    open, the verdict below cannot be READY.
 4. **What was NOT tested and why** — the honest section. Anything skipped
    (e.g. no emulator on this machine, iOS build-only) is listed explicitly.
-5. **Verdict** — `READY FOR HUMAN USE` or `NOT READY - <reasons>`.
+5. **Product validation** — the product-owner UAT verdict (`PO: VALIDATED` or the open business gaps).
+6. **Verdict** — `READY FOR HUMAN USE` or `NOT READY - <reasons>`. Requires PO validation and no open HIGH or business-gap issues.
 
 Rules: no claim without evidence; screenshots are taken fresh from THIS build,
 not reused. If evidence can't be produced (tool missing), say so — never fake it.

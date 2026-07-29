@@ -1,6 +1,6 @@
 # Product Team — Autonomous Agent Workflow
 
-A self-operating software team of Claude Code subagents, banking domain. You give
+A self-operating software team of Claude Code subagents. You give
 an idea and approve two things — the PRD and the UI design. After each approval the
 team runs on its own; after the design gate it builds, reviews, merges, ships to
 staging, and fixes bugs autonomously.
@@ -38,6 +38,19 @@ build from these mockups + `docs/design.md` + `docs/brand.md`.
   Pages) so a client can click through and approve before build. See
   `automation/deploy-mockups-pages.yml.example`.
 
+## Right-sizing: the PRD declares a product tier, everyone scales to it
+The product-owner puts a tier at the top of the PRD; every agent calibrates:
+- **TIER: personal** — single user, no clients. Docs are SHORT (architecture
+  <= ~300 lines, plan <= ~150), pragmatic security (protect data at rest if
+  sensitive, skip threat-model theatre), QA focuses on the journeys + a handful
+  of high-value attack probes (~5-10, not 30+), one review round is the norm.
+- **TIER: client** — someone pays for it. The current full rigor: evidence
+  reports, adversarial suites, thorough ADRs.
+- **TIER: production-critical** — real users' money/data at scale. Full rigor
+  plus human review on sensitive PRs.
+Over-engineering a personal tool is a defect: it costs the human time and
+tokens. Match the ceremony to the tier, and say so when you trim.
+
 ## Agents hand off through FILES + Linear + GitHub (not memory)
 Each subagent has isolated context and returns only a summary. Shared state lives in
 `docs/`, Linear issues, and GitHub PRs.
@@ -51,11 +64,11 @@ Each subagent has isolated context and returns only a summary. Shared state live
 | brand-designer | sonnet | (writes files) | palette, type, logo direction, `docs/brand.md` (gate 2) |
 | ui-ux-designer | sonnet | (writes files) | `docs/design.md` + viewable HTML mockups (gate 2) |
 | design-critic | opus | (reads files) | one critique round on mockups before you see them |
-| devops-engineer | opus | GitHub | CI/CD pipeline + branch protection |
+| devops-engineer | sonnet | GitHub | CI/CD pipeline + branch protection |
 | backend-engineer | opus | GitHub, Linear | Java/Spring API + tests |
-| frontend-engineer | opus | GitHub, Linear | React web |
+| frontend-engineer | sonnet | GitHub, Linear | React web |
 | mobile-engineer | opus | GitHub, Linear | Flutter |
-| qa-tester | opus | GitHub, Linear | tests + contract stage + security attacks, gates merges |
+| qa-tester | opus | GitHub, Linear | tests + contract + attacks + RUNS the app (journey verification), gates merges AND staging |
 | code-reviewer | opus | GitHub, Linear | reviews + MERGES PRs on green CI |
 | production-support | haiku | local | log triage, raises bugs |
 
@@ -63,10 +76,18 @@ Each subagent has isolated context and returns only a summary. Shared state live
 - `/kickoff <idea>` -> PRD draft. **You approve the PRD.**
 - `/design`         -> plan + architecture + brand + UI mockups. **You approve architecture + brand + design.**
 - `/build`          -> devops CI -> engineers (parallel) -> qa -> reviewer merges on
-   green CI -> deploy to staging. Autonomous.
+   green CI + QA pass -> qa BOOTS THE APP and walks every user journey -> deploy
+   to staging + smoke check. Autonomous.
 - `/revise-design`  -> apply client feedback to mockups, critic re-checks, you re-approve.
 - `/fix-bugs`       -> maintenance loop: reproduce -> fix + regression test -> qa ->
    reviewer merges. Autonomous.
+
+### The feature loop (test -> raise -> assign -> fix -> re-verify)
+After each feature, QA tests it for real (including running it) and files every
+problem as a Linear `bug` issue. The manager triages and assigns each issue to
+the owning engineer; the engineer fixes with a regression test; QA re-verifies.
+Max 3 rounds per feature, then it escalates to you instead of thrashing. Nothing
+merges with open bugs on the feature.
 
 ### Why auto-merge is safe
 The code-reviewer can merge, but GitHub **branch protection** (set by devops)
@@ -84,21 +105,30 @@ event-triggered GitHub Action on the `bug` label, a cron sweep, or manual runs.
 Headless runs use `claude -p ... --dangerously-skip-permissions` on a controlled
 machine only.
 
-## Model strategy (top-tier output; deliberately not cost-optimal)
-Opus everywhere code or judgment can introduce a defect: product-owner, manager
-(conducts every phase), solution-architect, every engineer (devops, backend,
-frontend, mobile), qa-tester (tests + security attacks), design-critic,
-code-reviewer. This is a deliberate call, made after a live security-relevant
-defect (domain-separation of a dedup HMAC key from the audit-chain key) surfaced
-in engineer-authored code under review — fewer defects reaching review is worth
-more here than the token cost of a smaller model. Sonnet stays only for
-low-judgment file generation: ui-ux-designer (opus critic reviews its output) and
-brand-designer. Haiku for production-support triage. The self-review pass before
-PR (frontend/mobile/backend) and the design-critic round stay in place as a
-second, independent-minded check even on opus output — the guardrail is cheap
-regardless of model tier. Quality loops are SINGLE-round by design (one critique,
-one self-review) so costs stay bounded. The manager logs per-phase cost notes in
-`docs/build-log.md` so the human can see what this choice costs over time.
+## Model strategy (top-tier output, cost-aware)
+Opus where mistakes are expensive or judgment gates quality: product-owner,
+manager (conducts every phase), solution-architect, backend-engineer (money/auth logic), mobile-engineer (the
+client-facing app itself), qa-tester (tests + security attacks), design-critic,
+code-reviewer.
+Sonnet for volume work with a guardrail: frontend-engineer (mandatory
+self-review pass before PR; upgrade to opus if web becomes the primary surface), ui-ux-designer (opus critic reviews its output), brand-designer,
+devops. Haiku for production-support triage. Quality loops are SINGLE-round by
+design (one critique, one self-review) so costs stay bounded. The manager logs
+per-phase cost notes in `docs/build-log.md`.
+
+## Verification AND validation
+QA proves the app was built right (tests, attacks, runtime journeys with
+business oracles — computed values checked against independently recomputed
+answers). The product-owner then proves it's the right product: UAT with
+realistic scenarios against the PRD's problem statement, verdict `PO: VALIDATED`.
+Both are required before a release report can say READY.
+
+## Definition of done: evidence, not claims
+A build finishes with `docs/release-report.md`: every journey runtime-verified
+with evidence (fresh screenshots in `docs/evidence/`, logs, CI links), open
+issues listed, untested areas stated honestly, and a verdict — READY FOR HUMAN
+USE or NOT READY. Run `/setup-test-env` once per machine so QA's toolchain
+(Playwright, Flutter, emulator) is in place and nothing is silently skipped.
 
 ## Team memory
 `docs/lessons.md` — the manager appends a retrospective after every build; agents
@@ -107,7 +137,7 @@ read it before starting. The team gets better with every project.
 ## Permissions
 `.claude/settings.json` lets the team act without prompting (edits, builds, tests,
 branches, PRs, merges, Linear, GitHub). Still guarded: `rm -rf`, force-push, repo
-deletion. Tighten to your bank's risk tolerance before real use.
+deletion. Tighten to your risk tolerance if the product handles sensitive data.
 
 ## Reusing the team over the product's life
 The same agents handle everything after v1. A new feature (e.g. "add ads") is just

@@ -46,6 +46,10 @@ actually finished from the evidence (files written, PRs open, tests passing) and
 resume from the first genuinely incomplete step.
 
 ## Rules
+- Scale process to the PRD's TIER. personal: build-plan <= ~150 lines, no risk
+  register, don't version-churn the plan doc; batch small fixes into one round;
+  build-log entries <= ~15 lines; Linear = issue + status only (no blocking-link
+  graphs or milestone choreography).
 - Flag security/data-privacy implications where relevant.
 - You never edit source code; you edit only planning/status docs under `docs/`
   and Linear.

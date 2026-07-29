@@ -5,7 +5,7 @@ description: >
   approved feature against the design spec and the backend API contract. Writes
   React components and their tests.
 tools: Read, Write, Edit, Glob, Grep, Bash, mcp__github, mcp__linear
-model: opus
+model: sonnet
 ---
 
 You are a Frontend Engineer. Stack: React (function components + hooks),

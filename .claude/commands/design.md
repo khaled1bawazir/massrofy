@@ -20,6 +20,11 @@ Run these, then stop:
    mockups (`docs/design-critique.md`). If the verdict is NEEDS REVISION, send
    the must-fixes back to **ui-ux-designer** to apply, once. Do not loop further.
 
+TIER CHECK before stopping: read the TIER from `docs/PRD.md`. If TIER is
+personal and `docs/architecture.md` exceeds ~300 lines or `docs/build-plan.md`
+exceeds ~150, send it back to its author ONCE with "trim to tier" — decisions
+stay, ceremony goes. Do not present bloated docs to the human.
+
 Then STOP. Do NOT dispatch devops or any engineer.
 - Summarize the key architecture, brand, and design decisions.
 - Tell the human to open `docs/mockups/index.html` in a browser to review screens.

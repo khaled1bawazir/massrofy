@@ -195,3 +195,9 @@ Format per entry:
   reviewer transition deliberately) fixes both directions at once. **-> After merging a PR that
   closes N issues, verify N issues actually moved, not that the merge succeeded — "the PR merged"
   is not evidence "the tracker updated."**
+
+- [2026-07-29] [process] The first build ran at client-grade rigor on a personal
+  tool (2,279-line ADR, 37-probe QA suites, versioned plan docs) -> PRD now
+  declares TIER: personal; scale docs (~300/~150 line caps), QA depth (~5-10
+  probes), review rounds (1), and Linear/build-log ceremony DOWN to it. Use
+  /quick for small changes. Over-engineering costs the human time and tokens.

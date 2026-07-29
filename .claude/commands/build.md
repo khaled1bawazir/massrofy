@@ -9,6 +9,10 @@ Preconditions (check ALL, stop if any fails):
 4. `docs/design.md` reads `APPROVED` (or `N/A - no UI in this feature`).
 If any is still `DRAFT`, STOP and tell the human to approve first.
 
+Read the TIER from `docs/PRD.md` first — it calibrates everything below
+(personal: short docs, ~5-10 QA probes, one review round, minimal Linear
+ceremony, short build-log entries).
+
 This build is CONDUCTED BY THE MANAGER. Between every phase, dispatch the
 **manager** in supervise mode: it reads actual state (docs, PRs, CI, Linear),
 updates `docs/build-plan.md` if reality diverged, resolves conflicts (especially
@@ -49,13 +53,18 @@ The phase sequence the manager conducts:
    core flows work, no boot errors). Verdict `QA: RUNTIME PASS/FAIL`. On FAIL,
    file the defects and route back to the owning engineer via the manager — do
    NOT proceed to staging.
-6. **devops-engineer** -> deploy to staging, then run the post-deploy smoke
+6. **product-owner** -> PRODUCT VALIDATION (UAT): use the verified build against
+   the PRD's problem statement with realistic scenarios (see its Mode 2).
+   Business gaps -> `business-gap` Linear issues -> manager triages: spec fixes
+   go back through the loop; genuine scope changes escalate to the human.
+   Verdict `PO: VALIDATED` required before release.
+7. **devops-engineer** -> deploy to staging, then run the post-deploy smoke
    check against live staging.
-7. **qa-tester** -> produce `docs/release-report.md` (see /release-report):
+8. **qa-tester** -> produce `docs/release-report.md` (see /release-report):
    journey table with evidence, fresh first-screen screenshots in
    `docs/evidence/`, open issues, what was NOT tested, and the verdict
    `READY FOR HUMAN USE` or `NOT READY`. The build is not "done" without it.
-8. **manager** -> retrospective: append lessons learned this build (what broke,
+9. **manager** -> retrospective: append lessons learned this build (what broke,
    what was re-planned, what to do differently) to `docs/lessons.md`, and write
    the final summary: shipped, merged, blocked, open issues, approximate cost by
    phase/model.
