@@ -181,6 +181,16 @@ LedgerTransaction? toLedgerTransactionOrNull(
     counterpartyName: row.counterpartyName,
     counterpartyBankName: row.counterpartyBankName,
     referenceNumber: row.referenceNumber,
+    // Schema v7 (KHA-30, KHA-31). Passed straight through, nulls included: a
+    // null `categoryId` here means "uncategorized", which `CategoryResolver`
+    // turns into the explicit category at display time — mapping must not
+    // substitute a default, or the two representations this schema went out of
+    // its way to avoid would reappear one layer up.
+    categoryId: row.categoryId,
+    categorySource: row.categorySource,
+    categoryConfidence: row.categoryConfidence,
+    categoryRuleId: row.categoryRuleId,
+    merchantId: row.merchantId,
     convertedAmount: _moneyOrNull(
       row.convertedAmountAmount,
       row.convertedAmountCurrency,

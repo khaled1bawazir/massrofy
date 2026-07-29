@@ -200,6 +200,15 @@ final class IngestionRunResult {
       'nonFinancial: $discardedNonFinancialSender, errors: $failedWithError)';
 }
 
+/// Called with the id of a transaction this pipeline has just written, so the
+/// learning loop can categorise it (KHA-31).
+///
+/// Runs **inside** the message's own database transaction, so a categorization
+/// and the transaction it describes commit together or not at all. A throw is
+/// contained by the pipeline's existing per-message `try`/`catch` — see the
+/// call site, which states exactly what it would cost.
+typedef CategorizeWrittenTransaction = Future<void> Function(int transactionId);
+
 final class IngestionPipeline {
   final AppDatabase database;
   final SmsSource smsSource;
@@ -219,6 +228,26 @@ final class IngestionPipeline {
   /// **explicitly unknown** rather than guessed, which is the same shape
   /// AC-B1.3 already requires for a message that named no instrument.
   final LedgerEntityResolver? entityResolver;
+
+  /// P4a (KHA-31): categorises a freshly written transaction from the learned
+  /// merchant rules — the second half of AC-D2.1's *"a new message from that
+  /// same utility arrives ALREADY categorized, with no user action"*.
+  ///
+  /// ## Why a callback and not a `CategorizationService`
+  ///
+  /// Architecture §3: *"`ingestion` never imports `categorization` internals;
+  /// it emits a domain event that `categorization` consumes."* This codebase
+  /// has no event bus, so the nearest honest equivalent is a function this
+  /// pipeline calls and the composition root supplies
+  /// (`presentation/providers/categorization_providers.dart` binds it to
+  /// `CategorizationService.categorizeTransaction`). The pipeline knows a
+  /// transaction id was written; it does not know what categorization *is*.
+  ///
+  /// Nullable for the same reason [entityResolver] is: the dedup and
+  /// historical-import tests care about nothing downstream of the write, and
+  /// a transaction with no categorizer is simply uncategorized — the state
+  /// every transaction starts in anyway.
+  final CategorizeWrittenTransaction? categorizer;
 
   /// The Keystore-held key for the D1 content HMAC (ADR-017). See
   /// `content_hmac.dart` for why this is keyed rather than a plain digest.
@@ -248,6 +277,7 @@ final class IngestionPipeline {
     required this.logger,
     required this.contentHmacKey,
     this.entityResolver,
+    this.categorizer,
     this.batchLimit = 100,
     this.maxBatchesPerRun = 10,
   });
@@ -690,6 +720,28 @@ final class IngestionPipeline {
       reviewReason: decision.reviewReason,
       possibleDuplicateOfId: decision.matchedTransactionId,
     );
+
+    // **P4a (KHA-31) — the learning loop's automatic half.**
+    //
+    // Placed after the transaction row exists (it needs the id) and inside the
+    // same per-message database transaction, so a message can never commit as
+    // "recorded but never offered to the categorizer": that state is invisible
+    // — the row simply looks uncategorized — and would leave the electric-bill
+    // case (AC-D2.1) silently not working for that message.
+    //
+    // **If the categorizer throws**, this message's unit of work rolls back
+    // and is retried on the next sweep, exactly like a parse failure — the
+    // existing per-message `try`/`catch` in `processAll` contains it (NFR-R5,
+    // invariant 3 above), so one message never stops the batch. A
+    // *deterministic* categorization defect would make that one message retry
+    // indefinitely, which is why `CategorizationService` performs no operation
+    // that can fail on valid data and never guesses at malformed input: it
+    // returns "uncategorized" instead. The null-categorizer path is exercised
+    // by tests too, so an app with no categorizer wired still records every
+    // transaction.
+    if (categorizer != null) {
+      await categorizer!(transactionId);
+    }
 
     if (decision.action == DuplicateAction.acceptAndFlag &&
         decision.matchedTransactionId != null) {

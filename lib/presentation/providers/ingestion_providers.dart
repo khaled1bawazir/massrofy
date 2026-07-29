@@ -45,6 +45,7 @@ import '../../features/parsing/rule_pack.dart';
 import '../../features/parsing/rule_pack_loader.dart';
 import '../../features/parsing/rule_pack_message_parser.dart';
 import 'app_providers.dart';
+import 'categorization_providers.dart';
 import 'ledger_providers.dart';
 
 /// Path of the bundled rule pack asset (ADR-007 "Bundled" source).
@@ -124,6 +125,15 @@ final FutureProvider<IngestionPipeline?> ingestionPipelineProvider =
         ledgerEntityResolverProvider.future,
       );
 
+      // P4a (KHA-31): the learning loop's automatic half. Wiring it here is
+      // what makes AC-D2.1 — "a new message from that same utility arrives
+      // ALREADY categorized, with no user action" — a property of the shipped
+      // app rather than of a test. Nullable for the same reason as the
+      // resolver above: without it every transaction is simply uncategorized.
+      final CategorizeWrittenTransaction? categorizer = await ref.watch(
+        ingestionCategorizerProvider.future,
+      );
+
       return IngestionPipeline(
         database: session.database,
         smsSource: ref.watch(smsSourceProvider),
@@ -143,6 +153,7 @@ final FutureProvider<IngestionPipeline?> ingestionPipelineProvider =
           label: ContentHmac.keyDerivationLabel,
         ),
         entityResolver: resolver,
+        categorizer: categorizer,
       );
     });
 

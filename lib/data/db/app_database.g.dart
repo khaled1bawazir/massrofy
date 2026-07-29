@@ -3084,6 +3084,51 @@ class $TransactionsTable extends Transactions
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _categorySourceMeta = const VerificationMeta(
+    'categorySource',
+  );
+  @override
+  late final GeneratedColumn<String> categorySource = GeneratedColumn<String>(
+    'category_source',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _categoryConfidenceMeta =
+      const VerificationMeta('categoryConfidence');
+  @override
+  late final GeneratedColumn<double> categoryConfidence =
+      GeneratedColumn<double>(
+        'category_confidence',
+        aliasedName,
+        true,
+        type: DriftSqlType.double,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _categoryRuleIdMeta = const VerificationMeta(
+    'categoryRuleId',
+  );
+  @override
+  late final GeneratedColumn<int> categoryRuleId = GeneratedColumn<int>(
+    'category_rule_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _merchantIdMeta = const VerificationMeta(
+    'merchantId',
+  );
+  @override
+  late final GeneratedColumn<int> merchantId = GeneratedColumn<int>(
+    'merchant_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    $customConstraints: 'REFERENCES merchant(id)',
+  );
   static const VerificationMeta _convertedAmountAmountMeta =
       const VerificationMeta('convertedAmountAmount');
   @override
@@ -3570,6 +3615,10 @@ class $TransactionsTable extends Transactions
     amountCurrency,
     amountMinor,
     categoryId,
+    categorySource,
+    categoryConfidence,
+    categoryRuleId,
+    merchantId,
     convertedAmountAmount,
     convertedAmountCurrency,
     convertedAmountMinor,
@@ -3674,6 +3723,39 @@ class $TransactionsTable extends Transactions
       context.handle(
         _categoryIdMeta,
         categoryId.isAcceptableOrUnknown(data['category_id']!, _categoryIdMeta),
+      );
+    }
+    if (data.containsKey('category_source')) {
+      context.handle(
+        _categorySourceMeta,
+        categorySource.isAcceptableOrUnknown(
+          data['category_source']!,
+          _categorySourceMeta,
+        ),
+      );
+    }
+    if (data.containsKey('category_confidence')) {
+      context.handle(
+        _categoryConfidenceMeta,
+        categoryConfidence.isAcceptableOrUnknown(
+          data['category_confidence']!,
+          _categoryConfidenceMeta,
+        ),
+      );
+    }
+    if (data.containsKey('category_rule_id')) {
+      context.handle(
+        _categoryRuleIdMeta,
+        categoryRuleId.isAcceptableOrUnknown(
+          data['category_rule_id']!,
+          _categoryRuleIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('merchant_id')) {
+      context.handle(
+        _merchantIdMeta,
+        merchantId.isAcceptableOrUnknown(data['merchant_id']!, _merchantIdMeta),
       );
     }
     if (data.containsKey('converted_amount_amount')) {
@@ -4057,6 +4139,22 @@ class $TransactionsTable extends Transactions
         DriftSqlType.string,
         data['${effectivePrefix}category_id'],
       ),
+      categorySource: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}category_source'],
+      ),
+      categoryConfidence: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}category_confidence'],
+      ),
+      categoryRuleId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}category_rule_id'],
+      ),
+      merchantId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}merchant_id'],
+      ),
       convertedAmountAmount: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}converted_amount_amount'],
@@ -4241,9 +4339,70 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
   final String amountCurrency;
   final int amountMinor;
 
-  /// Nullable, no FK target yet (the `Category` table is P4 work) —
-  /// intentionally loose in this P1-minimal table.
+  /// The category this transaction belongs to, or **NULL for uncategorized**.
+  ///
+  /// ## One storage representation of "uncategorized", not two (AC-C1.1)
+  ///
+  /// P4a's `category` table contains a row whose id is
+  /// `CategoryIds.uncategorized`, and it would have been possible to store
+  /// that id here instead of NULL. That is precisely what this codebase does
+  /// **not** do, because it would create two encodings of one fact — NULL from
+  /// every row written before P4, the literal id from every row written after
+  /// — and every future query would have to remember both. One of them
+  /// eventually would not.
+  ///
+  /// So: **NULL is the only stored form of uncategorized**, and the *domain*
+  /// makes it explicit at read time. `CategoryResolver.resolve` maps NULL — and
+  /// any id that no longer resolves — to the Uncategorized category, which is
+  /// what makes AC-C1.1's *"never a blank"* true for every row in the table
+  /// including the ones written in P1. `CategoryDao` normalises the
+  /// Uncategorized id back to NULL on write so the invariant cannot drift.
+  ///
+  /// Left without a SQL foreign key deliberately — see
+  /// `AppDatabase._installCategoryGuardTrigger` for the mechanism that
+  /// enforces AC-C3.3 instead, and why it is not a weakening.
   final String? categoryId;
+
+  /// `user` | `rule` | `default` | `none` — architecture §4.2's
+  /// `categorySource`.
+  ///
+  /// **AC-D2.2 is the reason this is a column.** *"An auto-categorized
+  /// transaction indicates it was categorized automatically and, ideally,
+  /// why."* A list rendering a hundred rows cannot answer "was this
+  /// automatic?" by querying the audit trail per row, so the answer lives on
+  /// the row. The audit trail remains the authority on *when and by whom*
+  /// (NFR-A2); this column is the fast, denormalised statement of the current
+  /// state — the same division of labour as `userEditedFields`.
+  ///
+  /// NULL means no categorization decision has ever been recorded for this
+  /// row, which is the honest value for every transaction written before P4a.
+  final String? categorySource;
+
+  /// The matcher's confidence in [categoryId], `0.0`–`1.0`.
+  ///
+  /// **`REAL` is correct here and this is not an ADR-002 violation.**
+  /// Architecture §4.2 says so explicitly: *"`categoryConfidence` is `REAL` —
+  /// this is **not money**, so a float is correct here."* Nothing is ever
+  /// summed from this column and no amount is derived from it; it feeds one
+  /// comparison against `CategorizationConfig.autoApplyThreshold`.
+  final double? categoryConfidence;
+
+  /// `merchant_rule.id` of the rule that produced [categoryId], when a rule
+  /// did.
+  ///
+  /// Records *which* rule fired, so AC-D2.2's "ideally why" survives the rule
+  /// later being edited or deleted — the audit entry names it too, but a row
+  /// that can state its own provenance does not need a join to be explicable
+  /// (the same argument `mergedFromTransactionId` makes for NFR-A6).
+  final int? categoryRuleId;
+
+  /// The resolved `merchant.id`, when the merchant pipeline recognised or
+  /// created one.
+  ///
+  /// Nullable because plenty of transactions name no merchant at all — a
+  /// transfer names a counterparty, an ATM withdrawal names nobody. Null is
+  /// AC-B1.3's explicit unknown, never "no merchant".
+  final int? merchantId;
 
   /// The bank's own inline conversion into the base currency, where the
   /// message supplied one. ADR-009 prefers the bank's figure over anything
@@ -4483,6 +4642,10 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     required this.amountCurrency,
     required this.amountMinor,
     this.categoryId,
+    this.categorySource,
+    this.categoryConfidence,
+    this.categoryRuleId,
+    this.merchantId,
     this.convertedAmountAmount,
     this.convertedAmountCurrency,
     this.convertedAmountMinor,
@@ -4538,6 +4701,18 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     map['amount_minor'] = Variable<int>(amountMinor);
     if (!nullToAbsent || categoryId != null) {
       map['category_id'] = Variable<String>(categoryId);
+    }
+    if (!nullToAbsent || categorySource != null) {
+      map['category_source'] = Variable<String>(categorySource);
+    }
+    if (!nullToAbsent || categoryConfidence != null) {
+      map['category_confidence'] = Variable<double>(categoryConfidence);
+    }
+    if (!nullToAbsent || categoryRuleId != null) {
+      map['category_rule_id'] = Variable<int>(categoryRuleId);
+    }
+    if (!nullToAbsent || merchantId != null) {
+      map['merchant_id'] = Variable<int>(merchantId);
     }
     if (!nullToAbsent || convertedAmountAmount != null) {
       map['converted_amount_amount'] = Variable<String>(convertedAmountAmount);
@@ -4672,6 +4847,18 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       categoryId: categoryId == null && nullToAbsent
           ? const Value.absent()
           : Value(categoryId),
+      categorySource: categorySource == null && nullToAbsent
+          ? const Value.absent()
+          : Value(categorySource),
+      categoryConfidence: categoryConfidence == null && nullToAbsent
+          ? const Value.absent()
+          : Value(categoryConfidence),
+      categoryRuleId: categoryRuleId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(categoryRuleId),
+      merchantId: merchantId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(merchantId),
       convertedAmountAmount: convertedAmountAmount == null && nullToAbsent
           ? const Value.absent()
           : Value(convertedAmountAmount),
@@ -4795,6 +4982,12 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       amountCurrency: serializer.fromJson<String>(json['amountCurrency']),
       amountMinor: serializer.fromJson<int>(json['amountMinor']),
       categoryId: serializer.fromJson<String?>(json['categoryId']),
+      categorySource: serializer.fromJson<String?>(json['categorySource']),
+      categoryConfidence: serializer.fromJson<double?>(
+        json['categoryConfidence'],
+      ),
+      categoryRuleId: serializer.fromJson<int?>(json['categoryRuleId']),
+      merchantId: serializer.fromJson<int?>(json['merchantId']),
       convertedAmountAmount: serializer.fromJson<String?>(
         json['convertedAmountAmount'],
       ),
@@ -4875,6 +5068,10 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       'amountCurrency': serializer.toJson<String>(amountCurrency),
       'amountMinor': serializer.toJson<int>(amountMinor),
       'categoryId': serializer.toJson<String?>(categoryId),
+      'categorySource': serializer.toJson<String?>(categorySource),
+      'categoryConfidence': serializer.toJson<double?>(categoryConfidence),
+      'categoryRuleId': serializer.toJson<int?>(categoryRuleId),
+      'merchantId': serializer.toJson<int?>(merchantId),
       'convertedAmountAmount': serializer.toJson<String?>(
         convertedAmountAmount,
       ),
@@ -4941,6 +5138,10 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     String? amountCurrency,
     int? amountMinor,
     Value<String?> categoryId = const Value.absent(),
+    Value<String?> categorySource = const Value.absent(),
+    Value<double?> categoryConfidence = const Value.absent(),
+    Value<int?> categoryRuleId = const Value.absent(),
+    Value<int?> merchantId = const Value.absent(),
     Value<String?> convertedAmountAmount = const Value.absent(),
     Value<String?> convertedAmountCurrency = const Value.absent(),
     Value<int?> convertedAmountMinor = const Value.absent(),
@@ -4992,6 +5193,16 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     amountCurrency: amountCurrency ?? this.amountCurrency,
     amountMinor: amountMinor ?? this.amountMinor,
     categoryId: categoryId.present ? categoryId.value : this.categoryId,
+    categorySource: categorySource.present
+        ? categorySource.value
+        : this.categorySource,
+    categoryConfidence: categoryConfidence.present
+        ? categoryConfidence.value
+        : this.categoryConfidence,
+    categoryRuleId: categoryRuleId.present
+        ? categoryRuleId.value
+        : this.categoryRuleId,
+    merchantId: merchantId.present ? merchantId.value : this.merchantId,
     convertedAmountAmount: convertedAmountAmount.present
         ? convertedAmountAmount.value
         : this.convertedAmountAmount,
@@ -5097,6 +5308,18 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       categoryId: data.categoryId.present
           ? data.categoryId.value
           : this.categoryId,
+      categorySource: data.categorySource.present
+          ? data.categorySource.value
+          : this.categorySource,
+      categoryConfidence: data.categoryConfidence.present
+          ? data.categoryConfidence.value
+          : this.categoryConfidence,
+      categoryRuleId: data.categoryRuleId.present
+          ? data.categoryRuleId.value
+          : this.categoryRuleId,
+      merchantId: data.merchantId.present
+          ? data.merchantId.value
+          : this.merchantId,
       convertedAmountAmount: data.convertedAmountAmount.present
           ? data.convertedAmountAmount.value
           : this.convertedAmountAmount,
@@ -5221,6 +5444,10 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           ..write('amountCurrency: $amountCurrency, ')
           ..write('amountMinor: $amountMinor, ')
           ..write('categoryId: $categoryId, ')
+          ..write('categorySource: $categorySource, ')
+          ..write('categoryConfidence: $categoryConfidence, ')
+          ..write('categoryRuleId: $categoryRuleId, ')
+          ..write('merchantId: $merchantId, ')
           ..write('convertedAmountAmount: $convertedAmountAmount, ')
           ..write('convertedAmountCurrency: $convertedAmountCurrency, ')
           ..write('convertedAmountMinor: $convertedAmountMinor, ')
@@ -5275,6 +5502,10 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     amountCurrency,
     amountMinor,
     categoryId,
+    categorySource,
+    categoryConfidence,
+    categoryRuleId,
+    merchantId,
     convertedAmountAmount,
     convertedAmountCurrency,
     convertedAmountMinor,
@@ -5328,6 +5559,10 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           other.amountCurrency == this.amountCurrency &&
           other.amountMinor == this.amountMinor &&
           other.categoryId == this.categoryId &&
+          other.categorySource == this.categorySource &&
+          other.categoryConfidence == this.categoryConfidence &&
+          other.categoryRuleId == this.categoryRuleId &&
+          other.merchantId == this.merchantId &&
           other.convertedAmountAmount == this.convertedAmountAmount &&
           other.convertedAmountCurrency == this.convertedAmountCurrency &&
           other.convertedAmountMinor == this.convertedAmountMinor &&
@@ -5379,6 +5614,10 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
   final Value<String> amountCurrency;
   final Value<int> amountMinor;
   final Value<String?> categoryId;
+  final Value<String?> categorySource;
+  final Value<double?> categoryConfidence;
+  final Value<int?> categoryRuleId;
+  final Value<int?> merchantId;
   final Value<String?> convertedAmountAmount;
   final Value<String?> convertedAmountCurrency;
   final Value<int?> convertedAmountMinor;
@@ -5428,6 +5667,10 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     this.amountCurrency = const Value.absent(),
     this.amountMinor = const Value.absent(),
     this.categoryId = const Value.absent(),
+    this.categorySource = const Value.absent(),
+    this.categoryConfidence = const Value.absent(),
+    this.categoryRuleId = const Value.absent(),
+    this.merchantId = const Value.absent(),
     this.convertedAmountAmount = const Value.absent(),
     this.convertedAmountCurrency = const Value.absent(),
     this.convertedAmountMinor = const Value.absent(),
@@ -5478,6 +5721,10 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     required String amountCurrency,
     required int amountMinor,
     this.categoryId = const Value.absent(),
+    this.categorySource = const Value.absent(),
+    this.categoryConfidence = const Value.absent(),
+    this.categoryRuleId = const Value.absent(),
+    this.merchantId = const Value.absent(),
     this.convertedAmountAmount = const Value.absent(),
     this.convertedAmountCurrency = const Value.absent(),
     this.convertedAmountMinor = const Value.absent(),
@@ -5530,6 +5777,10 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     Expression<String>? amountCurrency,
     Expression<int>? amountMinor,
     Expression<String>? categoryId,
+    Expression<String>? categorySource,
+    Expression<double>? categoryConfidence,
+    Expression<int>? categoryRuleId,
+    Expression<int>? merchantId,
     Expression<String>? convertedAmountAmount,
     Expression<String>? convertedAmountCurrency,
     Expression<int>? convertedAmountMinor,
@@ -5580,6 +5831,10 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
       if (amountCurrency != null) 'amount_currency': amountCurrency,
       if (amountMinor != null) 'amount_minor': amountMinor,
       if (categoryId != null) 'category_id': categoryId,
+      if (categorySource != null) 'category_source': categorySource,
+      if (categoryConfidence != null) 'category_confidence': categoryConfidence,
+      if (categoryRuleId != null) 'category_rule_id': categoryRuleId,
+      if (merchantId != null) 'merchant_id': merchantId,
       if (convertedAmountAmount != null)
         'converted_amount_amount': convertedAmountAmount,
       if (convertedAmountCurrency != null)
@@ -5644,6 +5899,10 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     Value<String>? amountCurrency,
     Value<int>? amountMinor,
     Value<String?>? categoryId,
+    Value<String?>? categorySource,
+    Value<double?>? categoryConfidence,
+    Value<int?>? categoryRuleId,
+    Value<int?>? merchantId,
     Value<String?>? convertedAmountAmount,
     Value<String?>? convertedAmountCurrency,
     Value<int?>? convertedAmountMinor,
@@ -5694,6 +5953,10 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
       amountCurrency: amountCurrency ?? this.amountCurrency,
       amountMinor: amountMinor ?? this.amountMinor,
       categoryId: categoryId ?? this.categoryId,
+      categorySource: categorySource ?? this.categorySource,
+      categoryConfidence: categoryConfidence ?? this.categoryConfidence,
+      categoryRuleId: categoryRuleId ?? this.categoryRuleId,
+      merchantId: merchantId ?? this.merchantId,
       convertedAmountAmount:
           convertedAmountAmount ?? this.convertedAmountAmount,
       convertedAmountCurrency:
@@ -5768,6 +6031,18 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     }
     if (categoryId.present) {
       map['category_id'] = Variable<String>(categoryId.value);
+    }
+    if (categorySource.present) {
+      map['category_source'] = Variable<String>(categorySource.value);
+    }
+    if (categoryConfidence.present) {
+      map['category_confidence'] = Variable<double>(categoryConfidence.value);
+    }
+    if (categoryRuleId.present) {
+      map['category_rule_id'] = Variable<int>(categoryRuleId.value);
+    }
+    if (merchantId.present) {
+      map['merchant_id'] = Variable<int>(merchantId.value);
     }
     if (convertedAmountAmount.present) {
       map['converted_amount_amount'] = Variable<String>(
@@ -5929,6 +6204,10 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
           ..write('amountCurrency: $amountCurrency, ')
           ..write('amountMinor: $amountMinor, ')
           ..write('categoryId: $categoryId, ')
+          ..write('categorySource: $categorySource, ')
+          ..write('categoryConfidence: $categoryConfidence, ')
+          ..write('categoryRuleId: $categoryRuleId, ')
+          ..write('merchantId: $merchantId, ')
           ..write('convertedAmountAmount: $convertedAmountAmount, ')
           ..write('convertedAmountCurrency: $convertedAmountCurrency, ')
           ..write('convertedAmountMinor: $convertedAmountMinor, ')
@@ -6951,6 +7230,2331 @@ class IngestWatermarksCompanion extends UpdateCompanion<IngestWatermarkRow> {
   }
 }
 
+class $CategoriesTable extends Categories
+    with TableInfo<$CategoriesTable, CategoryRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CategoriesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _keyMeta = const VerificationMeta('key');
+  @override
+  late final GeneratedColumn<String> key = GeneratedColumn<String>(
+    'key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  static const VerificationMeta _nameArMeta = const VerificationMeta('nameAr');
+  @override
+  late final GeneratedColumn<String> nameAr = GeneratedColumn<String>(
+    'name_ar',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameEnMeta = const VerificationMeta('nameEn');
+  @override
+  late final GeneratedColumn<String> nameEn = GeneratedColumn<String>(
+    'name_en',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameKeyArMeta = const VerificationMeta(
+    'nameKeyAr',
+  );
+  @override
+  late final GeneratedColumn<String> nameKeyAr = GeneratedColumn<String>(
+    'name_key_ar',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  static const VerificationMeta _nameKeyEnMeta = const VerificationMeta(
+    'nameKeyEn',
+  );
+  @override
+  late final GeneratedColumn<String> nameKeyEn = GeneratedColumn<String>(
+    'name_key_en',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  static const VerificationMeta _iconTokenMeta = const VerificationMeta(
+    'iconToken',
+  );
+  @override
+  late final GeneratedColumn<String> iconToken = GeneratedColumn<String>(
+    'icon_token',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _colorTokenMeta = const VerificationMeta(
+    'colorToken',
+  );
+  @override
+  late final GeneratedColumn<String> colorToken = GeneratedColumn<String>(
+    'color_token',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _groupKeyMeta = const VerificationMeta(
+    'groupKey',
+  );
+  @override
+  late final GeneratedColumn<String> groupKey = GeneratedColumn<String>(
+    'group_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _isSystemMeta = const VerificationMeta(
+    'isSystem',
+  );
+  @override
+  late final GeneratedColumn<bool> isSystem = GeneratedColumn<bool>(
+    'is_system',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_system" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _isProtectedMeta = const VerificationMeta(
+    'isProtected',
+  );
+  @override
+  late final GeneratedColumn<bool> isProtected = GeneratedColumn<bool>(
+    'is_protected',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_protected" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _isArchivedMeta = const VerificationMeta(
+    'isArchived',
+  );
+  @override
+  late final GeneratedColumn<bool> isArchived = GeneratedColumn<bool>(
+    'is_archived',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_archived" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _sortOrderMeta = const VerificationMeta(
+    'sortOrder',
+  );
+  @override
+  late final GeneratedColumn<int> sortOrder = GeneratedColumn<int>(
+    'sort_order',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    key,
+    nameAr,
+    nameEn,
+    nameKeyAr,
+    nameKeyEn,
+    iconToken,
+    colorToken,
+    groupKey,
+    isSystem,
+    isProtected,
+    isArchived,
+    sortOrder,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'category';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CategoryRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('key')) {
+      context.handle(
+        _keyMeta,
+        key.isAcceptableOrUnknown(data['key']!, _keyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_keyMeta);
+    }
+    if (data.containsKey('name_ar')) {
+      context.handle(
+        _nameArMeta,
+        nameAr.isAcceptableOrUnknown(data['name_ar']!, _nameArMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameArMeta);
+    }
+    if (data.containsKey('name_en')) {
+      context.handle(
+        _nameEnMeta,
+        nameEn.isAcceptableOrUnknown(data['name_en']!, _nameEnMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameEnMeta);
+    }
+    if (data.containsKey('name_key_ar')) {
+      context.handle(
+        _nameKeyArMeta,
+        nameKeyAr.isAcceptableOrUnknown(data['name_key_ar']!, _nameKeyArMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameKeyArMeta);
+    }
+    if (data.containsKey('name_key_en')) {
+      context.handle(
+        _nameKeyEnMeta,
+        nameKeyEn.isAcceptableOrUnknown(data['name_key_en']!, _nameKeyEnMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameKeyEnMeta);
+    }
+    if (data.containsKey('icon_token')) {
+      context.handle(
+        _iconTokenMeta,
+        iconToken.isAcceptableOrUnknown(data['icon_token']!, _iconTokenMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_iconTokenMeta);
+    }
+    if (data.containsKey('color_token')) {
+      context.handle(
+        _colorTokenMeta,
+        colorToken.isAcceptableOrUnknown(data['color_token']!, _colorTokenMeta),
+      );
+    }
+    if (data.containsKey('group_key')) {
+      context.handle(
+        _groupKeyMeta,
+        groupKey.isAcceptableOrUnknown(data['group_key']!, _groupKeyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_groupKeyMeta);
+    }
+    if (data.containsKey('is_system')) {
+      context.handle(
+        _isSystemMeta,
+        isSystem.isAcceptableOrUnknown(data['is_system']!, _isSystemMeta),
+      );
+    }
+    if (data.containsKey('is_protected')) {
+      context.handle(
+        _isProtectedMeta,
+        isProtected.isAcceptableOrUnknown(
+          data['is_protected']!,
+          _isProtectedMeta,
+        ),
+      );
+    }
+    if (data.containsKey('is_archived')) {
+      context.handle(
+        _isArchivedMeta,
+        isArchived.isAcceptableOrUnknown(data['is_archived']!, _isArchivedMeta),
+      );
+    }
+    if (data.containsKey('sort_order')) {
+      context.handle(
+        _sortOrderMeta,
+        sortOrder.isAcceptableOrUnknown(data['sort_order']!, _sortOrderMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  CategoryRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CategoryRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      key: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}key'],
+      )!,
+      nameAr: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name_ar'],
+      )!,
+      nameEn: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name_en'],
+      )!,
+      nameKeyAr: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name_key_ar'],
+      )!,
+      nameKeyEn: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name_key_en'],
+      )!,
+      iconToken: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}icon_token'],
+      )!,
+      colorToken: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}color_token'],
+      ),
+      groupKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}group_key'],
+      )!,
+      isSystem: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_system'],
+      )!,
+      isProtected: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_protected'],
+      )!,
+      isArchived: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_archived'],
+      )!,
+      sortOrder: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sort_order'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $CategoriesTable createAlias(String alias) {
+    return $CategoriesTable(attachedDatabase, alias);
+  }
+}
+
+class CategoryRow extends DataClass implements Insertable<CategoryRow> {
+  final String id;
+
+  /// The semantic key for a seeded category, e.g. `groceries`. Equal to [id]
+  /// for seeds and kept as its own column so a future rule pack can name a
+  /// category stably even if ids ever change shape.
+  final String key;
+  final String nameAr;
+  final String nameEn;
+
+  /// Folded match forms of the two names — the `UNIQUE` pair behind AC-C3.2.
+  /// Never displayed (see `CanonicalText`).
+  final String nameKeyAr;
+  final String nameKeyEn;
+
+  /// The Material Symbols identifier from design §4's table, e.g.
+  /// `shopping_cart`. A token, not an asset path: `docs/brand.md` §5.1 keeps
+  /// Flutter on bundled Material Symbols vector data.
+  final String iconToken;
+
+  /// A `docs/brand.md` chart-palette token, e.g. `chart-teal`. Null means "let
+  /// the theme choose", which is the honest state for a category the user
+  /// created without picking a colour.
+  final String? colorToken;
+
+  /// `spending` | `money_movement` — design §4's two buckets.
+  ///
+  /// This is not cosmetic. A money-movement category is excluded from spend
+  /// totals and cannot carry a budget (US-B10/B11, US-G1), so the group is a
+  /// behavioural fact about the category that reporting reads.
+  final String groupKey;
+
+  /// True for the 13 rows seeded from design §4. Fully editable regardless —
+  /// see point 3 in the class comment.
+  final bool isSystem;
+
+  /// True for *Uncategorized* alone: may not be renamed, deleted or archived.
+  final bool isProtected;
+
+  /// Hidden from pickers but retained, so historical transactions keep their
+  /// category context. There is no hard delete outside erase-all (ADR-011) —
+  /// except a category delete, which is a real delete *because* AC-C3.3 forces
+  /// the user to say where its transactions go first.
+  final bool isArchived;
+
+  /// Display order within [groupKey]; design §4's table is numbered 1-13 and
+  /// that numbering is the seed order.
+  final int sortOrder;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  const CategoryRow({
+    required this.id,
+    required this.key,
+    required this.nameAr,
+    required this.nameEn,
+    required this.nameKeyAr,
+    required this.nameKeyEn,
+    required this.iconToken,
+    this.colorToken,
+    required this.groupKey,
+    required this.isSystem,
+    required this.isProtected,
+    required this.isArchived,
+    required this.sortOrder,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['key'] = Variable<String>(key);
+    map['name_ar'] = Variable<String>(nameAr);
+    map['name_en'] = Variable<String>(nameEn);
+    map['name_key_ar'] = Variable<String>(nameKeyAr);
+    map['name_key_en'] = Variable<String>(nameKeyEn);
+    map['icon_token'] = Variable<String>(iconToken);
+    if (!nullToAbsent || colorToken != null) {
+      map['color_token'] = Variable<String>(colorToken);
+    }
+    map['group_key'] = Variable<String>(groupKey);
+    map['is_system'] = Variable<bool>(isSystem);
+    map['is_protected'] = Variable<bool>(isProtected);
+    map['is_archived'] = Variable<bool>(isArchived);
+    map['sort_order'] = Variable<int>(sortOrder);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  CategoriesCompanion toCompanion(bool nullToAbsent) {
+    return CategoriesCompanion(
+      id: Value(id),
+      key: Value(key),
+      nameAr: Value(nameAr),
+      nameEn: Value(nameEn),
+      nameKeyAr: Value(nameKeyAr),
+      nameKeyEn: Value(nameKeyEn),
+      iconToken: Value(iconToken),
+      colorToken: colorToken == null && nullToAbsent
+          ? const Value.absent()
+          : Value(colorToken),
+      groupKey: Value(groupKey),
+      isSystem: Value(isSystem),
+      isProtected: Value(isProtected),
+      isArchived: Value(isArchived),
+      sortOrder: Value(sortOrder),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory CategoryRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CategoryRow(
+      id: serializer.fromJson<String>(json['id']),
+      key: serializer.fromJson<String>(json['key']),
+      nameAr: serializer.fromJson<String>(json['nameAr']),
+      nameEn: serializer.fromJson<String>(json['nameEn']),
+      nameKeyAr: serializer.fromJson<String>(json['nameKeyAr']),
+      nameKeyEn: serializer.fromJson<String>(json['nameKeyEn']),
+      iconToken: serializer.fromJson<String>(json['iconToken']),
+      colorToken: serializer.fromJson<String?>(json['colorToken']),
+      groupKey: serializer.fromJson<String>(json['groupKey']),
+      isSystem: serializer.fromJson<bool>(json['isSystem']),
+      isProtected: serializer.fromJson<bool>(json['isProtected']),
+      isArchived: serializer.fromJson<bool>(json['isArchived']),
+      sortOrder: serializer.fromJson<int>(json['sortOrder']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'key': serializer.toJson<String>(key),
+      'nameAr': serializer.toJson<String>(nameAr),
+      'nameEn': serializer.toJson<String>(nameEn),
+      'nameKeyAr': serializer.toJson<String>(nameKeyAr),
+      'nameKeyEn': serializer.toJson<String>(nameKeyEn),
+      'iconToken': serializer.toJson<String>(iconToken),
+      'colorToken': serializer.toJson<String?>(colorToken),
+      'groupKey': serializer.toJson<String>(groupKey),
+      'isSystem': serializer.toJson<bool>(isSystem),
+      'isProtected': serializer.toJson<bool>(isProtected),
+      'isArchived': serializer.toJson<bool>(isArchived),
+      'sortOrder': serializer.toJson<int>(sortOrder),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  CategoryRow copyWith({
+    String? id,
+    String? key,
+    String? nameAr,
+    String? nameEn,
+    String? nameKeyAr,
+    String? nameKeyEn,
+    String? iconToken,
+    Value<String?> colorToken = const Value.absent(),
+    String? groupKey,
+    bool? isSystem,
+    bool? isProtected,
+    bool? isArchived,
+    int? sortOrder,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) => CategoryRow(
+    id: id ?? this.id,
+    key: key ?? this.key,
+    nameAr: nameAr ?? this.nameAr,
+    nameEn: nameEn ?? this.nameEn,
+    nameKeyAr: nameKeyAr ?? this.nameKeyAr,
+    nameKeyEn: nameKeyEn ?? this.nameKeyEn,
+    iconToken: iconToken ?? this.iconToken,
+    colorToken: colorToken.present ? colorToken.value : this.colorToken,
+    groupKey: groupKey ?? this.groupKey,
+    isSystem: isSystem ?? this.isSystem,
+    isProtected: isProtected ?? this.isProtected,
+    isArchived: isArchived ?? this.isArchived,
+    sortOrder: sortOrder ?? this.sortOrder,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  CategoryRow copyWithCompanion(CategoriesCompanion data) {
+    return CategoryRow(
+      id: data.id.present ? data.id.value : this.id,
+      key: data.key.present ? data.key.value : this.key,
+      nameAr: data.nameAr.present ? data.nameAr.value : this.nameAr,
+      nameEn: data.nameEn.present ? data.nameEn.value : this.nameEn,
+      nameKeyAr: data.nameKeyAr.present ? data.nameKeyAr.value : this.nameKeyAr,
+      nameKeyEn: data.nameKeyEn.present ? data.nameKeyEn.value : this.nameKeyEn,
+      iconToken: data.iconToken.present ? data.iconToken.value : this.iconToken,
+      colorToken: data.colorToken.present
+          ? data.colorToken.value
+          : this.colorToken,
+      groupKey: data.groupKey.present ? data.groupKey.value : this.groupKey,
+      isSystem: data.isSystem.present ? data.isSystem.value : this.isSystem,
+      isProtected: data.isProtected.present
+          ? data.isProtected.value
+          : this.isProtected,
+      isArchived: data.isArchived.present
+          ? data.isArchived.value
+          : this.isArchived,
+      sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CategoryRow(')
+          ..write('id: $id, ')
+          ..write('key: $key, ')
+          ..write('nameAr: $nameAr, ')
+          ..write('nameEn: $nameEn, ')
+          ..write('nameKeyAr: $nameKeyAr, ')
+          ..write('nameKeyEn: $nameKeyEn, ')
+          ..write('iconToken: $iconToken, ')
+          ..write('colorToken: $colorToken, ')
+          ..write('groupKey: $groupKey, ')
+          ..write('isSystem: $isSystem, ')
+          ..write('isProtected: $isProtected, ')
+          ..write('isArchived: $isArchived, ')
+          ..write('sortOrder: $sortOrder, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    key,
+    nameAr,
+    nameEn,
+    nameKeyAr,
+    nameKeyEn,
+    iconToken,
+    colorToken,
+    groupKey,
+    isSystem,
+    isProtected,
+    isArchived,
+    sortOrder,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CategoryRow &&
+          other.id == this.id &&
+          other.key == this.key &&
+          other.nameAr == this.nameAr &&
+          other.nameEn == this.nameEn &&
+          other.nameKeyAr == this.nameKeyAr &&
+          other.nameKeyEn == this.nameKeyEn &&
+          other.iconToken == this.iconToken &&
+          other.colorToken == this.colorToken &&
+          other.groupKey == this.groupKey &&
+          other.isSystem == this.isSystem &&
+          other.isProtected == this.isProtected &&
+          other.isArchived == this.isArchived &&
+          other.sortOrder == this.sortOrder &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class CategoriesCompanion extends UpdateCompanion<CategoryRow> {
+  final Value<String> id;
+  final Value<String> key;
+  final Value<String> nameAr;
+  final Value<String> nameEn;
+  final Value<String> nameKeyAr;
+  final Value<String> nameKeyEn;
+  final Value<String> iconToken;
+  final Value<String?> colorToken;
+  final Value<String> groupKey;
+  final Value<bool> isSystem;
+  final Value<bool> isProtected;
+  final Value<bool> isArchived;
+  final Value<int> sortOrder;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const CategoriesCompanion({
+    this.id = const Value.absent(),
+    this.key = const Value.absent(),
+    this.nameAr = const Value.absent(),
+    this.nameEn = const Value.absent(),
+    this.nameKeyAr = const Value.absent(),
+    this.nameKeyEn = const Value.absent(),
+    this.iconToken = const Value.absent(),
+    this.colorToken = const Value.absent(),
+    this.groupKey = const Value.absent(),
+    this.isSystem = const Value.absent(),
+    this.isProtected = const Value.absent(),
+    this.isArchived = const Value.absent(),
+    this.sortOrder = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CategoriesCompanion.insert({
+    required String id,
+    required String key,
+    required String nameAr,
+    required String nameEn,
+    required String nameKeyAr,
+    required String nameKeyEn,
+    required String iconToken,
+    this.colorToken = const Value.absent(),
+    required String groupKey,
+    this.isSystem = const Value.absent(),
+    this.isProtected = const Value.absent(),
+    this.isArchived = const Value.absent(),
+    this.sortOrder = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       key = Value(key),
+       nameAr = Value(nameAr),
+       nameEn = Value(nameEn),
+       nameKeyAr = Value(nameKeyAr),
+       nameKeyEn = Value(nameKeyEn),
+       iconToken = Value(iconToken),
+       groupKey = Value(groupKey);
+  static Insertable<CategoryRow> custom({
+    Expression<String>? id,
+    Expression<String>? key,
+    Expression<String>? nameAr,
+    Expression<String>? nameEn,
+    Expression<String>? nameKeyAr,
+    Expression<String>? nameKeyEn,
+    Expression<String>? iconToken,
+    Expression<String>? colorToken,
+    Expression<String>? groupKey,
+    Expression<bool>? isSystem,
+    Expression<bool>? isProtected,
+    Expression<bool>? isArchived,
+    Expression<int>? sortOrder,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (key != null) 'key': key,
+      if (nameAr != null) 'name_ar': nameAr,
+      if (nameEn != null) 'name_en': nameEn,
+      if (nameKeyAr != null) 'name_key_ar': nameKeyAr,
+      if (nameKeyEn != null) 'name_key_en': nameKeyEn,
+      if (iconToken != null) 'icon_token': iconToken,
+      if (colorToken != null) 'color_token': colorToken,
+      if (groupKey != null) 'group_key': groupKey,
+      if (isSystem != null) 'is_system': isSystem,
+      if (isProtected != null) 'is_protected': isProtected,
+      if (isArchived != null) 'is_archived': isArchived,
+      if (sortOrder != null) 'sort_order': sortOrder,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CategoriesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? key,
+    Value<String>? nameAr,
+    Value<String>? nameEn,
+    Value<String>? nameKeyAr,
+    Value<String>? nameKeyEn,
+    Value<String>? iconToken,
+    Value<String?>? colorToken,
+    Value<String>? groupKey,
+    Value<bool>? isSystem,
+    Value<bool>? isProtected,
+    Value<bool>? isArchived,
+    Value<int>? sortOrder,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return CategoriesCompanion(
+      id: id ?? this.id,
+      key: key ?? this.key,
+      nameAr: nameAr ?? this.nameAr,
+      nameEn: nameEn ?? this.nameEn,
+      nameKeyAr: nameKeyAr ?? this.nameKeyAr,
+      nameKeyEn: nameKeyEn ?? this.nameKeyEn,
+      iconToken: iconToken ?? this.iconToken,
+      colorToken: colorToken ?? this.colorToken,
+      groupKey: groupKey ?? this.groupKey,
+      isSystem: isSystem ?? this.isSystem,
+      isProtected: isProtected ?? this.isProtected,
+      isArchived: isArchived ?? this.isArchived,
+      sortOrder: sortOrder ?? this.sortOrder,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (key.present) {
+      map['key'] = Variable<String>(key.value);
+    }
+    if (nameAr.present) {
+      map['name_ar'] = Variable<String>(nameAr.value);
+    }
+    if (nameEn.present) {
+      map['name_en'] = Variable<String>(nameEn.value);
+    }
+    if (nameKeyAr.present) {
+      map['name_key_ar'] = Variable<String>(nameKeyAr.value);
+    }
+    if (nameKeyEn.present) {
+      map['name_key_en'] = Variable<String>(nameKeyEn.value);
+    }
+    if (iconToken.present) {
+      map['icon_token'] = Variable<String>(iconToken.value);
+    }
+    if (colorToken.present) {
+      map['color_token'] = Variable<String>(colorToken.value);
+    }
+    if (groupKey.present) {
+      map['group_key'] = Variable<String>(groupKey.value);
+    }
+    if (isSystem.present) {
+      map['is_system'] = Variable<bool>(isSystem.value);
+    }
+    if (isProtected.present) {
+      map['is_protected'] = Variable<bool>(isProtected.value);
+    }
+    if (isArchived.present) {
+      map['is_archived'] = Variable<bool>(isArchived.value);
+    }
+    if (sortOrder.present) {
+      map['sort_order'] = Variable<int>(sortOrder.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CategoriesCompanion(')
+          ..write('id: $id, ')
+          ..write('key: $key, ')
+          ..write('nameAr: $nameAr, ')
+          ..write('nameEn: $nameEn, ')
+          ..write('nameKeyAr: $nameKeyAr, ')
+          ..write('nameKeyEn: $nameKeyEn, ')
+          ..write('iconToken: $iconToken, ')
+          ..write('colorToken: $colorToken, ')
+          ..write('groupKey: $groupKey, ')
+          ..write('isSystem: $isSystem, ')
+          ..write('isProtected: $isProtected, ')
+          ..write('isArchived: $isArchived, ')
+          ..write('sortOrder: $sortOrder, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $MerchantsTable extends Merchants
+    with TableInfo<$MerchantsTable, MerchantRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $MerchantsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _canonicalNameMeta = const VerificationMeta(
+    'canonicalName',
+  );
+  @override
+  late final GeneratedColumn<String> canonicalName = GeneratedColumn<String>(
+    'canonical_name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _merchantKeyMeta = const VerificationMeta(
+    'merchantKey',
+  );
+  @override
+  late final GeneratedColumn<String> merchantKey = GeneratedColumn<String>(
+    'merchant_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  static const VerificationMeta _firstSeenMessageIdMeta =
+      const VerificationMeta('firstSeenMessageId');
+  @override
+  late final GeneratedColumn<int> firstSeenMessageId = GeneratedColumn<int>(
+    'first_seen_message_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    canonicalName,
+    merchantKey,
+    firstSeenMessageId,
+    createdAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'merchant';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<MerchantRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('canonical_name')) {
+      context.handle(
+        _canonicalNameMeta,
+        canonicalName.isAcceptableOrUnknown(
+          data['canonical_name']!,
+          _canonicalNameMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_canonicalNameMeta);
+    }
+    if (data.containsKey('merchant_key')) {
+      context.handle(
+        _merchantKeyMeta,
+        merchantKey.isAcceptableOrUnknown(
+          data['merchant_key']!,
+          _merchantKeyMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_merchantKeyMeta);
+    }
+    if (data.containsKey('first_seen_message_id')) {
+      context.handle(
+        _firstSeenMessageIdMeta,
+        firstSeenMessageId.isAcceptableOrUnknown(
+          data['first_seen_message_id']!,
+          _firstSeenMessageIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  MerchantRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return MerchantRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      canonicalName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}canonical_name'],
+      )!,
+      merchantKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}merchant_key'],
+      )!,
+      firstSeenMessageId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}first_seen_message_id'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $MerchantsTable createAlias(String alias) {
+    return $MerchantsTable(attachedDatabase, alias);
+  }
+}
+
+class MerchantRow extends DataClass implements Insertable<MerchantRow> {
+  final int id;
+
+  /// The first raw merchant string observed for this merchant, for display.
+  final String canonicalName;
+
+  /// ADR-008's normalised key. `UNIQUE` — see the class comment.
+  final String merchantKey;
+
+  /// `raw_message.id` of the message that first mentioned this merchant
+  /// (NFR-A1), or null when the user created it by hand.
+  final int? firstSeenMessageId;
+  final DateTime createdAt;
+  const MerchantRow({
+    required this.id,
+    required this.canonicalName,
+    required this.merchantKey,
+    this.firstSeenMessageId,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['canonical_name'] = Variable<String>(canonicalName);
+    map['merchant_key'] = Variable<String>(merchantKey);
+    if (!nullToAbsent || firstSeenMessageId != null) {
+      map['first_seen_message_id'] = Variable<int>(firstSeenMessageId);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  MerchantsCompanion toCompanion(bool nullToAbsent) {
+    return MerchantsCompanion(
+      id: Value(id),
+      canonicalName: Value(canonicalName),
+      merchantKey: Value(merchantKey),
+      firstSeenMessageId: firstSeenMessageId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(firstSeenMessageId),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory MerchantRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return MerchantRow(
+      id: serializer.fromJson<int>(json['id']),
+      canonicalName: serializer.fromJson<String>(json['canonicalName']),
+      merchantKey: serializer.fromJson<String>(json['merchantKey']),
+      firstSeenMessageId: serializer.fromJson<int?>(json['firstSeenMessageId']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'canonicalName': serializer.toJson<String>(canonicalName),
+      'merchantKey': serializer.toJson<String>(merchantKey),
+      'firstSeenMessageId': serializer.toJson<int?>(firstSeenMessageId),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  MerchantRow copyWith({
+    int? id,
+    String? canonicalName,
+    String? merchantKey,
+    Value<int?> firstSeenMessageId = const Value.absent(),
+    DateTime? createdAt,
+  }) => MerchantRow(
+    id: id ?? this.id,
+    canonicalName: canonicalName ?? this.canonicalName,
+    merchantKey: merchantKey ?? this.merchantKey,
+    firstSeenMessageId: firstSeenMessageId.present
+        ? firstSeenMessageId.value
+        : this.firstSeenMessageId,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  MerchantRow copyWithCompanion(MerchantsCompanion data) {
+    return MerchantRow(
+      id: data.id.present ? data.id.value : this.id,
+      canonicalName: data.canonicalName.present
+          ? data.canonicalName.value
+          : this.canonicalName,
+      merchantKey: data.merchantKey.present
+          ? data.merchantKey.value
+          : this.merchantKey,
+      firstSeenMessageId: data.firstSeenMessageId.present
+          ? data.firstSeenMessageId.value
+          : this.firstSeenMessageId,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MerchantRow(')
+          ..write('id: $id, ')
+          ..write('canonicalName: $canonicalName, ')
+          ..write('merchantKey: $merchantKey, ')
+          ..write('firstSeenMessageId: $firstSeenMessageId, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    canonicalName,
+    merchantKey,
+    firstSeenMessageId,
+    createdAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is MerchantRow &&
+          other.id == this.id &&
+          other.canonicalName == this.canonicalName &&
+          other.merchantKey == this.merchantKey &&
+          other.firstSeenMessageId == this.firstSeenMessageId &&
+          other.createdAt == this.createdAt);
+}
+
+class MerchantsCompanion extends UpdateCompanion<MerchantRow> {
+  final Value<int> id;
+  final Value<String> canonicalName;
+  final Value<String> merchantKey;
+  final Value<int?> firstSeenMessageId;
+  final Value<DateTime> createdAt;
+  const MerchantsCompanion({
+    this.id = const Value.absent(),
+    this.canonicalName = const Value.absent(),
+    this.merchantKey = const Value.absent(),
+    this.firstSeenMessageId = const Value.absent(),
+    this.createdAt = const Value.absent(),
+  });
+  MerchantsCompanion.insert({
+    this.id = const Value.absent(),
+    required String canonicalName,
+    required String merchantKey,
+    this.firstSeenMessageId = const Value.absent(),
+    this.createdAt = const Value.absent(),
+  }) : canonicalName = Value(canonicalName),
+       merchantKey = Value(merchantKey);
+  static Insertable<MerchantRow> custom({
+    Expression<int>? id,
+    Expression<String>? canonicalName,
+    Expression<String>? merchantKey,
+    Expression<int>? firstSeenMessageId,
+    Expression<DateTime>? createdAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (canonicalName != null) 'canonical_name': canonicalName,
+      if (merchantKey != null) 'merchant_key': merchantKey,
+      if (firstSeenMessageId != null)
+        'first_seen_message_id': firstSeenMessageId,
+      if (createdAt != null) 'created_at': createdAt,
+    });
+  }
+
+  MerchantsCompanion copyWith({
+    Value<int>? id,
+    Value<String>? canonicalName,
+    Value<String>? merchantKey,
+    Value<int?>? firstSeenMessageId,
+    Value<DateTime>? createdAt,
+  }) {
+    return MerchantsCompanion(
+      id: id ?? this.id,
+      canonicalName: canonicalName ?? this.canonicalName,
+      merchantKey: merchantKey ?? this.merchantKey,
+      firstSeenMessageId: firstSeenMessageId ?? this.firstSeenMessageId,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (canonicalName.present) {
+      map['canonical_name'] = Variable<String>(canonicalName.value);
+    }
+    if (merchantKey.present) {
+      map['merchant_key'] = Variable<String>(merchantKey.value);
+    }
+    if (firstSeenMessageId.present) {
+      map['first_seen_message_id'] = Variable<int>(firstSeenMessageId.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MerchantsCompanion(')
+          ..write('id: $id, ')
+          ..write('canonicalName: $canonicalName, ')
+          ..write('merchantKey: $merchantKey, ')
+          ..write('firstSeenMessageId: $firstSeenMessageId, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $MerchantAliasesTable extends MerchantAliases
+    with TableInfo<$MerchantAliasesTable, MerchantAliasRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $MerchantAliasesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _merchantIdMeta = const VerificationMeta(
+    'merchantId',
+  );
+  @override
+  late final GeneratedColumn<int> merchantId = GeneratedColumn<int>(
+    'merchant_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+    $customConstraints: 'NOT NULL REFERENCES merchant(id)',
+  );
+  static const VerificationMeta _aliasKeyMeta = const VerificationMeta(
+    'aliasKey',
+  );
+  @override
+  late final GeneratedColumn<String> aliasKey = GeneratedColumn<String>(
+    'alias_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  static const VerificationMeta _scriptMeta = const VerificationMeta('script');
+  @override
+  late final GeneratedColumn<String> script = GeneratedColumn<String>(
+    'script',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sourceMeta = const VerificationMeta('source');
+  @override
+  late final GeneratedColumn<String> source = GeneratedColumn<String>(
+    'source',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    merchantId,
+    aliasKey,
+    script,
+    source,
+    createdAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'merchant_alias';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<MerchantAliasRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('merchant_id')) {
+      context.handle(
+        _merchantIdMeta,
+        merchantId.isAcceptableOrUnknown(data['merchant_id']!, _merchantIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_merchantIdMeta);
+    }
+    if (data.containsKey('alias_key')) {
+      context.handle(
+        _aliasKeyMeta,
+        aliasKey.isAcceptableOrUnknown(data['alias_key']!, _aliasKeyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_aliasKeyMeta);
+    }
+    if (data.containsKey('script')) {
+      context.handle(
+        _scriptMeta,
+        script.isAcceptableOrUnknown(data['script']!, _scriptMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_scriptMeta);
+    }
+    if (data.containsKey('source')) {
+      context.handle(
+        _sourceMeta,
+        source.isAcceptableOrUnknown(data['source']!, _sourceMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sourceMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  MerchantAliasRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return MerchantAliasRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      merchantId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}merchant_id'],
+      )!,
+      aliasKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}alias_key'],
+      )!,
+      script: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}script'],
+      )!,
+      source: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}source'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $MerchantAliasesTable createAlias(String alias) {
+    return $MerchantAliasesTable(attachedDatabase, alias);
+  }
+}
+
+class MerchantAliasRow extends DataClass
+    implements Insertable<MerchantAliasRow> {
+  final int id;
+
+  /// The canonical merchant this alias resolves to.
+  ///
+  /// `customConstraint` rather than `.references(Merchants, #id)` for the same
+  /// drift 2.31 reason documented on `instrument_table.dart`'s `bankId`: the
+  /// Dart-side resolver silently emits *no* foreign key under this project's
+  /// pinned analyzer, and a constraint you believe you have and do not is
+  /// worse than none.
+  final int merchantId;
+
+  /// The normalised key of the *alternative* spelling, produced by the same
+  /// `MerchantKey.of` pipeline. `UNIQUE`, so one spelling can never point at
+  /// two different merchants — which is the database refusing to represent an
+  /// ambiguity the matcher would otherwise have to resolve by guessing.
+  final String aliasKey;
+
+  /// `arabic` | `latin` | `mixed` — recorded so a future review screen can
+  /// explain *why* two spellings were linked.
+  final String script;
+
+  /// `user` | `observed`. P4a writes only `user` — see the class comment.
+  final String source;
+  final DateTime createdAt;
+  const MerchantAliasRow({
+    required this.id,
+    required this.merchantId,
+    required this.aliasKey,
+    required this.script,
+    required this.source,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['merchant_id'] = Variable<int>(merchantId);
+    map['alias_key'] = Variable<String>(aliasKey);
+    map['script'] = Variable<String>(script);
+    map['source'] = Variable<String>(source);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  MerchantAliasesCompanion toCompanion(bool nullToAbsent) {
+    return MerchantAliasesCompanion(
+      id: Value(id),
+      merchantId: Value(merchantId),
+      aliasKey: Value(aliasKey),
+      script: Value(script),
+      source: Value(source),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory MerchantAliasRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return MerchantAliasRow(
+      id: serializer.fromJson<int>(json['id']),
+      merchantId: serializer.fromJson<int>(json['merchantId']),
+      aliasKey: serializer.fromJson<String>(json['aliasKey']),
+      script: serializer.fromJson<String>(json['script']),
+      source: serializer.fromJson<String>(json['source']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'merchantId': serializer.toJson<int>(merchantId),
+      'aliasKey': serializer.toJson<String>(aliasKey),
+      'script': serializer.toJson<String>(script),
+      'source': serializer.toJson<String>(source),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  MerchantAliasRow copyWith({
+    int? id,
+    int? merchantId,
+    String? aliasKey,
+    String? script,
+    String? source,
+    DateTime? createdAt,
+  }) => MerchantAliasRow(
+    id: id ?? this.id,
+    merchantId: merchantId ?? this.merchantId,
+    aliasKey: aliasKey ?? this.aliasKey,
+    script: script ?? this.script,
+    source: source ?? this.source,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  MerchantAliasRow copyWithCompanion(MerchantAliasesCompanion data) {
+    return MerchantAliasRow(
+      id: data.id.present ? data.id.value : this.id,
+      merchantId: data.merchantId.present
+          ? data.merchantId.value
+          : this.merchantId,
+      aliasKey: data.aliasKey.present ? data.aliasKey.value : this.aliasKey,
+      script: data.script.present ? data.script.value : this.script,
+      source: data.source.present ? data.source.value : this.source,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MerchantAliasRow(')
+          ..write('id: $id, ')
+          ..write('merchantId: $merchantId, ')
+          ..write('aliasKey: $aliasKey, ')
+          ..write('script: $script, ')
+          ..write('source: $source, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(id, merchantId, aliasKey, script, source, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is MerchantAliasRow &&
+          other.id == this.id &&
+          other.merchantId == this.merchantId &&
+          other.aliasKey == this.aliasKey &&
+          other.script == this.script &&
+          other.source == this.source &&
+          other.createdAt == this.createdAt);
+}
+
+class MerchantAliasesCompanion extends UpdateCompanion<MerchantAliasRow> {
+  final Value<int> id;
+  final Value<int> merchantId;
+  final Value<String> aliasKey;
+  final Value<String> script;
+  final Value<String> source;
+  final Value<DateTime> createdAt;
+  const MerchantAliasesCompanion({
+    this.id = const Value.absent(),
+    this.merchantId = const Value.absent(),
+    this.aliasKey = const Value.absent(),
+    this.script = const Value.absent(),
+    this.source = const Value.absent(),
+    this.createdAt = const Value.absent(),
+  });
+  MerchantAliasesCompanion.insert({
+    this.id = const Value.absent(),
+    required int merchantId,
+    required String aliasKey,
+    required String script,
+    required String source,
+    this.createdAt = const Value.absent(),
+  }) : merchantId = Value(merchantId),
+       aliasKey = Value(aliasKey),
+       script = Value(script),
+       source = Value(source);
+  static Insertable<MerchantAliasRow> custom({
+    Expression<int>? id,
+    Expression<int>? merchantId,
+    Expression<String>? aliasKey,
+    Expression<String>? script,
+    Expression<String>? source,
+    Expression<DateTime>? createdAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (merchantId != null) 'merchant_id': merchantId,
+      if (aliasKey != null) 'alias_key': aliasKey,
+      if (script != null) 'script': script,
+      if (source != null) 'source': source,
+      if (createdAt != null) 'created_at': createdAt,
+    });
+  }
+
+  MerchantAliasesCompanion copyWith({
+    Value<int>? id,
+    Value<int>? merchantId,
+    Value<String>? aliasKey,
+    Value<String>? script,
+    Value<String>? source,
+    Value<DateTime>? createdAt,
+  }) {
+    return MerchantAliasesCompanion(
+      id: id ?? this.id,
+      merchantId: merchantId ?? this.merchantId,
+      aliasKey: aliasKey ?? this.aliasKey,
+      script: script ?? this.script,
+      source: source ?? this.source,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (merchantId.present) {
+      map['merchant_id'] = Variable<int>(merchantId.value);
+    }
+    if (aliasKey.present) {
+      map['alias_key'] = Variable<String>(aliasKey.value);
+    }
+    if (script.present) {
+      map['script'] = Variable<String>(script.value);
+    }
+    if (source.present) {
+      map['source'] = Variable<String>(source.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MerchantAliasesCompanion(')
+          ..write('id: $id, ')
+          ..write('merchantId: $merchantId, ')
+          ..write('aliasKey: $aliasKey, ')
+          ..write('script: $script, ')
+          ..write('source: $source, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $MerchantRulesTable extends MerchantRules
+    with TableInfo<$MerchantRulesTable, MerchantRuleRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $MerchantRulesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _merchantIdMeta = const VerificationMeta(
+    'merchantId',
+  );
+  @override
+  late final GeneratedColumn<int> merchantId = GeneratedColumn<int>(
+    'merchant_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+    $customConstraints: 'NOT NULL UNIQUE REFERENCES merchant(id)',
+  );
+  static const VerificationMeta _categoryIdMeta = const VerificationMeta(
+    'categoryId',
+  );
+  @override
+  late final GeneratedColumn<String> categoryId = GeneratedColumn<String>(
+    'category_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _matchTypeMeta = const VerificationMeta(
+    'matchType',
+  );
+  @override
+  late final GeneratedColumn<String> matchType = GeneratedColumn<String>(
+    'match_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('exact_key'),
+  );
+  static const VerificationMeta _sourceMeta = const VerificationMeta('source');
+  @override
+  late final GeneratedColumn<String> source = GeneratedColumn<String>(
+    'source',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _isEnabledMeta = const VerificationMeta(
+    'isEnabled',
+  );
+  @override
+  late final GeneratedColumn<bool> isEnabled = GeneratedColumn<bool>(
+    'is_enabled',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_enabled" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _appliedCountMeta = const VerificationMeta(
+    'appliedCount',
+  );
+  @override
+  late final GeneratedColumn<int> appliedCount = GeneratedColumn<int>(
+    'applied_count',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _lastAppliedAtMeta = const VerificationMeta(
+    'lastAppliedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> lastAppliedAt =
+      GeneratedColumn<DateTime>(
+        'last_applied_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    merchantId,
+    categoryId,
+    matchType,
+    source,
+    isEnabled,
+    appliedCount,
+    lastAppliedAt,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'merchant_rule';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<MerchantRuleRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('merchant_id')) {
+      context.handle(
+        _merchantIdMeta,
+        merchantId.isAcceptableOrUnknown(data['merchant_id']!, _merchantIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_merchantIdMeta);
+    }
+    if (data.containsKey('category_id')) {
+      context.handle(
+        _categoryIdMeta,
+        categoryId.isAcceptableOrUnknown(data['category_id']!, _categoryIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_categoryIdMeta);
+    }
+    if (data.containsKey('match_type')) {
+      context.handle(
+        _matchTypeMeta,
+        matchType.isAcceptableOrUnknown(data['match_type']!, _matchTypeMeta),
+      );
+    }
+    if (data.containsKey('source')) {
+      context.handle(
+        _sourceMeta,
+        source.isAcceptableOrUnknown(data['source']!, _sourceMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sourceMeta);
+    }
+    if (data.containsKey('is_enabled')) {
+      context.handle(
+        _isEnabledMeta,
+        isEnabled.isAcceptableOrUnknown(data['is_enabled']!, _isEnabledMeta),
+      );
+    }
+    if (data.containsKey('applied_count')) {
+      context.handle(
+        _appliedCountMeta,
+        appliedCount.isAcceptableOrUnknown(
+          data['applied_count']!,
+          _appliedCountMeta,
+        ),
+      );
+    }
+    if (data.containsKey('last_applied_at')) {
+      context.handle(
+        _lastAppliedAtMeta,
+        lastAppliedAt.isAcceptableOrUnknown(
+          data['last_applied_at']!,
+          _lastAppliedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  MerchantRuleRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return MerchantRuleRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      merchantId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}merchant_id'],
+      )!,
+      categoryId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}category_id'],
+      )!,
+      matchType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}match_type'],
+      )!,
+      source: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}source'],
+      )!,
+      isEnabled: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_enabled'],
+      )!,
+      appliedCount: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}applied_count'],
+      )!,
+      lastAppliedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}last_applied_at'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $MerchantRulesTable createAlias(String alias) {
+    return $MerchantRulesTable(attachedDatabase, alias);
+  }
+}
+
+class MerchantRuleRow extends DataClass implements Insertable<MerchantRuleRow> {
+  final int id;
+
+  /// One live rule per merchant — see the class comment.
+  ///
+  /// `UNIQUE` is written inside the custom constraint rather than as a
+  /// separate `.unique()` call: a column-level `customConstraint` **replaces**
+  /// everything drift would have generated for the column, so a `.unique()`
+  /// alongside it would silently produce no constraint at all (the same trap
+  /// `instrument_table.dart` documents for `NOT NULL`).
+  final int merchantId;
+
+  /// The category this merchant's transactions belong in.
+  ///
+  /// Not declared as a SQL foreign key, and the reason is the same one that
+  /// makes `AppDatabase`'s category-delete trigger the right mechanism: the
+  /// guarantee AC-C3.3 asks for is *"no transaction points at a missing
+  /// category"*, and it is enforced at the single operation that could break
+  /// it (the delete) for every referencing table at once. `CategoryDao.delete`
+  /// repoints or removes the rules that name the doomed category inside the
+  /// same database transaction as the delete.
+  final String categoryId;
+
+  /// `exact_key` | `token_set` | `manual_alias` — how the rule is intended to
+  /// be matched. Recorded per architecture §4.2; the matcher currently applies
+  /// every rule through the full tier ladder regardless, so this is
+  /// descriptive of the rule's origin rather than a switch.
+  final String matchType;
+
+  /// `user` | `seed`. See invariant 2 in the class comment.
+  final String source;
+
+  /// False hides the rule from matching without destroying what the user
+  /// taught (US-D4's rule management, P4b).
+  final bool isEnabled;
+
+  /// How many times this rule has auto-categorised a transaction. The
+  /// learned-rules list shows it so a user can see which lessons are earning
+  /// their keep (AC-D1.1's "visible").
+  final int appliedCount;
+  final DateTime? lastAppliedAt;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  const MerchantRuleRow({
+    required this.id,
+    required this.merchantId,
+    required this.categoryId,
+    required this.matchType,
+    required this.source,
+    required this.isEnabled,
+    required this.appliedCount,
+    this.lastAppliedAt,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['merchant_id'] = Variable<int>(merchantId);
+    map['category_id'] = Variable<String>(categoryId);
+    map['match_type'] = Variable<String>(matchType);
+    map['source'] = Variable<String>(source);
+    map['is_enabled'] = Variable<bool>(isEnabled);
+    map['applied_count'] = Variable<int>(appliedCount);
+    if (!nullToAbsent || lastAppliedAt != null) {
+      map['last_applied_at'] = Variable<DateTime>(lastAppliedAt);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  MerchantRulesCompanion toCompanion(bool nullToAbsent) {
+    return MerchantRulesCompanion(
+      id: Value(id),
+      merchantId: Value(merchantId),
+      categoryId: Value(categoryId),
+      matchType: Value(matchType),
+      source: Value(source),
+      isEnabled: Value(isEnabled),
+      appliedCount: Value(appliedCount),
+      lastAppliedAt: lastAppliedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastAppliedAt),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory MerchantRuleRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return MerchantRuleRow(
+      id: serializer.fromJson<int>(json['id']),
+      merchantId: serializer.fromJson<int>(json['merchantId']),
+      categoryId: serializer.fromJson<String>(json['categoryId']),
+      matchType: serializer.fromJson<String>(json['matchType']),
+      source: serializer.fromJson<String>(json['source']),
+      isEnabled: serializer.fromJson<bool>(json['isEnabled']),
+      appliedCount: serializer.fromJson<int>(json['appliedCount']),
+      lastAppliedAt: serializer.fromJson<DateTime?>(json['lastAppliedAt']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'merchantId': serializer.toJson<int>(merchantId),
+      'categoryId': serializer.toJson<String>(categoryId),
+      'matchType': serializer.toJson<String>(matchType),
+      'source': serializer.toJson<String>(source),
+      'isEnabled': serializer.toJson<bool>(isEnabled),
+      'appliedCount': serializer.toJson<int>(appliedCount),
+      'lastAppliedAt': serializer.toJson<DateTime?>(lastAppliedAt),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  MerchantRuleRow copyWith({
+    int? id,
+    int? merchantId,
+    String? categoryId,
+    String? matchType,
+    String? source,
+    bool? isEnabled,
+    int? appliedCount,
+    Value<DateTime?> lastAppliedAt = const Value.absent(),
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) => MerchantRuleRow(
+    id: id ?? this.id,
+    merchantId: merchantId ?? this.merchantId,
+    categoryId: categoryId ?? this.categoryId,
+    matchType: matchType ?? this.matchType,
+    source: source ?? this.source,
+    isEnabled: isEnabled ?? this.isEnabled,
+    appliedCount: appliedCount ?? this.appliedCount,
+    lastAppliedAt: lastAppliedAt.present
+        ? lastAppliedAt.value
+        : this.lastAppliedAt,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  MerchantRuleRow copyWithCompanion(MerchantRulesCompanion data) {
+    return MerchantRuleRow(
+      id: data.id.present ? data.id.value : this.id,
+      merchantId: data.merchantId.present
+          ? data.merchantId.value
+          : this.merchantId,
+      categoryId: data.categoryId.present
+          ? data.categoryId.value
+          : this.categoryId,
+      matchType: data.matchType.present ? data.matchType.value : this.matchType,
+      source: data.source.present ? data.source.value : this.source,
+      isEnabled: data.isEnabled.present ? data.isEnabled.value : this.isEnabled,
+      appliedCount: data.appliedCount.present
+          ? data.appliedCount.value
+          : this.appliedCount,
+      lastAppliedAt: data.lastAppliedAt.present
+          ? data.lastAppliedAt.value
+          : this.lastAppliedAt,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MerchantRuleRow(')
+          ..write('id: $id, ')
+          ..write('merchantId: $merchantId, ')
+          ..write('categoryId: $categoryId, ')
+          ..write('matchType: $matchType, ')
+          ..write('source: $source, ')
+          ..write('isEnabled: $isEnabled, ')
+          ..write('appliedCount: $appliedCount, ')
+          ..write('lastAppliedAt: $lastAppliedAt, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    merchantId,
+    categoryId,
+    matchType,
+    source,
+    isEnabled,
+    appliedCount,
+    lastAppliedAt,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is MerchantRuleRow &&
+          other.id == this.id &&
+          other.merchantId == this.merchantId &&
+          other.categoryId == this.categoryId &&
+          other.matchType == this.matchType &&
+          other.source == this.source &&
+          other.isEnabled == this.isEnabled &&
+          other.appliedCount == this.appliedCount &&
+          other.lastAppliedAt == this.lastAppliedAt &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class MerchantRulesCompanion extends UpdateCompanion<MerchantRuleRow> {
+  final Value<int> id;
+  final Value<int> merchantId;
+  final Value<String> categoryId;
+  final Value<String> matchType;
+  final Value<String> source;
+  final Value<bool> isEnabled;
+  final Value<int> appliedCount;
+  final Value<DateTime?> lastAppliedAt;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  const MerchantRulesCompanion({
+    this.id = const Value.absent(),
+    this.merchantId = const Value.absent(),
+    this.categoryId = const Value.absent(),
+    this.matchType = const Value.absent(),
+    this.source = const Value.absent(),
+    this.isEnabled = const Value.absent(),
+    this.appliedCount = const Value.absent(),
+    this.lastAppliedAt = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+  });
+  MerchantRulesCompanion.insert({
+    this.id = const Value.absent(),
+    required int merchantId,
+    required String categoryId,
+    this.matchType = const Value.absent(),
+    required String source,
+    this.isEnabled = const Value.absent(),
+    this.appliedCount = const Value.absent(),
+    this.lastAppliedAt = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+  }) : merchantId = Value(merchantId),
+       categoryId = Value(categoryId),
+       source = Value(source);
+  static Insertable<MerchantRuleRow> custom({
+    Expression<int>? id,
+    Expression<int>? merchantId,
+    Expression<String>? categoryId,
+    Expression<String>? matchType,
+    Expression<String>? source,
+    Expression<bool>? isEnabled,
+    Expression<int>? appliedCount,
+    Expression<DateTime>? lastAppliedAt,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (merchantId != null) 'merchant_id': merchantId,
+      if (categoryId != null) 'category_id': categoryId,
+      if (matchType != null) 'match_type': matchType,
+      if (source != null) 'source': source,
+      if (isEnabled != null) 'is_enabled': isEnabled,
+      if (appliedCount != null) 'applied_count': appliedCount,
+      if (lastAppliedAt != null) 'last_applied_at': lastAppliedAt,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+    });
+  }
+
+  MerchantRulesCompanion copyWith({
+    Value<int>? id,
+    Value<int>? merchantId,
+    Value<String>? categoryId,
+    Value<String>? matchType,
+    Value<String>? source,
+    Value<bool>? isEnabled,
+    Value<int>? appliedCount,
+    Value<DateTime?>? lastAppliedAt,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+  }) {
+    return MerchantRulesCompanion(
+      id: id ?? this.id,
+      merchantId: merchantId ?? this.merchantId,
+      categoryId: categoryId ?? this.categoryId,
+      matchType: matchType ?? this.matchType,
+      source: source ?? this.source,
+      isEnabled: isEnabled ?? this.isEnabled,
+      appliedCount: appliedCount ?? this.appliedCount,
+      lastAppliedAt: lastAppliedAt ?? this.lastAppliedAt,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (merchantId.present) {
+      map['merchant_id'] = Variable<int>(merchantId.value);
+    }
+    if (categoryId.present) {
+      map['category_id'] = Variable<String>(categoryId.value);
+    }
+    if (matchType.present) {
+      map['match_type'] = Variable<String>(matchType.value);
+    }
+    if (source.present) {
+      map['source'] = Variable<String>(source.value);
+    }
+    if (isEnabled.present) {
+      map['is_enabled'] = Variable<bool>(isEnabled.value);
+    }
+    if (appliedCount.present) {
+      map['applied_count'] = Variable<int>(appliedCount.value);
+    }
+    if (lastAppliedAt.present) {
+      map['last_applied_at'] = Variable<DateTime>(lastAppliedAt.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MerchantRulesCompanion(')
+          ..write('id: $id, ')
+          ..write('merchantId: $merchantId, ')
+          ..write('categoryId: $categoryId, ')
+          ..write('matchType: $matchType, ')
+          ..write('source: $source, ')
+          ..write('isEnabled: $isEnabled, ')
+          ..write('appliedCount: $appliedCount, ')
+          ..write('lastAppliedAt: $lastAppliedAt, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -6965,6 +9569,12 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $IngestWatermarksTable ingestWatermarks = $IngestWatermarksTable(
     this,
   );
+  late final $CategoriesTable categories = $CategoriesTable(this);
+  late final $MerchantsTable merchants = $MerchantsTable(this);
+  late final $MerchantAliasesTable merchantAliases = $MerchantAliasesTable(
+    this,
+  );
+  late final $MerchantRulesTable merchantRules = $MerchantRulesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -6977,6 +9587,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     transactions,
     appSettingsTable,
     ingestWatermarks,
+    categories,
+    merchants,
+    merchantAliases,
+    merchantRules,
   ];
 }
 
@@ -8320,6 +10934,10 @@ typedef $$TransactionsTableCreateCompanionBuilder =
       required String amountCurrency,
       required int amountMinor,
       Value<String?> categoryId,
+      Value<String?> categorySource,
+      Value<double?> categoryConfidence,
+      Value<int?> categoryRuleId,
+      Value<int?> merchantId,
       Value<String?> convertedAmountAmount,
       Value<String?> convertedAmountCurrency,
       Value<int?> convertedAmountMinor,
@@ -8371,6 +10989,10 @@ typedef $$TransactionsTableUpdateCompanionBuilder =
       Value<String> amountCurrency,
       Value<int> amountMinor,
       Value<String?> categoryId,
+      Value<String?> categorySource,
+      Value<double?> categoryConfidence,
+      Value<int?> categoryRuleId,
+      Value<int?> merchantId,
       Value<String?> convertedAmountAmount,
       Value<String?> convertedAmountCurrency,
       Value<int?> convertedAmountMinor,
@@ -8451,6 +11073,26 @@ class $$TransactionsTableFilterComposer
 
   ColumnFilters<String> get categoryId => $composableBuilder(
     column: $table.categoryId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get categorySource => $composableBuilder(
+    column: $table.categorySource,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get categoryConfidence => $composableBuilder(
+    column: $table.categoryConfidence,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get categoryRuleId => $composableBuilder(
+    column: $table.categoryRuleId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get merchantId => $composableBuilder(
+    column: $table.merchantId,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -8704,6 +11346,26 @@ class $$TransactionsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get categorySource => $composableBuilder(
+    column: $table.categorySource,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get categoryConfidence => $composableBuilder(
+    column: $table.categoryConfidence,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get categoryRuleId => $composableBuilder(
+    column: $table.categoryRuleId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get merchantId => $composableBuilder(
+    column: $table.merchantId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get convertedAmountAmount => $composableBuilder(
     column: $table.convertedAmountAmount,
     builder: (column) => ColumnOrderings(column),
@@ -8952,6 +11614,26 @@ class $$TransactionsTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get categorySource => $composableBuilder(
+    column: $table.categorySource,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get categoryConfidence => $composableBuilder(
+    column: $table.categoryConfidence,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get categoryRuleId => $composableBuilder(
+    column: $table.categoryRuleId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get merchantId => $composableBuilder(
+    column: $table.merchantId,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get convertedAmountAmount => $composableBuilder(
     column: $table.convertedAmountAmount,
     builder: (column) => column,
@@ -9186,6 +11868,10 @@ class $$TransactionsTableTableManager
                 Value<String> amountCurrency = const Value.absent(),
                 Value<int> amountMinor = const Value.absent(),
                 Value<String?> categoryId = const Value.absent(),
+                Value<String?> categorySource = const Value.absent(),
+                Value<double?> categoryConfidence = const Value.absent(),
+                Value<int?> categoryRuleId = const Value.absent(),
+                Value<int?> merchantId = const Value.absent(),
                 Value<String?> convertedAmountAmount = const Value.absent(),
                 Value<String?> convertedAmountCurrency = const Value.absent(),
                 Value<int?> convertedAmountMinor = const Value.absent(),
@@ -9235,6 +11921,10 @@ class $$TransactionsTableTableManager
                 amountCurrency: amountCurrency,
                 amountMinor: amountMinor,
                 categoryId: categoryId,
+                categorySource: categorySource,
+                categoryConfidence: categoryConfidence,
+                categoryRuleId: categoryRuleId,
+                merchantId: merchantId,
                 convertedAmountAmount: convertedAmountAmount,
                 convertedAmountCurrency: convertedAmountCurrency,
                 convertedAmountMinor: convertedAmountMinor,
@@ -9286,6 +11976,10 @@ class $$TransactionsTableTableManager
                 required String amountCurrency,
                 required int amountMinor,
                 Value<String?> categoryId = const Value.absent(),
+                Value<String?> categorySource = const Value.absent(),
+                Value<double?> categoryConfidence = const Value.absent(),
+                Value<int?> categoryRuleId = const Value.absent(),
+                Value<int?> merchantId = const Value.absent(),
                 Value<String?> convertedAmountAmount = const Value.absent(),
                 Value<String?> convertedAmountCurrency = const Value.absent(),
                 Value<int?> convertedAmountMinor = const Value.absent(),
@@ -9335,6 +12029,10 @@ class $$TransactionsTableTableManager
                 amountCurrency: amountCurrency,
                 amountMinor: amountMinor,
                 categoryId: categoryId,
+                categorySource: categorySource,
+                categoryConfidence: categoryConfidence,
+                categoryRuleId: categoryRuleId,
+                merchantId: merchantId,
                 convertedAmountAmount: convertedAmountAmount,
                 convertedAmountCurrency: convertedAmountCurrency,
                 convertedAmountMinor: convertedAmountMinor,
@@ -9884,6 +12582,1569 @@ typedef $$IngestWatermarksTableProcessedTableManager =
       IngestWatermarkRow,
       PrefetchHooks Function()
     >;
+typedef $$CategoriesTableCreateCompanionBuilder =
+    CategoriesCompanion Function({
+      required String id,
+      required String key,
+      required String nameAr,
+      required String nameEn,
+      required String nameKeyAr,
+      required String nameKeyEn,
+      required String iconToken,
+      Value<String?> colorToken,
+      required String groupKey,
+      Value<bool> isSystem,
+      Value<bool> isProtected,
+      Value<bool> isArchived,
+      Value<int> sortOrder,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+typedef $$CategoriesTableUpdateCompanionBuilder =
+    CategoriesCompanion Function({
+      Value<String> id,
+      Value<String> key,
+      Value<String> nameAr,
+      Value<String> nameEn,
+      Value<String> nameKeyAr,
+      Value<String> nameKeyEn,
+      Value<String> iconToken,
+      Value<String?> colorToken,
+      Value<String> groupKey,
+      Value<bool> isSystem,
+      Value<bool> isProtected,
+      Value<bool> isArchived,
+      Value<int> sortOrder,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$CategoriesTableFilterComposer
+    extends Composer<_$AppDatabase, $CategoriesTable> {
+  $$CategoriesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get key => $composableBuilder(
+    column: $table.key,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get nameAr => $composableBuilder(
+    column: $table.nameAr,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get nameEn => $composableBuilder(
+    column: $table.nameEn,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get nameKeyAr => $composableBuilder(
+    column: $table.nameKeyAr,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get nameKeyEn => $composableBuilder(
+    column: $table.nameKeyEn,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get iconToken => $composableBuilder(
+    column: $table.iconToken,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get colorToken => $composableBuilder(
+    column: $table.colorToken,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get groupKey => $composableBuilder(
+    column: $table.groupKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isSystem => $composableBuilder(
+    column: $table.isSystem,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isProtected => $composableBuilder(
+    column: $table.isProtected,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isArchived => $composableBuilder(
+    column: $table.isArchived,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sortOrder => $composableBuilder(
+    column: $table.sortOrder,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CategoriesTableOrderingComposer
+    extends Composer<_$AppDatabase, $CategoriesTable> {
+  $$CategoriesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get key => $composableBuilder(
+    column: $table.key,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get nameAr => $composableBuilder(
+    column: $table.nameAr,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get nameEn => $composableBuilder(
+    column: $table.nameEn,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get nameKeyAr => $composableBuilder(
+    column: $table.nameKeyAr,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get nameKeyEn => $composableBuilder(
+    column: $table.nameKeyEn,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get iconToken => $composableBuilder(
+    column: $table.iconToken,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get colorToken => $composableBuilder(
+    column: $table.colorToken,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get groupKey => $composableBuilder(
+    column: $table.groupKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isSystem => $composableBuilder(
+    column: $table.isSystem,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isProtected => $composableBuilder(
+    column: $table.isProtected,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isArchived => $composableBuilder(
+    column: $table.isArchived,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get sortOrder => $composableBuilder(
+    column: $table.sortOrder,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CategoriesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CategoriesTable> {
+  $$CategoriesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get key =>
+      $composableBuilder(column: $table.key, builder: (column) => column);
+
+  GeneratedColumn<String> get nameAr =>
+      $composableBuilder(column: $table.nameAr, builder: (column) => column);
+
+  GeneratedColumn<String> get nameEn =>
+      $composableBuilder(column: $table.nameEn, builder: (column) => column);
+
+  GeneratedColumn<String> get nameKeyAr =>
+      $composableBuilder(column: $table.nameKeyAr, builder: (column) => column);
+
+  GeneratedColumn<String> get nameKeyEn =>
+      $composableBuilder(column: $table.nameKeyEn, builder: (column) => column);
+
+  GeneratedColumn<String> get iconToken =>
+      $composableBuilder(column: $table.iconToken, builder: (column) => column);
+
+  GeneratedColumn<String> get colorToken => $composableBuilder(
+    column: $table.colorToken,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get groupKey =>
+      $composableBuilder(column: $table.groupKey, builder: (column) => column);
+
+  GeneratedColumn<bool> get isSystem =>
+      $composableBuilder(column: $table.isSystem, builder: (column) => column);
+
+  GeneratedColumn<bool> get isProtected => $composableBuilder(
+    column: $table.isProtected,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get isArchived => $composableBuilder(
+    column: $table.isArchived,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get sortOrder =>
+      $composableBuilder(column: $table.sortOrder, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$CategoriesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CategoriesTable,
+          CategoryRow,
+          $$CategoriesTableFilterComposer,
+          $$CategoriesTableOrderingComposer,
+          $$CategoriesTableAnnotationComposer,
+          $$CategoriesTableCreateCompanionBuilder,
+          $$CategoriesTableUpdateCompanionBuilder,
+          (
+            CategoryRow,
+            BaseReferences<_$AppDatabase, $CategoriesTable, CategoryRow>,
+          ),
+          CategoryRow,
+          PrefetchHooks Function()
+        > {
+  $$CategoriesTableTableManager(_$AppDatabase db, $CategoriesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CategoriesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CategoriesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$CategoriesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> key = const Value.absent(),
+                Value<String> nameAr = const Value.absent(),
+                Value<String> nameEn = const Value.absent(),
+                Value<String> nameKeyAr = const Value.absent(),
+                Value<String> nameKeyEn = const Value.absent(),
+                Value<String> iconToken = const Value.absent(),
+                Value<String?> colorToken = const Value.absent(),
+                Value<String> groupKey = const Value.absent(),
+                Value<bool> isSystem = const Value.absent(),
+                Value<bool> isProtected = const Value.absent(),
+                Value<bool> isArchived = const Value.absent(),
+                Value<int> sortOrder = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CategoriesCompanion(
+                id: id,
+                key: key,
+                nameAr: nameAr,
+                nameEn: nameEn,
+                nameKeyAr: nameKeyAr,
+                nameKeyEn: nameKeyEn,
+                iconToken: iconToken,
+                colorToken: colorToken,
+                groupKey: groupKey,
+                isSystem: isSystem,
+                isProtected: isProtected,
+                isArchived: isArchived,
+                sortOrder: sortOrder,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String key,
+                required String nameAr,
+                required String nameEn,
+                required String nameKeyAr,
+                required String nameKeyEn,
+                required String iconToken,
+                Value<String?> colorToken = const Value.absent(),
+                required String groupKey,
+                Value<bool> isSystem = const Value.absent(),
+                Value<bool> isProtected = const Value.absent(),
+                Value<bool> isArchived = const Value.absent(),
+                Value<int> sortOrder = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CategoriesCompanion.insert(
+                id: id,
+                key: key,
+                nameAr: nameAr,
+                nameEn: nameEn,
+                nameKeyAr: nameKeyAr,
+                nameKeyEn: nameKeyEn,
+                iconToken: iconToken,
+                colorToken: colorToken,
+                groupKey: groupKey,
+                isSystem: isSystem,
+                isProtected: isProtected,
+                isArchived: isArchived,
+                sortOrder: sortOrder,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CategoriesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CategoriesTable,
+      CategoryRow,
+      $$CategoriesTableFilterComposer,
+      $$CategoriesTableOrderingComposer,
+      $$CategoriesTableAnnotationComposer,
+      $$CategoriesTableCreateCompanionBuilder,
+      $$CategoriesTableUpdateCompanionBuilder,
+      (
+        CategoryRow,
+        BaseReferences<_$AppDatabase, $CategoriesTable, CategoryRow>,
+      ),
+      CategoryRow,
+      PrefetchHooks Function()
+    >;
+typedef $$MerchantsTableCreateCompanionBuilder =
+    MerchantsCompanion Function({
+      Value<int> id,
+      required String canonicalName,
+      required String merchantKey,
+      Value<int?> firstSeenMessageId,
+      Value<DateTime> createdAt,
+    });
+typedef $$MerchantsTableUpdateCompanionBuilder =
+    MerchantsCompanion Function({
+      Value<int> id,
+      Value<String> canonicalName,
+      Value<String> merchantKey,
+      Value<int?> firstSeenMessageId,
+      Value<DateTime> createdAt,
+    });
+
+final class $$MerchantsTableReferences
+    extends BaseReferences<_$AppDatabase, $MerchantsTable, MerchantRow> {
+  $$MerchantsTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static MultiTypedResultKey<$MerchantAliasesTable, List<MerchantAliasRow>>
+  _merchantAliasesRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.merchantAliases,
+    aliasName: $_aliasNameGenerator(
+      db.merchants.id,
+      db.merchantAliases.merchantId,
+    ),
+  );
+
+  $$MerchantAliasesTableProcessedTableManager get merchantAliasesRefs {
+    final manager = $$MerchantAliasesTableTableManager(
+      $_db,
+      $_db.merchantAliases,
+    ).filter((f) => f.merchantId.id.sqlEquals($_itemColumn<int>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(
+      _merchantAliasesRefsTable($_db),
+    );
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<$MerchantRulesTable, List<MerchantRuleRow>>
+  _merchantRulesRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.merchantRules,
+    aliasName: $_aliasNameGenerator(
+      db.merchants.id,
+      db.merchantRules.merchantId,
+    ),
+  );
+
+  $$MerchantRulesTableProcessedTableManager get merchantRulesRefs {
+    final manager = $$MerchantRulesTableTableManager(
+      $_db,
+      $_db.merchantRules,
+    ).filter((f) => f.merchantId.id.sqlEquals($_itemColumn<int>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_merchantRulesRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+}
+
+class $$MerchantsTableFilterComposer
+    extends Composer<_$AppDatabase, $MerchantsTable> {
+  $$MerchantsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get canonicalName => $composableBuilder(
+    column: $table.canonicalName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get merchantKey => $composableBuilder(
+    column: $table.merchantKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get firstSeenMessageId => $composableBuilder(
+    column: $table.firstSeenMessageId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  Expression<bool> merchantAliasesRefs(
+    Expression<bool> Function($$MerchantAliasesTableFilterComposer f) f,
+  ) {
+    final $$MerchantAliasesTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.merchantAliases,
+      getReferencedColumn: (t) => t.merchantId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MerchantAliasesTableFilterComposer(
+            $db: $db,
+            $table: $db.merchantAliases,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<bool> merchantRulesRefs(
+    Expression<bool> Function($$MerchantRulesTableFilterComposer f) f,
+  ) {
+    final $$MerchantRulesTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.merchantRules,
+      getReferencedColumn: (t) => t.merchantId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MerchantRulesTableFilterComposer(
+            $db: $db,
+            $table: $db.merchantRules,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+}
+
+class $$MerchantsTableOrderingComposer
+    extends Composer<_$AppDatabase, $MerchantsTable> {
+  $$MerchantsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get canonicalName => $composableBuilder(
+    column: $table.canonicalName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get merchantKey => $composableBuilder(
+    column: $table.merchantKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get firstSeenMessageId => $composableBuilder(
+    column: $table.firstSeenMessageId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$MerchantsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $MerchantsTable> {
+  $$MerchantsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get canonicalName => $composableBuilder(
+    column: $table.canonicalName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get merchantKey => $composableBuilder(
+    column: $table.merchantKey,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get firstSeenMessageId => $composableBuilder(
+    column: $table.firstSeenMessageId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  Expression<T> merchantAliasesRefs<T extends Object>(
+    Expression<T> Function($$MerchantAliasesTableAnnotationComposer a) f,
+  ) {
+    final $$MerchantAliasesTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.merchantAliases,
+      getReferencedColumn: (t) => t.merchantId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MerchantAliasesTableAnnotationComposer(
+            $db: $db,
+            $table: $db.merchantAliases,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<T> merchantRulesRefs<T extends Object>(
+    Expression<T> Function($$MerchantRulesTableAnnotationComposer a) f,
+  ) {
+    final $$MerchantRulesTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.merchantRules,
+      getReferencedColumn: (t) => t.merchantId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MerchantRulesTableAnnotationComposer(
+            $db: $db,
+            $table: $db.merchantRules,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+}
+
+class $$MerchantsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $MerchantsTable,
+          MerchantRow,
+          $$MerchantsTableFilterComposer,
+          $$MerchantsTableOrderingComposer,
+          $$MerchantsTableAnnotationComposer,
+          $$MerchantsTableCreateCompanionBuilder,
+          $$MerchantsTableUpdateCompanionBuilder,
+          (MerchantRow, $$MerchantsTableReferences),
+          MerchantRow,
+          PrefetchHooks Function({
+            bool merchantAliasesRefs,
+            bool merchantRulesRefs,
+          })
+        > {
+  $$MerchantsTableTableManager(_$AppDatabase db, $MerchantsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$MerchantsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$MerchantsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$MerchantsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<String> canonicalName = const Value.absent(),
+                Value<String> merchantKey = const Value.absent(),
+                Value<int?> firstSeenMessageId = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+              }) => MerchantsCompanion(
+                id: id,
+                canonicalName: canonicalName,
+                merchantKey: merchantKey,
+                firstSeenMessageId: firstSeenMessageId,
+                createdAt: createdAt,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required String canonicalName,
+                required String merchantKey,
+                Value<int?> firstSeenMessageId = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+              }) => MerchantsCompanion.insert(
+                id: id,
+                canonicalName: canonicalName,
+                merchantKey: merchantKey,
+                firstSeenMessageId: firstSeenMessageId,
+                createdAt: createdAt,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$MerchantsTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback:
+              ({merchantAliasesRefs = false, merchantRulesRefs = false}) {
+                return PrefetchHooks(
+                  db: db,
+                  explicitlyWatchedTables: [
+                    if (merchantAliasesRefs) db.merchantAliases,
+                    if (merchantRulesRefs) db.merchantRules,
+                  ],
+                  addJoins: null,
+                  getPrefetchedDataCallback: (items) async {
+                    return [
+                      if (merchantAliasesRefs)
+                        await $_getPrefetchedData<
+                          MerchantRow,
+                          $MerchantsTable,
+                          MerchantAliasRow
+                        >(
+                          currentTable: table,
+                          referencedTable: $$MerchantsTableReferences
+                              ._merchantAliasesRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$MerchantsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).merchantAliasesRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.merchantId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
+                      if (merchantRulesRefs)
+                        await $_getPrefetchedData<
+                          MerchantRow,
+                          $MerchantsTable,
+                          MerchantRuleRow
+                        >(
+                          currentTable: table,
+                          referencedTable: $$MerchantsTableReferences
+                              ._merchantRulesRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$MerchantsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).merchantRulesRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.merchantId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
+                    ];
+                  },
+                );
+              },
+        ),
+      );
+}
+
+typedef $$MerchantsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $MerchantsTable,
+      MerchantRow,
+      $$MerchantsTableFilterComposer,
+      $$MerchantsTableOrderingComposer,
+      $$MerchantsTableAnnotationComposer,
+      $$MerchantsTableCreateCompanionBuilder,
+      $$MerchantsTableUpdateCompanionBuilder,
+      (MerchantRow, $$MerchantsTableReferences),
+      MerchantRow,
+      PrefetchHooks Function({bool merchantAliasesRefs, bool merchantRulesRefs})
+    >;
+typedef $$MerchantAliasesTableCreateCompanionBuilder =
+    MerchantAliasesCompanion Function({
+      Value<int> id,
+      required int merchantId,
+      required String aliasKey,
+      required String script,
+      required String source,
+      Value<DateTime> createdAt,
+    });
+typedef $$MerchantAliasesTableUpdateCompanionBuilder =
+    MerchantAliasesCompanion Function({
+      Value<int> id,
+      Value<int> merchantId,
+      Value<String> aliasKey,
+      Value<String> script,
+      Value<String> source,
+      Value<DateTime> createdAt,
+    });
+
+final class $$MerchantAliasesTableReferences
+    extends
+        BaseReferences<_$AppDatabase, $MerchantAliasesTable, MerchantAliasRow> {
+  $$MerchantAliasesTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static $MerchantsTable _merchantIdTable(_$AppDatabase db) =>
+      db.merchants.createAlias(
+        $_aliasNameGenerator(db.merchantAliases.merchantId, db.merchants.id),
+      );
+
+  $$MerchantsTableProcessedTableManager get merchantId {
+    final $_column = $_itemColumn<int>('merchant_id')!;
+
+    final manager = $$MerchantsTableTableManager(
+      $_db,
+      $_db.merchants,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_merchantIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$MerchantAliasesTableFilterComposer
+    extends Composer<_$AppDatabase, $MerchantAliasesTable> {
+  $$MerchantAliasesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get aliasKey => $composableBuilder(
+    column: $table.aliasKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get script => $composableBuilder(
+    column: $table.script,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get source => $composableBuilder(
+    column: $table.source,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$MerchantsTableFilterComposer get merchantId {
+    final $$MerchantsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.merchantId,
+      referencedTable: $db.merchants,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MerchantsTableFilterComposer(
+            $db: $db,
+            $table: $db.merchants,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$MerchantAliasesTableOrderingComposer
+    extends Composer<_$AppDatabase, $MerchantAliasesTable> {
+  $$MerchantAliasesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get aliasKey => $composableBuilder(
+    column: $table.aliasKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get script => $composableBuilder(
+    column: $table.script,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get source => $composableBuilder(
+    column: $table.source,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$MerchantsTableOrderingComposer get merchantId {
+    final $$MerchantsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.merchantId,
+      referencedTable: $db.merchants,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MerchantsTableOrderingComposer(
+            $db: $db,
+            $table: $db.merchants,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$MerchantAliasesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $MerchantAliasesTable> {
+  $$MerchantAliasesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get aliasKey =>
+      $composableBuilder(column: $table.aliasKey, builder: (column) => column);
+
+  GeneratedColumn<String> get script =>
+      $composableBuilder(column: $table.script, builder: (column) => column);
+
+  GeneratedColumn<String> get source =>
+      $composableBuilder(column: $table.source, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  $$MerchantsTableAnnotationComposer get merchantId {
+    final $$MerchantsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.merchantId,
+      referencedTable: $db.merchants,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MerchantsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.merchants,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$MerchantAliasesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $MerchantAliasesTable,
+          MerchantAliasRow,
+          $$MerchantAliasesTableFilterComposer,
+          $$MerchantAliasesTableOrderingComposer,
+          $$MerchantAliasesTableAnnotationComposer,
+          $$MerchantAliasesTableCreateCompanionBuilder,
+          $$MerchantAliasesTableUpdateCompanionBuilder,
+          (MerchantAliasRow, $$MerchantAliasesTableReferences),
+          MerchantAliasRow,
+          PrefetchHooks Function({bool merchantId})
+        > {
+  $$MerchantAliasesTableTableManager(
+    _$AppDatabase db,
+    $MerchantAliasesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$MerchantAliasesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$MerchantAliasesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$MerchantAliasesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<int> merchantId = const Value.absent(),
+                Value<String> aliasKey = const Value.absent(),
+                Value<String> script = const Value.absent(),
+                Value<String> source = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+              }) => MerchantAliasesCompanion(
+                id: id,
+                merchantId: merchantId,
+                aliasKey: aliasKey,
+                script: script,
+                source: source,
+                createdAt: createdAt,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required int merchantId,
+                required String aliasKey,
+                required String script,
+                required String source,
+                Value<DateTime> createdAt = const Value.absent(),
+              }) => MerchantAliasesCompanion.insert(
+                id: id,
+                merchantId: merchantId,
+                aliasKey: aliasKey,
+                script: script,
+                source: source,
+                createdAt: createdAt,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$MerchantAliasesTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({merchantId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (merchantId) {
+                      state =
+                          state.withJoin(
+                                currentTable: table,
+                                currentColumn: table.merchantId,
+                                referencedTable:
+                                    $$MerchantAliasesTableReferences
+                                        ._merchantIdTable(db),
+                                referencedColumn:
+                                    $$MerchantAliasesTableReferences
+                                        ._merchantIdTable(db)
+                                        .id,
+                              )
+                              as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$MerchantAliasesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $MerchantAliasesTable,
+      MerchantAliasRow,
+      $$MerchantAliasesTableFilterComposer,
+      $$MerchantAliasesTableOrderingComposer,
+      $$MerchantAliasesTableAnnotationComposer,
+      $$MerchantAliasesTableCreateCompanionBuilder,
+      $$MerchantAliasesTableUpdateCompanionBuilder,
+      (MerchantAliasRow, $$MerchantAliasesTableReferences),
+      MerchantAliasRow,
+      PrefetchHooks Function({bool merchantId})
+    >;
+typedef $$MerchantRulesTableCreateCompanionBuilder =
+    MerchantRulesCompanion Function({
+      Value<int> id,
+      required int merchantId,
+      required String categoryId,
+      Value<String> matchType,
+      required String source,
+      Value<bool> isEnabled,
+      Value<int> appliedCount,
+      Value<DateTime?> lastAppliedAt,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+    });
+typedef $$MerchantRulesTableUpdateCompanionBuilder =
+    MerchantRulesCompanion Function({
+      Value<int> id,
+      Value<int> merchantId,
+      Value<String> categoryId,
+      Value<String> matchType,
+      Value<String> source,
+      Value<bool> isEnabled,
+      Value<int> appliedCount,
+      Value<DateTime?> lastAppliedAt,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+    });
+
+final class $$MerchantRulesTableReferences
+    extends
+        BaseReferences<_$AppDatabase, $MerchantRulesTable, MerchantRuleRow> {
+  $$MerchantRulesTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static $MerchantsTable _merchantIdTable(_$AppDatabase db) =>
+      db.merchants.createAlias(
+        $_aliasNameGenerator(db.merchantRules.merchantId, db.merchants.id),
+      );
+
+  $$MerchantsTableProcessedTableManager get merchantId {
+    final $_column = $_itemColumn<int>('merchant_id')!;
+
+    final manager = $$MerchantsTableTableManager(
+      $_db,
+      $_db.merchants,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_merchantIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$MerchantRulesTableFilterComposer
+    extends Composer<_$AppDatabase, $MerchantRulesTable> {
+  $$MerchantRulesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get categoryId => $composableBuilder(
+    column: $table.categoryId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get matchType => $composableBuilder(
+    column: $table.matchType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get source => $composableBuilder(
+    column: $table.source,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isEnabled => $composableBuilder(
+    column: $table.isEnabled,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get appliedCount => $composableBuilder(
+    column: $table.appliedCount,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get lastAppliedAt => $composableBuilder(
+    column: $table.lastAppliedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$MerchantsTableFilterComposer get merchantId {
+    final $$MerchantsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.merchantId,
+      referencedTable: $db.merchants,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MerchantsTableFilterComposer(
+            $db: $db,
+            $table: $db.merchants,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$MerchantRulesTableOrderingComposer
+    extends Composer<_$AppDatabase, $MerchantRulesTable> {
+  $$MerchantRulesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get categoryId => $composableBuilder(
+    column: $table.categoryId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get matchType => $composableBuilder(
+    column: $table.matchType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get source => $composableBuilder(
+    column: $table.source,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isEnabled => $composableBuilder(
+    column: $table.isEnabled,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get appliedCount => $composableBuilder(
+    column: $table.appliedCount,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get lastAppliedAt => $composableBuilder(
+    column: $table.lastAppliedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$MerchantsTableOrderingComposer get merchantId {
+    final $$MerchantsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.merchantId,
+      referencedTable: $db.merchants,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MerchantsTableOrderingComposer(
+            $db: $db,
+            $table: $db.merchants,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$MerchantRulesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $MerchantRulesTable> {
+  $$MerchantRulesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get categoryId => $composableBuilder(
+    column: $table.categoryId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get matchType =>
+      $composableBuilder(column: $table.matchType, builder: (column) => column);
+
+  GeneratedColumn<String> get source =>
+      $composableBuilder(column: $table.source, builder: (column) => column);
+
+  GeneratedColumn<bool> get isEnabled =>
+      $composableBuilder(column: $table.isEnabled, builder: (column) => column);
+
+  GeneratedColumn<int> get appliedCount => $composableBuilder(
+    column: $table.appliedCount,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get lastAppliedAt => $composableBuilder(
+    column: $table.lastAppliedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  $$MerchantsTableAnnotationComposer get merchantId {
+    final $$MerchantsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.merchantId,
+      referencedTable: $db.merchants,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MerchantsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.merchants,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$MerchantRulesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $MerchantRulesTable,
+          MerchantRuleRow,
+          $$MerchantRulesTableFilterComposer,
+          $$MerchantRulesTableOrderingComposer,
+          $$MerchantRulesTableAnnotationComposer,
+          $$MerchantRulesTableCreateCompanionBuilder,
+          $$MerchantRulesTableUpdateCompanionBuilder,
+          (MerchantRuleRow, $$MerchantRulesTableReferences),
+          MerchantRuleRow,
+          PrefetchHooks Function({bool merchantId})
+        > {
+  $$MerchantRulesTableTableManager(_$AppDatabase db, $MerchantRulesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$MerchantRulesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$MerchantRulesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$MerchantRulesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<int> merchantId = const Value.absent(),
+                Value<String> categoryId = const Value.absent(),
+                Value<String> matchType = const Value.absent(),
+                Value<String> source = const Value.absent(),
+                Value<bool> isEnabled = const Value.absent(),
+                Value<int> appliedCount = const Value.absent(),
+                Value<DateTime?> lastAppliedAt = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+              }) => MerchantRulesCompanion(
+                id: id,
+                merchantId: merchantId,
+                categoryId: categoryId,
+                matchType: matchType,
+                source: source,
+                isEnabled: isEnabled,
+                appliedCount: appliedCount,
+                lastAppliedAt: lastAppliedAt,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required int merchantId,
+                required String categoryId,
+                Value<String> matchType = const Value.absent(),
+                required String source,
+                Value<bool> isEnabled = const Value.absent(),
+                Value<int> appliedCount = const Value.absent(),
+                Value<DateTime?> lastAppliedAt = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+              }) => MerchantRulesCompanion.insert(
+                id: id,
+                merchantId: merchantId,
+                categoryId: categoryId,
+                matchType: matchType,
+                source: source,
+                isEnabled: isEnabled,
+                appliedCount: appliedCount,
+                lastAppliedAt: lastAppliedAt,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$MerchantRulesTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({merchantId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (merchantId) {
+                      state =
+                          state.withJoin(
+                                currentTable: table,
+                                currentColumn: table.merchantId,
+                                referencedTable: $$MerchantRulesTableReferences
+                                    ._merchantIdTable(db),
+                                referencedColumn: $$MerchantRulesTableReferences
+                                    ._merchantIdTable(db)
+                                    .id,
+                              )
+                              as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$MerchantRulesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $MerchantRulesTable,
+      MerchantRuleRow,
+      $$MerchantRulesTableFilterComposer,
+      $$MerchantRulesTableOrderingComposer,
+      $$MerchantRulesTableAnnotationComposer,
+      $$MerchantRulesTableCreateCompanionBuilder,
+      $$MerchantRulesTableUpdateCompanionBuilder,
+      (MerchantRuleRow, $$MerchantRulesTableReferences),
+      MerchantRuleRow,
+      PrefetchHooks Function({bool merchantId})
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -9902,4 +14163,12 @@ class $AppDatabaseManager {
       $$AppSettingsTableTableTableManager(_db, _db.appSettingsTable);
   $$IngestWatermarksTableTableManager get ingestWatermarks =>
       $$IngestWatermarksTableTableManager(_db, _db.ingestWatermarks);
+  $$CategoriesTableTableManager get categories =>
+      $$CategoriesTableTableManager(_db, _db.categories);
+  $$MerchantsTableTableManager get merchants =>
+      $$MerchantsTableTableManager(_db, _db.merchants);
+  $$MerchantAliasesTableTableManager get merchantAliases =>
+      $$MerchantAliasesTableTableManager(_db, _db.merchantAliases);
+  $$MerchantRulesTableTableManager get merchantRules =>
+      $$MerchantRulesTableTableManager(_db, _db.merchantRules);
 }

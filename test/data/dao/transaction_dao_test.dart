@@ -52,40 +52,149 @@ void main() {
     },
   );
 
-  test('updateCategory() writes a before/after audit entry (US-F5)', () async {
-    final int id = await transactionDao.create(
-      amount: Money.parse('10.00', currency: 'SAR'),
-      actor: 'user',
-    );
+  // P4a (KHA-30/31) replaced P1's `updateCategory` — which wrote `category_id`
+  // alone — with two purpose-built methods, because a category id now travels
+  // with three facts about how it got there. The US-F5 coverage the old test
+  // provided is kept and extended below: the same before/after audit entry,
+  // plus the provenance columns and the AC-D3.1 refusal that the old
+  // single-method shape could not express.
+  group('categorization writes (US-F5, AC-D2.2, AC-D3.1)', () {
+    test('setUserCategory writes a before/after audit entry attributed to the '
+        'user, and records the category as user-chosen', () async {
+      final int id = await transactionDao.create(
+        amount: Money.parse('10.00', currency: 'SAR'),
+        actor: 'user',
+      );
 
-    await transactionDao.updateCategory(
-      id: id,
-      newCategoryId: 'groceries',
-      actor: 'user',
-    );
-    await transactionDao.updateCategory(
-      id: id,
-      newCategoryId: 'dining',
-      actor: 'system_rule',
-      actorDetail: 'rule-42',
-    );
+      await transactionDao.setUserCategory(id: id, categoryId: 'groceries');
+      await transactionDao.setUserCategory(id: id, categoryId: 'dining');
 
-    final TransactionRow row = await transactionDao.byId(id);
-    expect(row.categoryId, 'dining');
+      final TransactionRow row = await transactionDao.byId(id);
+      expect(row.categoryId, 'dining');
+      expect(row.categorySource, StoredCategorySource.user);
+      expect(row.categoryConfidence, 1.0);
+      expect(
+        decodeUserEditedFields(row.userEditedFields),
+        contains(TransactionField.categoryId),
+        reason:
+            'the app-wide "a person edited this" mechanism is what the '
+            'enrichment merge already honours — AC-D3.1 reuses it rather than '
+            'inventing a second protection flag',
+      );
 
-    final List<AuditEntryRow> history = await auditLogDao.queryFor(
-      'transaction',
-      id.toString(),
-    );
-    // create + 2 updates == 3 entries, one per mutation.
-    expect(history, hasLength(3));
-    expect(history.last.actor, 'system_rule');
-    expect(history.last.actorDetail, 'rule-42');
-    final AuditFieldChange change = auditLogDao
-        .decodeFieldChanges(history.last)
-        .single;
-    expect(change.from, 'groceries');
-    expect(change.to, 'dining');
+      final List<AuditEntryRow> history = await auditLogDao.queryFor(
+        'transaction',
+        id.toString(),
+      );
+      // create + 2 categorizations == 3 entries, one per mutation.
+      expect(history, hasLength(3));
+      expect(history.last.action, 'categorize');
+      expect(history.last.actor, 'user');
+      final AuditFieldChange change = auditLogDao
+          .decodeFieldChanges(history.last)
+          .first;
+      expect(change.field, TransactionField.categoryId);
+      expect(change.from, 'groceries');
+      expect(change.to, 'dining');
+    });
+
+    test('applyAutomaticCategory attributes the entry to the SYSTEM and names '
+        'the rule that fired (AC-F5.2, NFR-A2)', () async {
+      final int id = await transactionDao.create(
+        amount: Money.parse('10.00', currency: 'SAR'),
+        actor: 'parser',
+      );
+
+      final bool written = await transactionDao.applyAutomaticCategory(
+        id: id,
+        categoryId: 'utilities_bills',
+        confidence: 1.0,
+        ruleId: 42,
+        actorDetail: 'merchant_rule:42',
+      );
+
+      expect(written, isTrue);
+      final TransactionRow row = await transactionDao.byId(id);
+      expect(row.categoryId, 'utilities_bills');
+      expect(row.categorySource, StoredCategorySource.rule);
+      expect(row.categoryRuleId, 42);
+
+      final List<AuditEntryRow> history = await auditLogDao.queryFor(
+        'transaction',
+        id.toString(),
+      );
+      expect(history.last.action, 'categorize');
+      expect(history.last.actor, 'system_rule');
+      expect(history.last.actorDetail, 'merchant_rule:42');
+    });
+
+    test('applyAutomaticCategory refuses to overwrite a user-set category and '
+        'writes nothing at all (AC-D3.1)', () async {
+      final int id = await transactionDao.create(
+        amount: Money.parse('10.00', currency: 'SAR'),
+        actor: 'user',
+      );
+      await transactionDao.setUserCategory(id: id, categoryId: 'groceries');
+      final int entriesBefore = (await auditLogDao.queryFor(
+        'transaction',
+        id.toString(),
+      )).length;
+
+      final bool written = await transactionDao.applyAutomaticCategory(
+        id: id,
+        categoryId: 'dining',
+        confidence: 1.0,
+        ruleId: 7,
+        merchantId: 3,
+        actorDetail: 'merchant_rule:7',
+      );
+
+      expect(written, isFalse);
+      final TransactionRow row = await transactionDao.byId(id);
+      expect(row.categoryId, 'groceries');
+      expect(row.categorySource, StoredCategorySource.user);
+      expect(
+        row.merchantId,
+        isNull,
+        reason:
+            'the refusal writes nothing — not even the merchant link — '
+            'because any write here is what AC-D3.1 forbids',
+      );
+      expect(
+        await auditLogDao.queryFor('transaction', id.toString()),
+        hasLength(entriesBefore),
+      );
+    });
+
+    test('choosing Uncategorized explicitly is stored as NULL and still '
+        'protects the field (AC-C1.1 one representation)', () async {
+      final int id = await transactionDao.create(
+        amount: Money.parse('10.00', currency: 'SAR'),
+        actor: 'user',
+      );
+
+      await transactionDao.setUserCategory(
+        id: id,
+        categoryId: uncategorizedCategoryId,
+      );
+
+      final TransactionRow row = await transactionDao.byId(id);
+      expect(row.categoryId, isNull);
+      expect(row.categorySource, StoredCategorySource.user);
+      expect(
+        await transactionDao.applyAutomaticCategory(
+          id: id,
+          categoryId: 'dining',
+          confidence: 1.0,
+          ruleId: 1,
+          actorDetail: 'merchant_rule:1',
+        ),
+        isFalse,
+        reason:
+            'deliberately blanking a category is a decision, and the app must '
+            'not quietly re-categorise something the user cleared',
+      );
+    });
   });
 
   group('Soft delete / restore (US-B8)', () {
@@ -206,12 +315,12 @@ void main() {
 
   test('the ledger row and its audit entry are written atomically — an error '
       'mid-mutation leaves neither committed (NFR-R6)', () async {
-    // updateCategory() on a non-existent id: the SELECT ..getSingle()
+    // setUserCategory() on a non-existent id: the SELECT ..getSingle()
     // throws before any write happens, so nothing should be recorded.
     await expectLater(
-      transactionDao.updateCategory(
+      transactionDao.setUserCategory(
         id: 999999,
-        newCategoryId: 'groceries',
+        categoryId: 'groceries',
         actor: 'user',
       ),
       throwsA(anything),

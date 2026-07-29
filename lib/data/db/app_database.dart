@@ -3,8 +3,10 @@ import 'package:drift/drift.dart';
 import 'tables/app_settings_table.dart';
 import 'tables/audit_entry_table.dart';
 import 'tables/bank_table.dart';
+import 'tables/category_table.dart';
 import 'tables/ingest_watermark_table.dart';
 import 'tables/instrument_table.dart';
+import 'tables/merchant_table.dart';
 import 'tables/raw_message_table.dart';
 import 'tables/transaction_table.dart';
 
@@ -37,6 +39,10 @@ part 'app_database.g.dart';
     Transactions,
     AppSettingsTable,
     IngestWatermarks,
+    Categories,
+    Merchants,
+    MerchantAliases,
+    MerchantRules,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -58,14 +64,17 @@ class AppDatabase extends _$AppDatabase {
   /// | 3 | P3a | `bank` + `instrument` tables (KHA-23); instrument FK, counterparty, remaining balance, provenance detail and `deleted_at` on transactions (KHA-25) |
   /// | 4 | P3b-1 | FX rate date/source/pending (KHA-27, KHA-70) and internal-transfer link + state (KHA-29) on transactions |
   /// | 5 | P3b-2 | the mutation surface: `user_edited_fields` (KHA-26) and the merge pair `merged_into_id` / `merged_from_transaction_id` (KHA-64) |
+  /// | 6 | — | **deliberately unused.** `docs/build-plan.md` reserved v6 for P3b-3 *if it needed a schema change*; it did not. The number is burned rather than reused so that no two builds can ever disagree about what "v6" contained — a gap in the sequence is free, a collision is not |
+  /// | 7 | P4a | the categorization spine (KHA-30, KHA-31): `category`, `merchant`, `merchant_alias`, `merchant_rule` tables; `category_source` / `category_confidence` / `category_rule_id` / `merchant_id` on transactions; the category-delete guard trigger |
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (Migrator m) async {
       await m.createAll();
       await _installAuditTriggers();
+      await _installCategoryGuardTrigger();
       await _seedIngestWatermark();
     },
     onUpgrade: (Migrator m, int from, int to) async {
@@ -225,6 +234,59 @@ class AppDatabase extends _$AppDatabase {
         // `test/data/db/schema_v5_migration_test.dart`, which pins the
         // consequence: a v4 database upgraded to v5 verifies intact.
       }
+
+      if (from < 7) {
+        // ------------------------------------------------------------------
+        // P4a — the categorization spine (KHA-30, KHA-31).
+        // ------------------------------------------------------------------
+        //
+        // **On the missing v6:** `docs/build-plan.md` reserved schema v6 for
+        // P3b-3 in case its merge/undo fixes needed one. They did not, so v6
+        // was never written and this branch is `from < 7` rather than
+        // `from == 6`. An install can therefore arrive here from v5 (every
+        // real install) or from a hypothetical v6 (none exist); both walk the
+        // same steps, and skipping the number costs nothing while reusing it
+        // would leave two builds disagreeing about what v6 contained.
+
+        // Order matters: `merchant_rule` and `merchant_alias` reference
+        // `merchant`, and `transactions.merchant_id` references it too, so the
+        // parent must exist before anything that points at it.
+        await m.createTable(categories);
+        await m.createTable(merchants);
+        await m.createTable(merchantAliases);
+        await m.createTable(merchantRules);
+
+        for (final GeneratedColumn<Object> column in <GeneratedColumn<Object>>[
+          transactions.categorySource,
+          transactions.categoryConfidence,
+          transactions.categoryRuleId,
+          transactions.merchantId,
+        ]) {
+          await m.addColumn(transactions, column);
+        }
+
+        await _installCategoryGuardTrigger();
+
+        // **No backfill, and each absence is the honest value:**
+        //
+        //  - `category_source` stays NULL on every existing row, meaning "no
+        //    categorization decision has ever been recorded here". Writing
+        //    `'none'` would be a claim that the app looked at the row and
+        //    declined to categorise it, which it never did.
+        //  - `merchant_id` stays NULL rather than being derived from
+        //    `merchant_raw_text`. Deriving it would run ADR-008's matcher over
+        //    historical rows during a migration — an unattended, unauditable
+        //    bulk categorization, which is exactly the operation AC-D4.4 says
+        //    must write one audit entry per affected transaction and be the
+        //    user's choice (P4b's "re-apply to history"). A migration is not
+        //    the place to decide where someone's money went.
+        //  - The 13 starter categories are **not** seeded here either. Seeding
+        //    goes through `CategoryDao.ensureDefaultsSeeded`, which is
+        //    idempotent and is called from the composition root once the
+        //    database is unlocked — so the seed list has exactly one
+        //    implementation shared by fresh installs, upgrades and tests,
+        //    instead of one here and one there that can drift apart.
+      }
     },
     beforeOpen: (OpeningDetails details) async {
       // ADR-003: enforce referential integrity on every connection, not
@@ -246,6 +308,65 @@ class AppDatabase extends _$AppDatabase {
       'INSERT OR IGNORE INTO ingest_watermark (id) VALUES '
       '($ingestWatermarkSingletonId);',
     );
+  }
+
+  /// **AC-C3.3 — "no transaction may be left pointing at a category that no
+  /// longer exists"** — enforced at the database, against every code path.
+  ///
+  /// ## Why a trigger and not the `FK RESTRICT` architecture §4.2 names
+  ///
+  /// §4.2 says *"deleting a category in use is blocked by `FK RESTRICT`"*.
+  /// That would require `transactions.category_id` to carry a `REFERENCES`
+  /// clause — and that column has existed since schema v1 without one. SQLite
+  /// cannot add a foreign key to an existing column; the only way is to
+  /// rebuild the entire `transactions` table (create-copy-drop-rename). This
+  /// build declines to do that, and the reason is specific rather than
+  /// squeamish: `transactions` is the money table, it carries 50-odd columns,
+  /// P3b-2 and P3b-3 have just finished repairing two money-losing defects in
+  /// the code that writes it, and a column silently dropped during a rebuild
+  /// would be undetectable from the outside until a total came out wrong. The
+  /// risk of the mechanism would exceed the risk it removes.
+  ///
+  /// **This is not a weakening, and the difference is worth being precise
+  /// about.** `FK RESTRICT` aborts a `DELETE FROM category` while any row
+  /// references it. So does this trigger — for `transactions` *and* for
+  /// `merchant_rule`, in one place, with a message that says which. What the
+  /// trigger does not do is police *writes* to `transactions.category_id`
+  /// (a real FK would reject an insert naming a nonexistent category). That
+  /// direction is covered differently and deliberately:
+  ///
+  ///  - the write paths go through `CategoryDao`/`CategorizationService`,
+  ///    which resolve a category before writing it;
+  ///  - and a dangling id, if one ever occurred, is **not** a data-loss
+  ///    condition — `CategoryResolver` renders any unresolvable id as
+  ///    *Uncategorized*, so the transaction stays visible, stays in its
+  ///    period total, and stays in the category breakdown (AC-C1.3). The
+  ///    figure is never wrong; only the label is.
+  ///
+  /// The asymmetry is the right way round for a ledger: refuse the operation
+  /// that could orphan money, and degrade gracefully on a label.
+  ///
+  /// Deleting is still possible — `CategoryDao.deleteCategory` reassigns or clears
+  /// every referencing row *inside the same transaction*, before the delete
+  /// statement runs. The trigger is what makes "the caller must decide first"
+  /// a fact rather than a convention (AC-C3.3's "REQUIRES a decision").
+  Future<void> _installCategoryGuardTrigger() async {
+    await customStatement('''
+      CREATE TRIGGER IF NOT EXISTS category_no_delete_while_in_use
+        BEFORE DELETE ON category
+        BEGIN
+          SELECT RAISE(ABORT, 'category is still used by transactions')
+          WHERE EXISTS (
+            SELECT 1 FROM transactions WHERE category_id = OLD.id
+          );
+          SELECT RAISE(ABORT, 'category is still used by merchant rules')
+          WHERE EXISTS (
+            SELECT 1 FROM merchant_rule WHERE category_id = OLD.id
+          );
+          SELECT RAISE(ABORT, 'this category cannot be deleted')
+          WHERE OLD.is_protected = 1;
+        END;
+    ''');
   }
 
   /// ADR-010 layer 2: SQL triggers that make `audit_entry` append-only

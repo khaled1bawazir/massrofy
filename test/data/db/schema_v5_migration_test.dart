@@ -39,6 +39,7 @@ import 'package:massrofy/data/dao/transaction_dao.dart';
 import 'package:massrofy/data/db/app_database.dart';
 
 import '../../support/plain_test_database.dart';
+import 'schema_v7_migration_test.dart' show rewindPastV7;
 
 /// The columns v5 adds to `transactions`, in SQL naming.
 const List<String> v5TransactionColumns = <String>[
@@ -63,10 +64,12 @@ void main() {
     setUp(() => db = openPlainTestDatabase());
     tearDown(() async => db.close());
 
-    test('reports schemaVersion 5', () {
-      // The one place the *current* version is pinned; older migration files
-      // deliberately no longer assert an exact number.
-      expect(db.schemaVersion, 5);
+    test('reports a schema version of at least 5', () {
+      // No longer an exact number — `schema_v7_migration_test.dart` is now the
+      // one place the *current* version is pinned. This file's job is to
+      // assert that v5's own additions survive, which stays true at every
+      // later version.
+      expect(db.schemaVersion, greaterThanOrEqualTo(5));
     });
 
     test('every v5 column is present on transactions', () async {
@@ -112,7 +115,11 @@ void main() {
           'ALTER TABLE transactions DROP COLUMN $column;',
         );
       }
-      await db.customStatement('PRAGMA user_version = 4;');
+      // v7's tables and columns come off through `rewindPastV7`, which also
+      // sets `user_version` — see `schema_v7_migration_test.dart`. Keeping that
+      // knowledge in one file means this test never needs updating when a
+      // later version adds a column.
+      await rewindPastV7(db, toVersion: 4);
       await db.close();
 
       db = AppDatabase(NativeDatabase(dbFile));
@@ -193,7 +200,11 @@ void main() {
           'ALTER TABLE transactions DROP COLUMN $column;',
         );
       }
-      await db.customStatement('PRAGMA user_version = 4;');
+      // v7's tables and columns come off through `rewindPastV7`, which also
+      // sets `user_version` — see `schema_v7_migration_test.dart`. Keeping that
+      // knowledge in one file means this test never needs updating when a
+      // later version adds a column.
+      await rewindPastV7(db, toVersion: 4);
       await db.close();
 
       db = AppDatabase(NativeDatabase(dbFile));
@@ -252,7 +263,11 @@ void main() {
           'ALTER TABLE transactions DROP COLUMN $column;',
         );
       }
-      await db.customStatement('PRAGMA user_version = 4;');
+      // v7's tables and columns come off through `rewindPastV7`, which also
+      // sets `user_version` — see `schema_v7_migration_test.dart`. Keeping that
+      // knowledge in one file means this test never needs updating when a
+      // later version adds a column.
+      await rewindPastV7(db, toVersion: 4);
       await db.close();
 
       db = AppDatabase(NativeDatabase(dbFile));

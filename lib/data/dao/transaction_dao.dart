@@ -7,9 +7,17 @@ import '../../core/types/edited.dart';
 import '../db/app_database.dart';
 import '../db/tables/transaction_table.dart';
 import 'audit_log_dao.dart';
+import 'category_fields.dart';
 import 'user_edited_fields.dart';
 
 export '../../core/types/edited.dart' show Edited;
+export 'category_fields.dart'
+    show
+        CategoryReviewReason,
+        StoredCategorySource,
+        isUserOwnedCategory,
+        normalizeStoredCategoryId,
+        uncategorizedCategoryId;
 export 'user_edited_fields.dart'
     show TransactionField, decodeUserEditedFields, encodeUserEditedFields;
 
@@ -277,7 +285,13 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
           amountAmount: amount.toCanonicalString(),
           amountCurrency: amount.currencyCode,
           amountMinor: _toMinorUnitsBestEffort(amount),
-          categoryId: Value<String?>(categoryId),
+          // Normalised even here, on a method with no production caller, so
+          // that no write path in this DAO can be the one that stores the
+          // literal `uncategorized` id (see `category_fields.dart`). The
+          // provenance columns are deliberately left unset: this method takes
+          // an arbitrary `actor` and cannot honestly claim the category was
+          // a user's choice or a rule's.
+          categoryId: Value<String?>(normalizeStoredCategoryId(categoryId)),
           createdAt: Value<DateTime>(timestamp),
           updatedAt: Value<DateTime>(timestamp),
         ),
@@ -312,46 +326,260 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
     });
   }
 
-  /// Re-categorises an existing transaction, writing a before/after audit
-  /// entry for the `categoryId` field (US-F5, AC-F5.1).
-  Future<void> updateCategory({
+  /// **The user's own categorization** (US-C2, AC-D3.1) — writes the category,
+  /// records it as user-chosen, and protects it from every automatic path.
+  ///
+  /// ## Four columns move together, and that is the point
+  ///
+  /// P1 shipped an `updateCategory` that wrote `category_id` alone. P4a
+  /// replaces it, because a category id now travels with three facts about
+  /// *how it got there* (`category_source`, `category_confidence`,
+  /// `category_rule_id`), and a method that wrote one without the others would
+  /// leave a row saying "a rule put this here" about a choice a person made.
+  /// There is deliberately no remaining method on this DAO that writes
+  /// `category_id` without also settling its provenance.
+  ///
+  /// ## Why this also writes `user_edited_fields`
+  ///
+  /// That column is the app's existing answer to *"may an automatic path
+  /// overwrite this field?"* (AC-B5.3, `user_edited_fields.dart`), and it is
+  /// already consulted by the enrichment merge. Reusing it — rather than
+  /// giving categories a private protection flag — means **AC-D3.1's "user
+  /// correction always wins" is enforced by two independent mechanisms** that
+  /// were not written by the same phase: this column, and
+  /// [applyAutomaticCategory]'s explicit source check.
+  ///
+  /// ## Uncategorized is stored as NULL
+  ///
+  /// Passing the literal `uncategorized` id is normalised to null here, so the
+  /// database holds exactly one representation of "uncategorized" — see the
+  /// column's doc comment in `transaction_table.dart`. Choosing Uncategorized
+  /// explicitly is still a *user choice*, so it still protects the field: the
+  /// app must not re-categorise something the user deliberately blanked.
+  /// [merchantId] links the transaction to the merchant row the correction
+  /// taught a rule about (KHA-31). Left absent when null, so a caller with no
+  /// merchant cannot accidentally *unlink* one that is already there.
+  Future<void> setUserCategory({
     required int id,
-    required String? newCategoryId,
-    required String actor,
+    required String? categoryId,
+    int? merchantId,
+    String actor = 'user',
     String? actorDetail,
     DateTime? now,
   }) {
     final DateTime timestamp = now ?? DateTime.now();
+    final String? storedId = normalizeStoredCategoryId(categoryId);
+
     return transaction<void>(() async {
       final TransactionRow existing = await (select(
         transactions,
       )..where((Transactions t) => t.id.equals(id))).getSingle();
 
+      final Set<String> protectedFields = <String>{
+        ...decodeUserEditedFields(existing.userEditedFields),
+        TransactionField.categoryId,
+      };
+
       await (update(
         transactions,
       )..where((Transactions t) => t.id.equals(id))).write(
         TransactionsCompanion(
-          categoryId: Value<String?>(newCategoryId),
+          categoryId: Value<String?>(storedId),
+          categorySource: const Value<String?>(StoredCategorySource.user),
+          // Certainty by construction: a person said so. Recorded rather than
+          // left null so a screen can render one confidence rule for every
+          // row instead of special-casing the null.
+          categoryConfidence: const Value<double?>(1.0),
+          // The rule (if one had fired) no longer explains this category, and
+          // leaving its id would make the detail screen credit a rule for the
+          // user's own decision.
+          categoryRuleId: const Value<int?>(null),
+          merchantId: merchantId == null
+              ? const Value<int?>.absent()
+              : Value<int?>(merchantId),
+          userEditedFields: Value<String?>(
+            encodeUserEditedFields(protectedFields),
+          ),
           updatedAt: Value<DateTime>(timestamp),
         ),
       );
 
+      // The category question is answered, so a review flag raised *by the
+      // categorizer* is spent (AC-C4.3). A flag raised by anything else —
+      // a possible duplicate, an unproven transfer — is untouched: those are
+      // different questions and answering one does not answer the other.
+      await _clearCategoryReviewFlag(id: id, existing: existing);
+
       await auditLogDao.append(
         entityType: 'transaction',
         entityId: id.toString(),
-        action: 'update',
+        // ADR-010's vocabulary has a word for this and it is not `update`.
+        action: 'categorize',
         actor: actor,
         actorDetail: actorDetail,
         changedAt: timestamp,
         fieldChanges: <AuditFieldChange>[
           AuditFieldChange(
-            field: 'categoryId',
+            field: TransactionField.categoryId,
             from: existing.categoryId,
-            to: newCategoryId,
+            to: storedId,
+          ),
+          AuditFieldChange(
+            field: 'categorySource',
+            from: existing.categorySource,
+            to: StoredCategorySource.user,
           ),
         ],
       );
     });
+  }
+
+  /// **An automatic categorization** (AC-D2.1, AC-D2.2, AC-F5.2) — applied
+  /// only if no person has already answered the question.
+  ///
+  /// Returns true when the category was written, false when the write was
+  /// refused because the user owns the field.
+  ///
+  /// ## The refusal is here, at the write boundary, on purpose
+  ///
+  /// `CategorizationService` checks the same thing before it even matches, and
+  /// that check is the one that normally fires. This one exists because
+  /// AC-D3.1 — *"the user's explicit choice is never silently overridden by
+  /// any automatic re-learning"* — must survive a **future** caller that has
+  /// not read the service. `checkMovementAmount` is guarded in the same
+  /// belt-and-braces way and for the same reason (KHA-79: the unguarded path
+  /// was the one that had no caller yet).
+  ///
+  /// Two signals are consulted, either of which vetoes the write:
+  ///
+  ///  - `user_edited_fields` contains `categoryId` — the app-wide "a person
+  ///    edited this" mechanism;
+  ///  - `category_source` is already `user` — the categorization-specific
+  ///    statement of the same fact.
+  ///
+  /// They are redundant by design. A row written by [setUserCategory] carries
+  /// both, so a bug that dropped one would still be caught by the other.
+  Future<bool> applyAutomaticCategory({
+    required int id,
+    required String? categoryId,
+    required double confidence,
+    int? ruleId,
+    int? merchantId,
+    required String actorDetail,
+    bool flagForReview = false,
+    String? reviewReason,
+    DateTime? now,
+  }) {
+    final DateTime timestamp = now ?? DateTime.now();
+    final String? storedId = normalizeStoredCategoryId(categoryId);
+
+    return transaction<bool>(() async {
+      final TransactionRow existing = await (select(
+        transactions,
+      )..where((Transactions t) => t.id.equals(id))).getSingle();
+
+      if (isUserOwnedCategory(existing)) {
+        // Not an error, and not silent either: the caller is told, and the
+        // stored row keeps the user's answer. Nothing is written at all — not
+        // even the merchant link — because a write here is what the AC forbids.
+        return false;
+      }
+
+      final bool applying = storedId != existing.categoryId;
+
+      await (update(
+        transactions,
+      )..where((Transactions t) => t.id.equals(id))).write(
+        TransactionsCompanion(
+          categoryId: Value<String?>(storedId),
+          categorySource: Value<String?>(
+            storedId == null
+                ? StoredCategorySource.none
+                : StoredCategorySource.rule,
+          ),
+          categoryConfidence: Value<double?>(confidence),
+          categoryRuleId: Value<int?>(ruleId),
+          // Recorded even when nothing was categorised: knowing *which* shop
+          // this was is useful on its own, and it is what stops a second
+          // merchant row being created for the same key next time.
+          merchantId: Value<int?>(merchantId),
+          // Only ever raises a flag, never lowers one: an existing flag was
+          // raised by a different question (a possible duplicate, an unproven
+          // transfer) and clearing it here would answer a question nobody
+          // asked. See `_clearCategoryReviewFlag` for the only lowering path.
+          needsReview: flagForReview
+              ? const Value<bool>(true)
+              : const Value<bool>.absent(),
+          reviewReason: flagForReview && !existing.needsReview
+              ? Value<String?>(reviewReason)
+              : const Value<String?>.absent(),
+          updatedAt: Value<DateTime>(timestamp),
+        ),
+      );
+
+      // **AC-F5.2 / NFR-A2 — "every automatic categorization writes an audit
+      // entry attributed to the SYSTEM and naming the rule that fired."**
+      //
+      // Written only when a category was actually applied. A pass that found
+      // nothing has not categorised anything, and an entry saying "the system
+      // considered this and did nothing" on every uncategorised transaction
+      // would bury the entries that record a real decision (US-F5 is read by
+      // a person). The row still says so, in `category_source = 'none'`.
+      if (applying && storedId != null) {
+        await auditLogDao.append(
+          entityType: 'transaction',
+          entityId: id.toString(),
+          action: 'categorize',
+          // ADR-010's actor vocabulary. Not 'user' — the whole value of this
+          // entry is that it distinguishes what the app did from what the
+          // person did.
+          actor: 'system_rule',
+          // Names the rule that fired, which is the "why" AC-D2.2 wants and
+          // the "which rule applied" AC-F5.2 requires.
+          actorDetail: actorDetail,
+          changedAt: timestamp,
+          fieldChanges: <AuditFieldChange>[
+            AuditFieldChange(
+              field: TransactionField.categoryId,
+              from: existing.categoryId,
+              to: storedId,
+            ),
+            AuditFieldChange(
+              field: 'categoryConfidence',
+              from: existing.categoryConfidence?.toString(),
+              to: confidence.toString(),
+            ),
+          ],
+        );
+      }
+
+      return true;
+    });
+  }
+
+  /// Lowers a review flag **only** when the categorizer is the one that raised
+  /// it.
+  ///
+  /// The check is on [TransactionRow.reviewReason], not on the boolean: a row
+  /// flagged as a possible duplicate is still a possible duplicate after the
+  /// user categorises it, and clearing that would hide an unresolved money
+  /// question behind an unrelated action.
+  Future<void> _clearCategoryReviewFlag({
+    required int id,
+    required TransactionRow existing,
+  }) async {
+    if (!existing.needsReview ||
+        !categoryReviewReasons.contains(existing.reviewReason)) {
+      return;
+    }
+    await (update(
+      transactions,
+    )..where((Transactions t) => t.id.equals(id))).write(
+      const TransactionsCompanion(
+        needsReview: Value<bool>(false),
+        reviewReason: Value<String?>(null),
+      ),
+    );
   }
 
   /// Soft-deletes a transaction (US-B8: hidden and restorable — only
@@ -880,7 +1108,24 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
           amountAmount: amount.toCanonicalString(),
           amountCurrency: amount.currencyCode,
           amountMinor: _toMinorUnitsBestEffort(amount),
-          categoryId: Value<String?>(categoryId),
+          // P4a: a category typed into the manual-entry form is a person's
+          // choice, so it arrives with the same provenance `setUserCategory`
+          // writes — including the protection that stops the learning loop
+          // from overwriting it later (AC-D3.1). Normalised through the shared
+          // helper so this path cannot be the one that stores the literal
+          // `uncategorized` id.
+          categoryId: Value<String?>(normalizeStoredCategoryId(categoryId)),
+          categorySource: categoryId == null
+              ? const Value<String?>.absent()
+              : const Value<String?>(StoredCategorySource.user),
+          categoryConfidence: categoryId == null
+              ? const Value<double?>.absent()
+              : const Value<double?>(1.0),
+          userEditedFields: categoryId == null
+              ? const Value<String?>.absent()
+              : Value<String?>(
+                  encodeUserEditedFields(<String>{TransactionField.categoryId}),
+                ),
           occurredAt: Value<DateTime?>(occurredAt),
           // The user stated when it happened. Neither SMS time source would be
           // truthful, and `received_at_fallback` would be actively wrong —
@@ -1060,14 +1305,34 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
         );
       }
       if (categoryId != null) {
+        // P4a: the edit form can change a category too, and when it does, the
+        // three provenance columns have to move with it — exactly as they do
+        // in [setUserCategory]. Leaving them behind would produce a row whose
+        // category a person typed and whose `category_source` still credits a
+        // rule, and the automatic path reads that column to decide whether it
+        // may overwrite (AC-D3.1). Normalised through the same helper so this
+        // path cannot be the one that stores the literal `uncategorized` id.
+        final String? storedCategoryId = normalizeStoredCategoryId(
+          categoryId.value,
+        );
         record(
           TransactionField.categoryId,
           existing.categoryId,
-          categoryId.value,
+          storedCategoryId,
         );
-        companion = companion.copyWith(
-          categoryId: Value<String?>(categoryId.value),
-        );
+        // Only when the value genuinely changed — the same restraint the
+        // method already applies to `user_edited_fields`. Someone who opened
+        // the edit form and pressed Save without touching the category has not
+        // expressed an intent about it, and stamping `source = user` on that
+        // would freeze the row against the learning loop for nothing.
+        if (existing.categoryId != storedCategoryId) {
+          companion = companion.copyWith(
+            categoryId: Value<String?>(storedCategoryId),
+            categorySource: const Value<String?>(StoredCategorySource.user),
+            categoryConfidence: const Value<double?>(1.0),
+            categoryRuleId: const Value<int?>(null),
+          );
+        }
       }
       if (instrumentId != null) {
         record(
