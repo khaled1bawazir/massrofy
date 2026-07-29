@@ -9,27 +9,50 @@
 # branch before the code PR reaches `main`. See PR #28 and PR #35 for the
 # pattern in practice.
 #
-# ci.yml only triggers on `pull_request: branches: [main]`, so every QA
-# artifact PR — by construction, always based against something other than
-# `main` — gets ZERO check runs of its own. That has already been mistaken
-# for a broken pipeline by a reviewing agent twice (PR #28, PR #35) before
-# being correctly identified as "by config, not failure." It also means the
-# two gates that have actually caught a real defect on a QA branch before —
-# an unused-import lint failure on PR #30's QA branch, caught later than it
-# should have been specifically because of this gap — run nowhere on these
-# PRs at all.
+# ci.yml only triggers on `pull_request: branches: [main]` (it also runs on
+# `push: branches: [main]`, which is irrelevant here since a PR is never a
+# push), so every QA artifact PR — by construction, always based against
+# something other than `main` — gets ZERO check runs of its own. That has
+# already been mistaken for a broken pipeline by a reviewing agent twice
+# (PR #28, PR #35) before being correctly identified as "by config, not
+# failure." It also means the gates that have actually caught a real defect
+# on a QA branch before — an unused-import lint failure on PR #30's QA
+# branch, caught later than it should have been specifically because of
+# this gap — run nowhere on these PRs at all.
 #
 # THE FIX, kept deliberately small (TIER: personal, see docs/PRD.md):
 # a second, lightweight workflow that fires on any PR whose BASE is not
 # `main` (i.e. exactly the QA-artifact-PR shape, plus any other non-main-base
-# PR that might exist) and runs only `dart format --set-exit-if-changed` and
-# `flutter analyze --fatal-infos`. NOT the full ci.yml suite: QA artifact PRs
-# are docs + test-file only by construction (see PR #28/#35's own "zero
-# production diff" proofs, which QA re-verifies via `git rev-parse
-# 'HEAD^{tree}:lib'` on every pass), so booting an emulator or building an
-# APK for one buys nothing and costs ~15-70 minutes it doesn't need. Analyze
-# + format is what actually catches an issue on this kind of PR (a stray
-# unused import in a new test file, a formatting slip) — see PR #30.
+# PR that might exist) and runs `dart format --set-exit-if-changed`,
+# `flutter analyze --fatal-infos`, and `flutter test` — the three gates
+# KHA-108's own done-check names. NOT the full ci.yml suite: no emulator
+# boot, no APK build, no dependency/OSV scan. QA artifact PRs are docs +
+# test-file only by construction (see PR #28/#35's own "zero production
+# diff" proofs, which QA re-verifies via `git rev-parse 'HEAD^{tree}:lib'`
+# on every pass), so those heavier jobs have no production code to exercise
+# and would cost ~15-70 minutes for nothing.
+#
+# `flutter test` IS included here, unlike the jobs skipped above, because
+# the "nothing to exercise" argument does not transfer to it: a QA-artifact
+# PR's entire payload is test files, so a test that compiles cleanly
+# (analyze-green) but fails its own assertion would otherwise only surface
+# once this PR merges into the code branch — turning the CODE branch red
+# for a defect that actually belongs to the QA PR. That is precisely the
+# signal inversion KHA-108 exists to prevent, so this gap doesn't get the
+# same "no production code" pass the emulator/APK/scan jobs get. See PR #30
+# (unused import caught by analyze) for the sibling case this closes for
+# tests.
+#
+# The `flutter test` step below passes `--exclude-tags=release_mode_guard`,
+# matching ci.yml's own main `flutter test --coverage` step exactly (see its
+# doc comment): `test/features/security/privacy_overlay_release_mode_test
+# .dart` is written to deliberately FAIL under a plain `flutter test` — it
+# only passes with `--dart-define=dart.vm.product=true`, which ci.yml
+# supplies via its own separate, dedicated invocation, not this one. A bare
+# `flutter test` here (without the exclude) would make every future
+# QA-artifact PR permanently red for a reason unrelated to the QA diff under
+# review — worse than the gap this workflow exists to close, since an
+# always-red check trains everyone to stop reading it.
 #
 # `branches-ignore: [main]` is what keeps this from double-running work
 # ci.yml already does: any PR targeting `main` is ci.yml's job, full stop.
@@ -61,10 +84,15 @@ env:
 
 jobs:
   analyze-and-format:
-    name: qa-pr-lint (analyze + format)
+    name: qa-pr-lint (analyze + format + test)
     runs-on: ubuntu-latest
-    # A pure lint job with no emulator/network dependency; generous but not
-    # loose, consistent with ci.yml's money-type-guard sizing.
+    # A pure lint+test job with no emulator/network dependency; generous but
+    # not loose, consistent with ci.yml's money-type-guard sizing. The added
+    # `flutter test` step below is the same suite ci.yml's main test step
+    # runs (minus --coverage and the release-mode-guard file), so this
+    # budget has headroom: ci.yml's equivalent job (pub get + format +
+    # analyze + full suite + coverage + a debug APK build) has run in
+    # ~7m21s end to end; this job skips the APK build entirely.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -104,3 +132,15 @@ jobs:
       - name: "flutter analyze (lint: static analysis)"
         if: steps.detect.outputs.exists == 'true'
         run: flutter analyze --fatal-infos
+
+      - name: "flutter test (KHA-108's third named gate)"
+        if: steps.detect.outputs.exists == 'true'
+        # --exclude-tags=release_mode_guard: excludes exactly one file,
+        # test/features/security/privacy_overlay_release_mode_test.dart,
+        # which self-checks and deliberately FAILS under a plain
+        # `flutter test` (see its doc comment and dart_test.yaml) — it only
+        # makes sense run with dart.vm.product=true, which is ci.yml's job
+        # (a separate, dedicated invocation), not this workflow's. Matches
+        # ci.yml's own main test step's pattern exactly — see its doc
+        # comment on the `flutter test --coverage` step.
+        run: flutter test --exclude-tags=release_mode_guard

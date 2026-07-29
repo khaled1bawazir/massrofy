@@ -172,26 +172,33 @@ shape above is the contract devops is producing for it to read.
 
 ### 5.0a `qa-pr-lint.yml` — lint coverage for QA-artifact PRs (KHA-108)
 
-`ci.yml` only triggers on `pull_request: branches: [main]`. Per `docs/lessons.md`,
-QA's verification PR is opened against the **code branch**, not `main` (so a
-squash-merge of the code PR can't orphan it) — which means every QA-artifact PR
-got zero check runs of its own under `ci.yml` alone. That has already been
-mistaken for a broken pipeline twice (PR #28, PR #35) before being correctly
-read as "by config, not failure," and it is also the reason a real lint issue
-on PR #30's QA branch was caught later than it should have been.
+`ci.yml`'s `pull_request` trigger is scoped to `branches: [main]` (it also has a
+separate `push: branches: [main]` trigger, which only fires on a direct push/merge
+to `main`, not on the PR itself). Per `docs/lessons.md`, QA's verification PR is
+opened against the **code branch**, not `main` (so a squash-merge of the code PR
+can't orphan it) — which means every QA-artifact PR got zero `pull_request` check
+runs of its own under `ci.yml` alone. That has already been mistaken for a broken
+pipeline twice (PR #28, PR #35) before being correctly read as "by config, not
+failure," and it is also the reason a real lint issue on PR #30's QA branch was
+caught later than it should have been.
 
 `.github/workflows/qa-pr-lint.yml` closes the gap without duplicating `ci.yml`'s
 heavier jobs: it triggers on `pull_request: branches-ignore: [main]` (i.e.
-exactly the PRs `ci.yml` cannot see) and runs only
-`dart format --set-exit-if-changed` and `flutter analyze --fatal-infos` — the
-two gates that have actually caught something on a QA branch. It deliberately
-does not run tests, the emulator job, or the dependency scan: QA-artifact PRs
-are docs + test-file only by construction (proven per-PR via
-`git rev-parse 'HEAD^{tree}:lib'`, not merely asserted), so there is no
-production code path for those heavier gates to exercise. It is not wired into
-branch protection as a required check — QA PRs merge under the reviewer's own
-"confirm the diff is genuinely artifacts-only" judgement, not the same
-green-`ci`-gate `main` uses.
+exactly the PRs `ci.yml` cannot see) and runs `dart format --set-exit-if-changed`,
+`flutter analyze --fatal-infos`, and `flutter test --exclude-tags=release_mode_guard`
+— the three gates KHA-108's own done-check names (format + analyze were the
+original shipped scope; `flutter test` was added after review — see §5.0a's own
+git history / PR #37's review thread — once it was pointed out that a QA test
+file failing its own assertion is exactly the signal-inversion case KHA-108 was
+filed about, not something the "no production code to exercise" argument covers).
+It deliberately does **not** run the Android emulator job, build an APK, or run
+the dependency/OSV scan: QA-artifact PRs are docs + test-file only by construction
+(proven per-PR via `git rev-parse 'HEAD^{tree}:lib'`, not merely asserted), so
+there is no production code path for those three heavier gates to exercise —
+unlike `flutter test`, whose whole point on a QA-artifact PR is to exercise the
+test files that *are* the PR's payload. It is not wired into branch protection as
+a required check — QA PRs merge under the reviewer's own "confirm the diff is
+genuinely artifacts-only" judgement, not the same green-`ci`-gate `main` uses.
 
 ### 5.1 How to read `timeout-minutes` in `ci.yml` (KHA-67)
 
