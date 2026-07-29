@@ -975,6 +975,135 @@ in `test/security/qa_pr30_probe_test.dart`, all passing.
 
 ---
 
+## 7f. Eighth pass — P4b, PR #34 (`feature/p4b-categorization-ui`, head `0585fd4`)
+
+**Scope:** the six issues PR #34 closes — KHA-106/107 (the ADR-008 v1.4 code
+fix, commit `eb14a10`) and KHA-32/33/34/97 (the categorization UI, commit
+`0585fd4`).
+
+### 7f.0 Calibration — why this pass is deliberately asymmetric
+
+`docs/PRD.md` now declares **`TIER: personal`**, which per the team's own rules
+means journeys plus **~5–10** highest-value probes and one review round, not a
+30-probe suite. That trim was applied to the **new UI/CRUD work** (category
+management, learned rules, picker sheet, correction flow, navigation) — PROBES
+U1–U5, five probes.
+
+**The merchant-matching engine was exempted, on purpose.**
+`lib/features/categorization/merchant_key.dart` has now required **four**
+adversarial rounds to catch real money-correctness bugs — KHA-98, KHA-99,
+KHA-106, KHA-107 — and *every one of them was missed by a pass that checked
+worked examples*. KHA-106 is the clearest case: ADR-008 v1.3's consequences list
+enumerated five examples and simply never stated a pair of 4-digit siblings, so
+three consecutive readers signed it off.
+
+So this round did not check examples. It checked **properties, mechanically**:
+
+* a **generated corpus** of 7,290 strings (all ordered 2–4 token strings over an
+  alphabet spanning every token *kind* the pipeline distinguishes: two proper
+  nouns, an ordinary word, two reference markers, a non-marker noise word, and
+  digit runs at three lengths straddling the deleted `>= 4` boundary);
+* a **differential** against ADR-008 v1.3's algorithm, transcribed verbatim from
+  `git show dc3f362:lib/features/categorization/merchant_key.dart`, so the
+  behaviour change is *enumerated* rather than described.
+
+### 7f.1 Commands run, on `0585fd4` itself
+
+Per the `docs/lessons.md` rule that a gate result is evidence only for the exact
+tree it was measured on. Evidence: `docs/evidence/qa-pr34-*.txt`.
+
+```
+flutter analyze                                        # No issues found!
+dart format --set-exit-if-changed --output=none lib test  # 215 files, 0 changed
+flutter test                                           # 1340 passing / 3 skipped / 1 failing
+flutter test --dart-define=dart.vm.product=true \
+  test/features/security/privacy_overlay_release_mode_test.dart  # All tests passed
+flutter test test/security/qa_pr34_probe_test.dart     # 12 passing
+flutter test    # with the QA probe file added: 1352 passing / 3 skipped / 1 failing
+```
+
+Every figure the PR body claims **reproduces exactly**, including the single
+failure: `privacy_overlay_release_mode_test` needs CI's dedicated dart-define
+step, and QA **verified it passes** under that define rather than accepting the
+disclosure on the PR's word.
+
+### 7f.2 Done-check traceability — the six issues
+
+| Issue | Sev | Done-check (from the issue, not the PR) | Test / probe | Status |
+|---|---|---|---|---|
+| **KHA-106** | High | `of('QAMART 1000') != of('QAMART 2000')`, **or** the residual is stated in ADR-008 + the constant's doc comment. PROBE M2 **inverted in place** | `CategorizationConfig.referenceDigitRunMinLength` **deleted**, with a comment in its place explaining why it must not return; `qa_pr30` M2 inverted (verified in the diff — same fixtures, same comments, flipped assertions), and it now also executes the end-to-end tier (T4, `canAutoApply` false); QA **PROBE E2/E4** | **PASS** |
+| **KHA-107** | Low | `of(of(x)) == of(x)` for all `x` including `'PANDA 1234 STORE'`, **or** the doc drops the claim. PROBE M1 **inverted in place** | Invariant made **true**, not withdrawn; `qa_pr30` M1 inverted; QA **PROBE E1 — 0 violations / 7,290 strings**, and **E1b** asserts the premise (`referenceMarkerTokens ⊆ noiseTokens`) the proof rests on | **PASS** |
+| **KHA-32** | High | Corpus tests show the three outcomes; the review count equals flagged ∪ uncategorized, **verified against the data layer** | `ReviewCounts.fromRows` is a pure function over rows; `p4b_screens_test` AC-C4.1 (icon **and** words, NFR-U4); QA **PROBE U4** recomputes the figure by an independent path and pins the literal answer (2 / 2 / **3**, not 4) | **PASS** |
+| **KHA-33** | Urgent | Tap-count test for AC-C2.2; explicit AC-D5.2 test; bulk undo restores each transaction's **individual** prior category | Correction is a bottom sheet, so AC-C2.2 holds by construction; AC-D5.2 tested end to end; AC-C5.2 restores six columns via `CategorySnapshot`, with a test proving the automatic path can write again after undo. QA **PROBE U5** constructs the genuinely-mixed-prior case the shipped test names but does not build — **production code passes** (see G-QA-34-2) | **PASS** |
+| **KHA-34** | Medium | Re-apply updates history **and** writes one audit entry per affected transaction; declining leaves history untouched; deleting a rule stops future auto-categorization only | Re-apply **loops** rather than issuing one `UPDATE`, so each row gets its own entry; N computed **before** the dialog opens and the button stays disabled until it arrives; **KHA-104's write-side guard verified on this S-17 path**, including the category-deleted-while-dialog-open case, and **no history rewrite runs against a rejected category** | **PASS** |
+| **KHA-97** | Medium | Duplicate name shows a message and creates nothing; delete cannot complete without a decision; **both decisions leave AC-C1.3 intact (widget-level path)**; Uncategorized offers no affordance | Duplicate + protected-category behaviour tested; AC-C3.3 is a property of the widget tree; *Uncategorized* affordance **absent, not disabled**. **The widget-level AC-C1.3 half was missing** — supplied by QA **PROBES U1/U2**, both pass | **PASS** (gap closed by QA — **G-QA-34-1**) |
+
+### 7f.3 Adversarial pass — attacks attempted, including the ones that failed
+
+Recorded as audit evidence whether or not they succeeded, per the standing rule.
+
+| # | Attack | Result |
+|---|---|---|
+| **E1** | Break idempotence anywhere in a 7,290-string generated corpus (`of(of(x)) != of(x)`) | **FAILED to break it — 0 violations.** KHA-107 genuinely closed, not just for the pinned examples |
+| **E1b** | Find a corroborator that survives step 7 and so re-fires step 6 on a second pass | **FAILED** — `referenceMarkerTokens ⊆ noiseTokens` holds; the doc comment's warning is now enforced by a test rather than written down |
+| **E2** | Find **any** two strings with different *name content* that share a key (the KHA-98/99/106 class), by partitioning the whole corpus rather than testing pairs | **FAILED — 0 classes span more than one name.** The strongest single result of this pass |
+| **E3** | Buy order-insensitivity by over-collapsing: make `X MARKER D` == `X D MARKER` *and* accidentally equal to a different name | **FAILED** — swept over every one of the 10 reference markers, both orders; `ZORBA` never collides with `QANDA` |
+| **E4** | Find a **third** cost, the way KHA-109 was found last round: a merge v1.4 introduces that v1.3 did not have, joining two different names | **FAILED to find a dangerous one.** v1.4 introduces **818** new merges and **not one joins two different names** — every one is `NAME <digits> <MARKER>` folding into the `NAME` class, the intended consequence |
+| **E4b** | Check whether the two disclosed costs are *"correctly and only those costs"* | **SUCCEEDED (Low)** — the cost class is **wider than the example that documents it**; the sub-4-digit, marker-after half is new in v1.4 and undisclosed. **D-QA-34-1** |
+| **E5** | Check the KHA-109 all-digit-key residual was not enlarged | **FAILED to find enlargement — it shrank** (−48 / +4). Recorded as **O-QA-34-1** because an undisclosed *improvement* is still an undisclosed change |
+| **U1/U2** | Break the AC-C1.3 category-sum invariant through a **UI-triggered** category delete (both sealed decisions), driving the real screen against the real DAO | **FAILED to break it.** Total holds at **175.00**; reassignment moves the money into `groceries` (**165.00** exactly), it does not merely detach it |
+| **U3** | SQL injection (`'; DROP TABLE category;--`, `' OR '1'='1`), RTL-override display spoofing (U+202E), embedded NUL — on the new category-name CRUD path | **FAILED.** Stored as data or refused; the `category` table and seed rows survive. Drift parameterises. Name folding still refuses a case/spacing duplicate (AC-C3.2) |
+| **U4** | Make the review badge over-count by feeding it a row that is *both* flagged and uncategorized | **FAILED** — the figure is a **union** (3), not a sum (4), verified against an independent recount |
+| **U5** | Make the undo reset rows to a default instead of their own priors, using genuinely different priors | **FAILED** — target returns to `dining`, the two blanks to `null`; audit chain still verifies |
+| **N1** | Reach any P4b screen **before unlock** | **FAILED.** `app.dart` renders `HomePlaceholderScreen` only on the unlocked branch and `LockGateScreen` otherwise; every P4b route hangs off `HomePlaceholderScreen`. Nothing is constructed above the lock gate |
+
+### 7f.4 Reachability — verified by grepping the construction site
+
+`docs/lessons.md`: *"verify a reachability claim by grepping for the
+construction site, never from the fact that the widget exists in the tree."*
+Done, and it holds — this is the first phase where the app is genuinely
+navigable:
+
+```
+app.dart  (unlocked branch only)
+  └── HomePlaceholderScreen
+        ├── openNeedsReview        → NeedsReviewHost → NeedsReviewScreen
+        │     ├── openTransactionDetail → TransactionDetailScreen   (S-11)
+        │     └── _openCompleteUnparsed → CompleteUnparsedScreen    (S-19)
+        ├── openCategoryManagement → CategoryManagementScreen       (S-14/S-15)
+        ├── openLearnedRules       → LearnedRulesScreen             (S-16/S-17)
+        └── openRecentlyDeleted    → RecentlyDeletedScreen          (S-44)
+```
+
+`showCategoryPickerSheet` is constructed from `correctTransactionCategory` in
+the same routes file. **The conditional merge gate is correctly discharged:**
+the gate said KHA-87/88/94/96/98–105 were merge-blocking for any PR routing
+`NeedsReviewScreen` / `RecentlyDeletedScreen` / `TransactionDetailScreen`; this
+PR routes all three, and all fourteen issues are `Done`.
+
+### 7f.5 Claims checked rather than accepted
+
+| Claim | Verdict |
+|---|---|
+| "1340 tests passing, one pre-existing environment-dependent failure" | **Accurate.** Reproduced exactly; the failure verified to pass under CI's dart-define |
+| "`flutter analyze` clean, format clean (215 files, 0 changed)" | **Accurate** on `0585fd4` |
+| "Two defects found by the new tests, fixed here" (`setState` arrow body returning a Future; unhandled async error in the provenance loader) | **Both genuinely fixed, not caught-then-left.** `transaction_detail_screen.dart` starts the future *outside* the callback and uses a block body; `_load()` catches `on Object` into a nullable result so a rejected future never exists, and `!snapshot.hasData` renders the error state — an error never renders as an *empty* history, which is the claim that matters |
+| "KHA-104's write-side guard verified on this path, not assumed" | **Accurate**, and stronger than claimed — the tests also assert **no history rewrite runs** against the rejected category, and cover the category-deleted-while-the-dialog-is-open race |
+| "KHA-110 (the unpopulated 'Recent' row) is deferred and non-blocking" | **Correct and correctly scoped.** The row hides itself when empty, so the shipped app renders no broken affordance; the picker is fully usable (search + full grid). Filed with owner, labels, priority **and milestone** — the standing `docs/lessons.md` failure did not recur. It hides nothing that should block |
+| PROBE M1/M2 "inverted in place rather than deleted" | **Verified in the diff** — same fixtures, same raw strings, same reasoning comments, assertions flipped. Neither was weakened or renamed to pass trivially |
+
+### 7f.6 Tracking check
+
+- **D-QA-34-1** filed as a Linear issue with the **P4 milestone set at
+  creation**; **G-QA-34-1** and **G-QA-34-2** are recorded in `docs/defects.md`
+  as gaps QA closed in the same pass (the tests now exist and pass), so they
+  need no separate ticket.
+- **KHA-110** was filed by the engineer with milestone — correctly.
+- **KHA-109** remains open and is **not** this PR's problem; E5 confirms this PR
+  shrinks rather than grows its class.
+
+---
+
 ## 8. Untestable-as-written criteria
 
 None found in Epic 0, Epic A, or the Epic B slice built by P3a. Every AC in the
