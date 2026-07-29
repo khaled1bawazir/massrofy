@@ -777,11 +777,103 @@ void main() {
 
       await tester.tap(find.byKey(const Key('needsReview.keepBoth.9')));
       await tester.pumpAndSettle();
+      // O-QA-8: merging now goes through a confirmation, so the tap opens the
+      // dialog and the second tap is the commitment.
       await tester.tap(find.byKey(const Key('needsReview.merge.9')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('needsReview.mergeConfirm.9')));
       await tester.pumpAndSettle();
 
       // The app has no idea which is right, so the UI must not imply it.
       expect(actions, <String>['keep', 'merge']);
+    });
+
+    testWidgets('O-QA-8 — a single tap on Merge does NOT merge: it asks '
+        'first, like delete does (risk R-8)', (WidgetTester tester) async {
+      // `build-plan.md` calls the merge "the single highest-risk operation in
+      // P3", and until KHA-90 it was one tap away while the strictly less
+      // dangerous soft delete took two. This test is the guard on that.
+      useTallSurface(tester);
+      final List<String> actions = <String>[];
+      await tester.pumpWidget(
+        wrap(inbox(onMerge: (_) => actions.add('merge'), onKeepBoth: (_) {})),
+      );
+      await tester.tap(find.text('Low confidence (1)'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('needsReview.merge.9')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.text('Merge these two into one?'), findsOneWidget);
+      // The dialog states the effect on totals AND the reversibility, so the
+      // user is not deciding under a false impression of permanence. Scoped to
+      // the dialog because the card behind it says something similar — which
+      // is the point: the two say the same thing, one before and one during.
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.textContaining('nothing is destroyed'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.textContaining('can be restored at any time'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        actions,
+        isEmpty,
+        reason: 'opening the dialog must not have merged anything yet',
+      );
+    });
+
+    testWidgets('O-QA-8 — cancelling the confirmation merges nothing', (
+      WidgetTester tester,
+    ) async {
+      useTallSurface(tester);
+      final List<String> actions = <String>[];
+      await tester.pumpWidget(
+        wrap(inbox(onMerge: (_) => actions.add('merge'), onKeepBoth: (_) {})),
+      );
+      await tester.tap(find.text('Low confidence (1)'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('needsReview.merge.9')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('needsReview.mergeCancel.9')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(actions, isEmpty);
+      // The card is still there with its decision unmade — the pair stays
+      // flagged rather than quietly resolving itself.
+      expect(find.byKey(const Key('needsReview.merge.9')), findsOneWidget);
+    });
+
+    testWidgets('O-QA-8 — dismissing the dialog by tapping outside it merges '
+        'nothing either (showDialog returns null)', (
+      WidgetTester tester,
+    ) async {
+      useTallSurface(tester);
+      final List<String> actions = <String>[];
+      await tester.pumpWidget(
+        wrap(inbox(onMerge: (_) => actions.add('merge'), onKeepBoth: (_) {})),
+      );
+      await tester.tap(find.text('Low confidence (1)'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('needsReview.merge.9')));
+      await tester.pumpAndSettle();
+      // Tap the barrier, well away from the dialog itself.
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(actions, isEmpty);
     });
 
     testWidgets('no merge button is offered when there is no counterpart to '

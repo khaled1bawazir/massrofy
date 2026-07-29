@@ -87,9 +87,23 @@ final class UnreadableTransaction {
 
 /// Why a stored row could not become a [LedgerTransaction].
 enum UnreadableReason {
-  /// The authoritative `amount_amount` column is not a valid exact decimal, or
-  /// `amount_currency` is not a currency code this build understands. Either
-  /// way there is no honest [Money] to be had from the row.
+  /// The authoritative `amount_amount` column is not a valid exact decimal, so
+  /// there is no honest [Money] to be had from the row.
+  ///
+  /// **O-QA-7 (KHA-90) — this used to also claim "or `amount_currency` is not
+  /// a currency code this build understands", and that was never true.**
+  /// [Money] performs no currency-code validation: it stores whatever string
+  /// the write path handed it, so a row holding `ZZZ` maps perfectly well and
+  /// never reaches here.
+  ///
+  /// The sentence was corrected rather than the code, because the current
+  /// behaviour is the one KHA-74 actually asked for. An unrecognised currency
+  /// lands in its own currency bucket, is excluded from the base-currency
+  /// total, and is counted on the explicit "not converted" line — so the user
+  /// is *told* the figure is incomplete. Declaring such a row unreadable would
+  /// hide a real transaction behind an error banner to protect a total that is
+  /// already protected. Rejecting an unknown code belongs at the **write**
+  /// boundary, where the message that produced it can still be shown.
   unparsableAmount,
 }
 

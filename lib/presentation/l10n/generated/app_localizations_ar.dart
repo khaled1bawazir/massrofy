@@ -705,6 +705,44 @@ class AppLocalizationsAr extends AppLocalizations {
   String get reviewDuplicateKeepBoth => 'لا، احتفظ بكلتيهما';
 
   @override
+  String get reviewMergeConfirmTitle =>
+      'هل تريد دمج هاتين المعاملتين في واحدة؟';
+
+  @override
+  String get reviewMergeConfirmBody =>
+      'ستبقى إحداهما في قوائمك وإجمالياتك، وتنتقل الأخرى إلى المحذوفات مؤخراً مع الاحتفاظ برسالتها، ويمكنك استعادتها في أي وقت — لا يُتلف شيء.';
+
+  @override
+  String get reviewMergeConfirmCancel => 'احتفظ بكلتيهما';
+
+  @override
+  String get reviewMergeConfirmAccept => 'ادمجهما';
+
+  @override
+  String get reviewMergeRefusedFee =>
+      'الرسومان مختلفان في هاتين المعاملتين، لذا لا يمكن دمجهما تلقائياً';
+
+  @override
+  String get reviewMergeRefusedConversion =>
+      'المبلغ المحوَّل أو سعر الصرف مختلف بين المعاملتين، لذا لا يمكن دمجهما';
+
+  @override
+  String get reviewMergeRefusedBalance =>
+      'الرصيد المتبقي المذكور بعد كل معاملة مختلف، لذا لا يمكن دمجهما';
+
+  @override
+  String get reviewMergeRefusedSpendEffect =>
+      'تحتسب كل منهما بطريقة مختلفة ضمن إنفاقك، لذا لا يمكن دمجهما';
+
+  @override
+  String get reviewMergeRefusedUserEdit =>
+      'لقد صحّحت تفصيلاً في إحداهما والأخرى تذكر شيئاً مختلفاً — يرجى مراجعتهما قبل الدمج';
+
+  @override
+  String get reviewMergeRefusedChain =>
+      'إحدى هاتين المعاملتين سبق أن استوعبت معاملة أخرى، لذا لا يمكن دمجها مرة أخرى';
+
+  @override
   String get reviewDuplicateMerged =>
       'تم الدمج — معاملة واحدة الآن، ويمكن تتبّعها إلى كلتا الرسالتين';
 

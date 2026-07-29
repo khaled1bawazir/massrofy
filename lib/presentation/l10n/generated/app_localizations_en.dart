@@ -707,6 +707,43 @@ class AppLocalizationsEn extends AppLocalizations {
   String get reviewDuplicateKeepBoth => 'No, keep both';
 
   @override
+  String get reviewMergeConfirmTitle => 'Merge these two into one?';
+
+  @override
+  String get reviewMergeConfirmBody =>
+      'One of them will stay in your lists and totals. The other moves to Recently deleted, keeps its own message, and can be restored at any time — nothing is destroyed.';
+
+  @override
+  String get reviewMergeConfirmCancel => 'Keep both';
+
+  @override
+  String get reviewMergeConfirmAccept => 'Merge them';
+
+  @override
+  String get reviewMergeRefusedFee =>
+      'These state different fees, so they cannot be merged automatically';
+
+  @override
+  String get reviewMergeRefusedConversion =>
+      'These state different converted amounts or exchange rates, so they cannot be merged';
+
+  @override
+  String get reviewMergeRefusedBalance =>
+      'These report different balances after the transaction, so they cannot be merged';
+
+  @override
+  String get reviewMergeRefusedSpendEffect =>
+      'These count differently toward your spending, so they cannot be merged';
+
+  @override
+  String get reviewMergeRefusedUserEdit =>
+      'You have corrected a detail on one of these and the other says something different — please check them before merging';
+
+  @override
+  String get reviewMergeRefusedChain =>
+      'One of these has already absorbed another transaction, so it cannot be merged again';
+
+  @override
   String get reviewDuplicateMerged =>
       'Merged — one transaction now, traceable to both messages';
 

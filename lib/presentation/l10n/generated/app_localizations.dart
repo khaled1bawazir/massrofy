@@ -1280,6 +1280,66 @@ abstract class AppLocalizations {
   /// **'No, keep both'**
   String get reviewDuplicateKeepBoth;
 
+  /// O-QA-8 / risk R-8 — the merge is the highest-risk operation in the app and, unlike soft delete, had no confirmation step. Asking is what makes ADR-017 D2's 'the decision is the user's' true in the UI and not only in the service.
+  ///
+  /// In en, this message translates to:
+  /// **'Merge these two into one?'**
+  String get reviewMergeConfirmTitle;
+
+  /// States the effect on totals AND the reversibility (R-8, AC-B8.1), matching the delete dialog's approach so the user is not deciding under a false impression of permanence.
+  ///
+  /// In en, this message translates to:
+  /// **'One of them will stay in your lists and totals. The other moves to Recently deleted, keeps its own message, and can be restored at any time — nothing is destroyed.'**
+  String get reviewMergeConfirmBody;
+
+  /// Cancel, positively worded and first, so the safe choice is the easy one. Dismissing writes nothing.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep both'**
+  String get reviewMergeConfirmCancel;
+
+  /// The explicit user confirmation ADR-017 D2 requires.
+  ///
+  /// In en, this message translates to:
+  /// **'Merge them'**
+  String get reviewMergeConfirmAccept;
+
+  /// MergeRefusal.feeDiffers (KHA-87) — the fee is a reported figure of its own (PRD §3.4), so a disagreement is the user's to settle.
+  ///
+  /// In en, this message translates to:
+  /// **'These state different fees, so they cannot be merged automatically'**
+  String get reviewMergeRefusedFee;
+
+  /// MergeRefusal.conversionDiffers (KHA-87) — the converted amount is what reaches the base-currency total (ADR-009).
+  ///
+  /// In en, this message translates to:
+  /// **'These state different converted amounts or exchange rates, so they cannot be merged'**
+  String get reviewMergeRefusedConversion;
+
+  /// MergeRefusal.remainingBalanceDiffers (KHA-87).
+  ///
+  /// In en, this message translates to:
+  /// **'These report different balances after the transaction, so they cannot be merged'**
+  String get reviewMergeRefusedBalance;
+
+  /// MergeRefusal.spendEffectDiffers (KHA-87) — affectsSpend or a recorded internal-transfer decision (AC-B11.2) differs.
+  ///
+  /// In en, this message translates to:
+  /// **'These count differently toward your spending, so they cannot be merged'**
+  String get reviewMergeRefusedSpendEffect;
+
+  /// MergeRefusal.userEditDiffers (KHA-89 / AC-B5.3) — two statements of user intent, which only the person who made them can reconcile.
+  ///
+  /// In en, this message translates to:
+  /// **'You have corrected a detail on one of these and the other says something different — please check them before merging'**
+  String get reviewMergeRefusedUserEdit;
+
+  /// MergeRefusal.chainWouldForm (D-QA-9) — the survivor-direction half of 'no chains'.
+  ///
+  /// In en, this message translates to:
+  /// **'One of these has already absorbed another transaction, so it cannot be merged again'**
+  String get reviewMergeRefusedChain;
+
   /// NFR-A6 confirmation: the merged figure still traces to both sources.
   ///
   /// In en, this message translates to:

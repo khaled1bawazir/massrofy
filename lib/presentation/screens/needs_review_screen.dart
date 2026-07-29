@@ -366,6 +366,24 @@ class _UnparsedCard extends StatelessWidget {
 /// be able to lose a real transaction by tapping something. Telling them the
 /// operation is reversible is part of making that true in practice rather than
 /// only in the database.
+///
+/// ## O-QA-8 (KHA-90) — the merge asks first, like delete does
+///
+/// Until this fix, tapping "Yes, merge them" fired the callback immediately,
+/// while the strictly *less* dangerous soft delete owned a real `AlertDialog`
+/// (`transaction_detail_screen.dart`, AC-B6.2). That is backwards: `build-plan`
+/// calls the merge *"the single highest-risk operation in P3"*.
+///
+/// It was harmless while nothing routed to this screen, and it stops being
+/// harmless the moment navigation is wired — which is why it is fixed **before**
+/// that happens rather than after. The service's `confirmedByUser` flag is a
+/// guard against a *programmer* merging by accident; this dialog is the guard
+/// against a *user* merging by accident, and neither substitutes for the other.
+///
+/// Deliberate details, mirroring the delete dialog so the two read as one
+/// product: cancel is positively worded ("Keep both") and comes first, and a
+/// dismissed dialog — `showDialog` returns null on a barrier tap — calls
+/// nothing at all.
 class _FlaggedCard extends StatelessWidget {
   final FlaggedTransactionItem item;
   final void Function(FlaggedTransactionItem) onOpen;
@@ -465,7 +483,10 @@ class _FlaggedCard extends StatelessWidget {
               Expanded(
                 child: FilledButton(
                   key: Key('needsReview.merge.${item.transactionId}'),
-                  onPressed: () => onMerge!(item),
+                  // Note the `context` captured here is this card's, which is
+                  // still mounted while the dialog is open because the dialog
+                  // is a route above it, not a replacement for it.
+                  onPressed: () => _confirmMerge(context),
                   child: Text(l10n.reviewDuplicateMerge),
                 ),
               ),
@@ -487,6 +508,44 @@ class _FlaggedCard extends StatelessWidget {
         ],
       ],
     );
+  }
+
+  /// **O-QA-8 / risk R-8 — an explicit confirmation before two records become
+  /// one.**
+  ///
+  /// `async`/`await` in a widget callback is the standard Flutter idiom for
+  /// "show a modal route and wait for its answer": `showDialog` pushes a route
+  /// and completes its `Future` with whatever `Navigator.pop` was given —
+  /// `true`, `false`, or `null` if the user tapped outside it. Comparing
+  /// `== true` handles the null case without a separate branch, so a dismissed
+  /// dialog merges nothing.
+  Future<void> _confirmMerge(BuildContext context) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: Text(l10n.reviewMergeConfirmTitle),
+        content: Text(l10n.reviewMergeConfirmBody),
+        actions: <Widget>[
+          TextButton(
+            key: Key('needsReview.mergeCancel.${item.transactionId}'),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(l10n.reviewMergeConfirmCancel),
+          ),
+          FilledButton(
+            key: Key('needsReview.mergeConfirm.${item.transactionId}'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(l10n.reviewMergeConfirmAccept),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      // `onMerge` was non-null when the button was built (`canMerge`), and a
+      // `StatelessWidget`'s fields cannot change underneath an await — a
+      // rebuild produces a new instance rather than mutating this one.
+      onMerge?.call(item);
+    }
   }
 }
 

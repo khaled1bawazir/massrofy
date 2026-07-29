@@ -19,10 +19,18 @@
 ///  3. **Never overwriting.** Enrichment fills gaps only, and never a field
 ///     the user has edited.
 ///  4. **Never across different movements.** Two rows that disagree about
-///     amount, direction or type are refused outright.
+///     amount, direction, type, **or any money-bearing column** are refused
+///     outright, and a merge cannot build a chain in either direction.
+///  5. **Never leaving a column unconsidered** (KHA-87). The last group is a
+///     forcing function rather than a behaviour test: it fails when a field
+///     is added to the schema's editable vocabulary without a decision about
+///     how the merge treats it.
 ///
-/// The last group is what stops a mis-tapped merge in the review inbox from
-/// making a real purchase disappear into an unrelated one.
+/// Group 4 is what stops a mis-tapped merge in the review inbox from making a
+/// real purchase disappear into an unrelated one. Group 5 exists because
+/// KHA-87's root cause was not a missing line of code but a missing decision:
+/// the fee and the converted amount were neither compared nor carried, and
+/// nothing anywhere said so out loud.
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -403,6 +411,78 @@ void main() {
       expect((await dao.byId(b)).mergedIntoId, a);
     });
 
+    test('...and "no chains" is true in the SURVIVOR direction too — a row '
+        'that has absorbed a duplicate cannot itself be merged away '
+        '(D-QA-9)', () async {
+      // This test's sibling above pins the *absorbed* direction: a
+      // soft-deleted row is `notLive`. QA found that the claim in the name —
+      // "no chains" — was only half enforced, because a SURVIVOR is still
+      // live, so `a -> b` followed by `b -> c` was permitted and orphaned `a`
+      // in the middle of the chain.
+      //
+      // Both directions are asserted, side by side, so a future change cannot
+      // satisfy one by breaking the other.
+      final int a = await sms(messageId: 1);
+      final int b = await sms(messageId: 2);
+      final int c = await sms(messageId: 3);
+
+      // b absorbs a, so b is a survivor holding a link.
+      expect(
+        await service.merge(
+          survivorId: b,
+          mergedAwayId: a,
+          confirmedByUser: true,
+        ),
+        isA<MergeCompleted>(),
+      );
+
+      final MergeResult chained = await service.merge(
+        survivorId: c,
+        mergedAwayId: b,
+        confirmedByUser: true,
+      );
+      expect((chained as MergeRejected).reason, MergeRefusal.chainWouldForm);
+
+      // Refused means nothing moved: b is live, still records absorbing a, and
+      // c gained no link.
+      expect((await dao.byId(b)).isDeleted, isFalse);
+      expect((await dao.byId(b)).mergedFromTransactionId, a);
+      expect((await dao.byId(c)).mergedFromTransactionId, isNull);
+    });
+
+    test(
+      'a survivor absorbing a SECOND duplicate is still allowed — three '
+      'alerts for one purchase is the case the refusal must not catch',
+      () async {
+        // The chain guard looks at the row being merged *away*, never at the
+        // survivor, precisely so this stays legal: a POS alert, a "card used"
+        // alert and a settlement alert are three records of one movement.
+        final int survivor = await sms(messageId: 1);
+        final int first = await sms(messageId: 2);
+        final int second = await sms(messageId: 3);
+
+        expect(
+          await service.merge(
+            survivorId: survivor,
+            mergedAwayId: first,
+            confirmedByUser: true,
+          ),
+          isA<MergeCompleted>(),
+        );
+        expect(
+          await service.merge(
+            survivorId: survivor,
+            mergedAwayId: second,
+            confirmedByUser: true,
+          ),
+          isA<MergeCompleted>(),
+        );
+        expect((await dao.byId(first)).isDeleted, isTrue);
+        expect((await dao.byId(second)).isDeleted, isTrue);
+        expect((await dao.byId(survivor)).isDeleted, isFalse);
+      },
+    );
+
     test('a missing transaction id is a result, not a crash', () async {
       final int a = await sms(messageId: 1);
       final MergeResult result = await service.merge(
@@ -432,6 +512,79 @@ void main() {
         await auditLogDao.queryFor('transaction', b.toString()),
         hasLength(1),
       );
+    });
+  });
+
+  // =========================================================================
+  group('KHA-87 — no field may be "neither compared nor carried"', () {
+    test('every user-editable field is either compared outright, carried by '
+        'the enrichment, or explicitly refused', () {
+      // The root cause of KHA-87 was not a missing line; it was that nothing
+      // forced a *decision* about a column. This test is that forcing
+      // function, at the field-vocabulary level: adding a value to
+      // `TransactionField` without teaching the merge about it fails here,
+      // with a message naming the field, rather than shipping as a silent
+      // gap-fill hole three releases later.
+      //
+      // A field may be handled in exactly one of three ways:
+      //
+      //  - **compared** — a difference makes the two rows different
+      //    movements, so `MergePlan.between` refuses long before enrichment
+      //    (amount, currency, direction, transactionType);
+      //  - **carried** — `MergeEnrichment` can move it, so a user edit on the
+      //    absorbed row survives into the survivor's gap;
+      //  - **neither** — then a user edit on it must produce
+      //    `MergeRefusal.userEditDiffers` rather than being stranded, which is
+      //    what `carriableFields` gates.
+      const Set<String> comparedOutright = <String>{
+        TransactionField.amount,
+        TransactionField.currency,
+        TransactionField.direction,
+        TransactionField.transactionType,
+      };
+      // The deliberate "neither" list. `categoryId` is here because P4 owns
+      // the category tables; when it gains a merge path it moves into
+      // `MergePlan.carriableFields` and drops out of here.
+      const Set<String> refusedRatherThanCarried = <String>{
+        TransactionField.categoryId,
+      };
+
+      expect(
+        MergePlan.carriableFields.difference(TransactionField.all),
+        isEmpty,
+        reason: 'carriableFields must name real TransactionField values',
+      );
+      expect(
+        TransactionField.all.difference(<String>{
+          ...comparedOutright,
+          ...MergePlan.carriableFields,
+          ...refusedRatherThanCarried,
+        }),
+        isEmpty,
+        reason:
+            'a TransactionField value is handled by none of the three merge '
+            'strategies — decide which one it gets, in transaction_merge.dart',
+      );
+    });
+
+    test('a user edit on a field the merge cannot carry is refused, not '
+        'stranded on the soft-deleted row', () async {
+      final int a = await sms(messageId: 1);
+      final int b = await sms(messageId: 2);
+      // `a` has no category; `b` has one the user chose. The merge has no way
+      // to move it, so it must not proceed as though nothing were lost.
+      await TransactionEditService(database: db, transactionDao: dao).edit(
+        b,
+        const TransactionEditDraft(categoryId: Edited<String?>('groceries')),
+      );
+
+      final MergeResult result = await service.merge(
+        survivorId: a,
+        mergedAwayId: b,
+        confirmedByUser: true,
+      );
+      expect((result as MergeRejected).reason, MergeRefusal.userEditDiffers);
+      expect((await dao.byId(b)).isDeleted, isFalse);
     });
   });
 }
