@@ -1,0 +1,18 @@
+00:00 +0: PROBE H — can the gap-fill half lose or misattribute money? H1 HOLDS — a ZERO fee is a value, not a gap: it is defended from being overwritten by a non-zero fee (KHA-25)
+00:00 +1: PROBE H — can the gap-fill half lose or misattribute money? H2 HOLDS — the verbatim MoneyColumns copy always moves amount, currency and minor as ONE consistent unit
+00:00 +2: PROBE H — can the gap-fill half lose or misattribute money? H3 DEFECT — a HALF-WRITTEN money triple (amount present, currency null) reads as an ABSENCE, so the gap-fill silently overwrites a stored amount
+00:00 +3: PROBE H — can the gap-fill half lose or misattribute money? H4 DEFECT — the FX block is carried as FOUR independent gap-fills, so a survivor can end up with a converted amount and a rate that contradict each other
+00:00 +4: PROBE H — can the gap-fill half lose or misattribute money? H5 DEFECT — a gap-filled fxRate DOES move the base-currency total, so the FX gap-fill is a money write, not a display detail
+00:00 +5: PROBE H — can the gap-fill half lose or misattribute money? H6 DEFECT — `conversionPending` is cleared by a carried RATE even when the rate cannot actually convert the row
+00:00 +6: PROBE J — do the new refusals hold under composition? J1 DEFECT — the chain guard is defeated by the D-QA-7 pointer overwrite plus an undo: a survivor that still holds an absorbed row can be merged away
+00:00 +7: PROBE J — do the new refusals hold under composition? J2 HOLDS — three-way merge in the intended order: the RESULT of a merge can still absorb a third alert
+00:00 +8: PROBE J — do the new refusals hold under composition? J3 HOLDS — a fee carried in merge 1 becomes a real disagreement in merge 2, so a third alert stating a different fee is refused
+00:00 +9: PROBE J — do the new refusals hold under composition? J4 OBSERVATION — undoing a merge that carried money now DOUBLE COUNTS that money, because the undo deliberately does not un-enrich (D-QA-12 x KHA-87)
+00:00 +10: PROBE J — do the new refusals hold under composition? J5 HOLDS — an internal-transfer verdict is carried with its group id atomically, and a survivor holding its own verdict absorbs neither half
+00:00 +11: PROBE J — do the new refusals hold under composition? J6 DEFECT (minor) — a survivor holding a verdict with NO group id does not absorb the group id the other row carries
+00:00 +12: PROBE J — do the new refusals hold under composition? J7 HOLDS — a user-set category on the losing row genuinely refuses with a reason, and writes nothing
+00:00 +13: PROBE J — do the new refusals hold under composition? J8 DEFECT (minor) — a RULE-assigned category on the losing row is still silently dropped, because the refusal is gated on the field being USER-edited
+00:00 +14: PROBE L — the merge_undo audit entry L1 HOLDS — the survivor's data write and its `merge_undo` entry share one timestamp, i.e. they came from one operation, and the entry carries a genuine before/after rather than a stub
+00:00 +15: PROBE L — the merge_undo audit entry L2 HOLDS — a DANGLING survivor id does not abort an otherwise valid undo, and writes no phantom audit entry
+00:00 +16: PROBE K — the anti-regression forcing function K1 DEFECT — the coverage check is a HAND-WRITTEN list, and a schema-derived version immediately finds two columns with no recorded merge decision (`provenance`, `provenance_detail`)
+00:00 +17: All tests passed!

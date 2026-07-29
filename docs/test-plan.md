@@ -625,6 +625,135 @@ or a traceability/audit-completeness gap.
 | **O-QA-8** | Observation | The merge button in the review inbox fires on a single tap with no confirmation dialog, while soft delete — a strictly less dangerous operation — owns one (AC-B6.2). `confirmedByUser` would be set by the not-yet-written caller. Worth an in-screen confirmation before the merge is ever routed |
 | **O-QA-9** | Observation | None of P3b-2's providers (`transactionMergeServiceProvider`, `manualEntryServiceProvider`, …) has a production consumer, because the app shell still routes only to `HomePlaceholderScreen`. Consistent across the whole screen layer, pre-existing, and disclosed by the PR's own "nothing here has run on a device" — noted so "its only caller is a user action in the review inbox" is read as *intent*, not as a present fact |
 
+### 7f. Fifth pass — P3b-3, PR #24 (`fix/p3b-3-merge-money-invariants`, head `8761e3e`)
+
+**Scope:** the merge-safety gate. KHA-87 (High), KHA-88 (High), KHA-89 (Medium),
+KHA-90 (O-QA-5 / O-QA-7 / O-QA-8 only). `security-sensitive`. No schema change.
+This is the **second adversarial round on the same merge operation** — PR #20's
+probes are now the fixed baseline, so this pass deliberately attacks past them.
+
+**Gate note (per `docs/lessons.md`, 2026-07-29):** every result below was
+measured by QA on this machine against head **`8761e3e`**, not read from the PR
+body. Flutter 3.44.8 stable, Dart 3.12.2.
+
+#### Reproduction of the engineer's claimed local gates
+
+| Claimed on `8761e3e` | Reproduced | Result |
+|---|---|---|
+| `flutter analyze --fatal-infos` → No issues found! | yes | **MATCH** — clean in 5.5s |
+| `dart format --set-exit-if-changed .` → 183 files, 0 changed | yes | **MATCH** — exit 0 |
+| `flutter test --exclude-tags=release_mode_guard` → `+1040 ~3` | yes | **MATCH** — 1040 passing, 3 skipped, 0 failing |
+| `flutter build apk --debug` → built | yes | **MATCH** — `app-debug.apk`, exit 0 |
+| `.github/scripts/check_money_type_ban.sh` | yes | **MATCH** — no banned `double`/`num`/SQL-aggregation usage |
+
+With QA's own `test/security/qa_pr24_probe_test.dart` (17 probes) added the tree
+runs **1057 passing / 3 skipped / 0 failing**, still analyze- and format-clean.
+`check_no_network_permission.sh` was **not** run (needs a release build + merged
+manifest); CI owns it. Evidence: `docs/evidence/qa-pr24/`.
+
+#### QA-authored probe suite for PR #24
+
+`test/security/qa_pr24_probe_test.dart`. The one judgment call in this PR is the
+**hybrid** rule — refuse on genuine disagreement, gap-fill on absence — so the
+suite is aimed squarely at it: can the null-detection be fooled, does the
+verbatim `MoneyColumns` copy propagate an inconsistency, and do the new refusals
+survive *composition* rather than only the single-step case the fix's own tests
+cover.
+
+| Probe | Attack | Outcome |
+|---|---|---|
+| **H1** | Is a stored **zero** fee mistaken for a gap and overwritten? (KHA-25 says zero ≠ unknown) | **Repelled, both directions** — `MoneyColumns.read` is a strict null check, so `0` vs `9.20` is `feeDiffers` |
+| **H2** | Can the verbatim triple copy pair one row's `_minor` with another row's amount? | **Repelled** — `fillMoney` returns the incoming triple whole or null; all three columns are written from one object. Question 2 of the review brief answered: the reasoning holds |
+| **H3** | Feed the gap-fill a **half-written** triple (amount present, currency null) | **DEFECT D-QA-14** — reads as an absence, so `9.20` is silently overwritten by `5.00` with no refusal. The null-detection *can* be fooled |
+| **H4** | Give the survivor a converted amount and the other row a contradicting **rate** | **DEFECT D-QA-15** — no single FX field collides, so nothing refuses; the survivor ends up stating `150 SAR` beside a rate of `9.99` on `40.00 USD` |
+| **H5** | Does a gap-filled `fx_rate` actually move `report.spend.base`? | Confirmed **yes** (ADR-009 case 3) — establishes that H4 operates on a money write, not a label. The intended behaviour, asserted to set H4's severity floor |
+| **H6** | Carry an **unparseable** rate onto a `conversion_pending` survivor | **DEFECT D-QA-16** — the pending flag is cleared because *a string arrived*, without checking it converts. Bounded: the "not converted" line is derived from the conversion attempt, not the flag |
+| **J1** | Compose D-QA-7's scalar-pointer overwrite with an undo, then merge the survivor away | **DEFECT D-QA-17 (Medium)** — `MergeRefusal.chainWouldForm` is **defeated**. `first → survivor → newSurvivor` forms, exactly the shape B6 asserts is refused |
+| **J2** | Three-way merge in the intended order: can the *result* absorb a third alert and keep what it gained? | **Repelled — holds.** Fee from merge 1 and merchant from merge 2 both survive; one movement, one fee |
+| **J3** | Does a **carried** fee become a real disagreement for a later merge? | **Repelled — holds.** The third alert's `5.00` is refused against the carried `9.20` |
+| **J4** | Undo a merge that carried money | **Observation O-QA-10** — the fee total goes `9.2 → 9.2 → 18.4`. D-QA-12's "don't un-enrich" was decided for descriptive fields and now also preserves money. Consistent with the amount, which doubles too; R-8's safe direction |
+| **J5** | Is the internal-transfer verdict genuinely carried **as a pair** with its group id? | **Repelled — holds.** State + group id both land; the `internal` verdict removes the survivor from spend. Question 3 of the review brief answered |
+| **J6** | Survivor holds a verdict with **no** group id; absorbed row holds the same verdict **with** one | **DEFECT D-QA-18 (Low)** — the carry is gated on the *state* being null, so the group id is never filled. The survivor keeps the "half a decision" the pairing exists to prevent |
+| **J7** | Does a user-set `category_id` on the losing row genuinely refuse, and write nothing? | **Repelled — holds.** `userEditDiffers`, and neither row is touched (asserted against the audit log, not only `isDeleted`). Question 4 of the review brief answered |
+| **J8** | Same, but a **rule-assigned** category (not in `user_edited_fields`) | **DEFECT D-QA-19 (Low)** — neither compared, nor carried, nor refused. The KHA-87 shape, on a non-money column, still present |
+| **K1** | Is the KHA-87 "forcing function" schema-derived, or a hand-written list? | **DEFECT D-QA-20 (Low)** — hand-written. A schema-derived version (written in the probe, from Drift's own `$columns`) immediately names two columns with **no recorded decision**: `provenance`, `provenance_detail` |
+| **L1** | Is the `merge_undo` entry really in the same DB transaction as the write it describes, with a real before/after? | **Repelled — holds.** Survivor `updated_at` and entry `changed_at` are the same instant (one `timestamp`, one `transaction()` block); the entry carries `mergedFromTransactionId: <id> → null`, not a stub; chain integrity holds. Question 5 of the review brief answered |
+| **L2** | Point a soft-deleted row at a **dangling** survivor id, then undo | **Repelled — holds.** `getSingleOrNull` lets the undo complete, and no phantom entry is written against the nonexistent row |
+
+#### Independent verification of the hybrid design (the review's central question)
+
+Re-derived from behaviour:
+
+1. **"Refuse on disagreement" is sound.** Every money column is compared as its
+   authoritative stored string, currency is part of the value (A6/H1), and a
+   carried value becomes the survivor's own for the next comparison (J3). Zero
+   is defended as a value, not read as an absence (H1) — the KHA-25 distinction
+   survives.
+2. **"Gap-fill on absence" is sound *for a whole triple*, and the justification
+   is genuine.** The engineer's reading of QA's own A1/A2 reproductions is
+   correct: those are null-then-value pairs, and pure refuse-on-any-difference
+   would have refused the exact D2 shape ADR-017 exists to resolve. The claim
+   "strictly safer than either half alone" holds for the money triples.
+3. **The gap-fill's weak point is not the triple — it is what surrounds it.**
+   Where a value is stored as *one* object (`MoneyColumns`) the hybrid is
+   airtight (H2). Where a value is spread across *independent* columns the same
+   rule applies field-by-field and composes badly: the FX block is four separate
+   gap-fills (H4), the transfer verdict is gated on one of its two halves (J6),
+   and a triple with one column missing reads as absent (H3). The design is
+   right; its application is not uniformly whole-value.
+
+**Verdict on the design question: sound, with one real gap — the "one value =
+one unit" discipline the money triple gets is not applied to the FX block or
+the transfer pair.** None of the gaps loses money from a total.
+
+#### 7f-i. Traceability — every done-check claimed by PR #24
+
+| Issue / done-check | Test case (file → test name) | Type | Result |
+|---|---|---|---|
+| **KHA-87** — a merge carries the fee / converted amount / FX rate under the gap-fill rule, **or** refuses with a new `MergeRefusal` + localised copy | `qa_pr20_probe_test.dart` A1/A2/A3/A4 (inverted), A1b/A2b/A5/A6/A7; `transaction_merge.dart` `feeDiffers`/`conversionDiffers`/`remainingBalanceDiffers`; EN+AR copy for all six new refusals | Unit + QA probe | **PASS** — QA re-ran A1 and A2 and confirms `fees.base == '9.2'` and `spend.base == '150'` after the merge, and that the assertions are genuinely inverted (original scenario, original comment, `INVERTED (was: ...)` marker) — not renamed or weakened |
+| **KHA-87** — probes A1/A2 **inverted**, not deleted | `qa_pr20_probe_test.dart` | QA probe | **PASS** — verified by diff: same fixtures, same message ids, same amounts; only the assertion flipped |
+| **KHA-87** — a test pins that `MergePlan.between` compares **every money-bearing column**, so a new column cannot silently join the "neither compared nor carried" set | `qa_pr20_probe_test.dart` A8; `transaction_merge_test.dart` "every user-editable field is either compared outright, carried, or explicitly refused" | Unit + QA probe | **PASS (partial) — D-QA-20.** The *field-vocabulary* forcing function is real and schema-derived over `TransactionField.all`. The *column* check (A8) is a hand-written map of four columns, so a new column changes nothing about whether it passes. QA's schema-derived version finds `provenance` / `provenance_detail` undecided |
+| **KHA-88 / D-QA-8** — `restore()` clears the survivor's pointer **only when it names the row being restored** | `qa_pr20_probe_test.dart` B3 (inverted); QA probe L2 | QA probe | **PASS** — identity check present and verified; a dangling id does not abort the undo |
+| **KHA-88 / D-QA-8** — an audit entry is appended **against the survivor** recording that write | `qa_pr20_probe_test.dart` B4 (inverted); QA probe L1 | QA probe | **PASS** — `create, merge, merge_undo`, genuine `b → null` before/after, **inside the same `transaction()` block** (corroborated behaviourally: row `updated_at` and entry `changed_at` are one instant), chain integrity holds |
+| **KHA-88 / D-QA-7** — the set-valued link, or a refusal, or the doc stops claiming a bidirectional pointer | `transaction_merge.dart` library doc; `qa_pr20_probe_test.dart` B2 | Doc + QA probe | **PASS (partial) — deliberately deferred and honestly disclosed.** The doc no longer over-claims and B2 pins the reachability that makes the degradation tolerable. But see **D-QA-17**: the same scalar is the *input to the chain guard*, so the degradation is not only "reduced convenience". KHA-88 must stay open |
+| **KHA-88 / D-QA-9** — a decision is recorded on chains and the doc/test names match | `transaction_merge_test.dart` (both directions side by side); `qa_pr20_probe_test.dart` B6/B6b (inverted) | Unit + QA probe | **PASS (partial) — D-QA-17.** The single-step guard is real and correct. It is defeated by composition with an undo |
+| **KHA-88 / D-QA-12** — a decision is recorded on enrichment-reversal | `transaction_merge.dart` property 1; `qa_pr20_probe_test.dart` F6 | Doc + QA probe | **PASS** as a decision. **O-QA-10**: the rationale predates money being carried, and now permits a fee to double-count after an undo |
+| **KHA-89 / D-QA-10** — the merge prefers the user's value **or** refuses naming the disagreement | `qa_pr20_probe_test.dart` D2 (inverted), D2b; QA probe J7 | Unit + QA probe | **PASS** — `MergeRefusal.userEditDiffers` with EN+AR copy; refusal writes nothing on either row |
+| **KHA-89 / D-QA-11** — a copied field carries its protected status onto the survivor | `qa_pr20_probe_test.dart` D3 (inverted) | QA probe | **PASS** — `MergeEnrichment.protectedFields` unioned into the survivor's `user_edited_fields` in the **same** write; D3 proves it behaviourally with a second merge |
+| **KHA-89 / D-QA-13** — the edit-then-rescan test lives in `test/features/ingestion/` | `test/features/ingestion/edited_transaction_rescan_test.dart` | Integration | **PASS** — moved beside `deleted_transaction_rescan_test.dart`, its sibling one AC apart |
+| **KHA-90 / O-QA-5** — `actor` is required with no default | `transaction_dao.dart:1253`; `qa_pr20_probe_test.dart` C2 | Compile-time | **PASS** — enforced by the compiler, which is stronger than a runtime assertion |
+| **KHA-90 / O-QA-7** — fix the sentence or add the validation | `ledger_mapping.dart` `UnreadableReason.unparsableAmount`; `qa_pr20_probe_test.dart` G2 | Doc + QA probe | **PASS** — the sentence was corrected and the *reason* the behaviour is right (visible, not dropped — KHA-74) is now recorded and pinned |
+| **KHA-90 / O-QA-8** — an in-screen confirmation before the merge is routed | `needs_review_screen.dart` `_confirmMerge`; `p3b2_screens_test.dart` (confirm / cancel / barrier-dismiss); EN+AR copy | Widget | **PASS** — mirrors the delete dialog, cancel positively worded (`Keep both`) and **first**; a barrier tap merges nothing. Verified all three widget tests exist and assert `actions isEmpty` on the non-merge paths |
+| **AC-A5.2** — a possible duplicate is flagged and mergeable by explicit action | `transaction_merge_test.dart` (+3 tests); `qa_pr20_probe_test.dart` A/B/C/D; `qa_pr24_probe_test.dart` H/J | Unit + QA probe | **PASS** — was PASS (partial) in pass 4. The merge no longer loses a reported figure |
+| **AC-B5.3** — user intent outranks the parser, **always** | `transaction_merge.dart` D-QA-10 loop; `edited_transaction_rescan_test.dart`; probes D1–D3, J7 | Unit + integration | **PASS** — was PASS (partial). Both directions and both paths (merge, re-scan) now covered |
+| **AC-B6.4 / NFR-A2** — every mutation writes an entry with before/after and actor | probes B3/B4, L1; `transaction_dao_p3b2_test.dart` | Unit + QA probe | **PASS** — was PASS (partial) on the undo path. The last known exception is closed |
+| **NFR-A6** — every derived figure traces to its constituents | probes B1/B2/B5, J1 | QA probe | **PASS (partial)** — literal per merge. Degrades after a second merge into one survivor (D-QA-7, disclosed) and, via **D-QA-17**, a chain can now form in which the middle row's absorbed row points at a soft-deleted row |
+| **PRD §3.4** — the FX fee is its own reported figure, never folded into spend | probes A1/A1b/A5; `period_totals.dart` | Unit + QA probe | **PASS** — the fee survives a merge and is not double-counted by one (A5) |
+| **ADR-002** — no `double`/`num` in any money path | `check_money_type_ban.sh`; `MoneyColumns` is `String`+`String`+`int?`; probe H2 | Script + unit | **PASS** — re-run by QA, clean. Comparison is on the authoritative strings; `_minor` is excluded from `==` and copied only alongside its own amount |
+| **R-8** — never silently delete a real transaction | whole probe suite (17 new + 37 inherited) | QA probe | **UPHELD.** No probe made a transaction row disappear. D-QA-14 is the only probe that **overwrote** a stored money value, and it needs a raw-SQL-produced half-triple to set up |
+
+**P3b-3 tally: 22 rows — 16 full PASS, 5 PASS (partial), 0 NOT TESTED, 0 FAIL.**
+
+#### 7f-ii. QA-found items on PR #24
+
+None is merge-blocking. Every finding is either (a) unreachable without a raw
+SQL write, (b) a self-consistency/provenance problem in a *displayed* field
+rather than a total, or (c) a guard that composes badly with a degradation this
+PR explicitly disclosed and left open on KHA-88. **No probe removed money from a
+total, and every High-severity finding from PR #20 is genuinely closed.**
+
+| Ref | Severity | Summary |
+|---|---|---|
+| **D-QA-14** | Medium | A half-written money triple (`fee_amount_amount` set, `fee_amount_currency` null) reads as an **absence**, so the gap-fill **overwrites a stored money value** with no refusal — the one thing property 3 says is structurally impossible. Reachable only by a raw Drift/SQL write or a column-at-a-time migration (the O-QA-6 residual class). Probe H3 |
+| **D-QA-15** | Medium | The FX block is carried as **four independent gap-fills**, so a survivor can end up stating a converted amount from one row and a contradicting rate/date/source from another. `MoneyColumns` gets whole-or-nothing treatment; `(converted, rate, rateDate, rateSource)` does not. Headline total unaffected (ADR-009 case 2 wins), but AC-B9.3's detail screen shows a rate that does not produce the amount beside it. Probe H4 |
+| **D-QA-17** | Medium | **`MergeRefusal.chainWouldForm` is defeated by composition.** The guard reads the single scalar `merged_from_transaction_id`; D-QA-7 means it holds only the most recent merge, and `restore()`'s (correct) identity check clears it on undo — after which a survivor still holding an earlier absorbed row looks unencumbered. `first → survivor → newSurvivor` then forms. No money lost; the traceability shape the guard exists to prevent is created. Probe J1 |
+| **D-QA-16** | Low | `conversion_pending` is cleared whenever a rate **string** is carried, without checking the rate converts. A row can stop claiming it is waiting for a conversion while still contributing nothing to the base total. Bounded — the "N not converted" line is derived from the conversion attempt, not the flag. Probe H6 |
+| **D-QA-18** | Low | The internal-transfer carry is gated on `internal_transfer_state == null` for **both** halves, so a survivor holding a state with no group id never gains the group id the absorbed row carries — the "half a decision" the doc says the pairing prevents. Probe J6 |
+| **D-QA-19** | Low | A **rule-assigned** `category_id` (not in `user_edited_fields`) on the losing row is still neither compared, carried, nor refused. The refuse-rather-than-strand rule iterates `incomingProtected` only. Not reachable until P4 assigns categories — which is the phase this PR gates. Probe J8 |
+| **D-QA-20** | Low | KHA-87's done check asks for a test pinning that a **new column** cannot silently join the "neither compared nor carried" set. A8 is a hand-written four-column map, so it cannot do that. A schema-derived version (supplied in probe K1) immediately finds `provenance` and `provenance_detail` with no recorded decision |
+| **O-QA-10** | Observation | D-QA-12's "an undo does not un-enrich" was decided when the enrichment carried five descriptive fields. It now also preserves money: undoing a merge that carried a 9.20 fee leaves the fee total at 18.4. Defensible (both rows are live duplicates again, and the amount doubles too — R-8's safe direction), but the doc's rationale still reads as though it only covers "a gap-filled merchant name". Probe J4 |
+| **O-QA-11** | Observation | `mergeDuplicatePair` clears the survivor's `needs_review` / `review_reason` / `possible_duplicate_of_id` **unconditionally**. A survivor flagged for a *different* reason (unparsable amount, transfer candidate, or a duplicate of a third row) silently leaves the review inbox when an unrelated pair is resolved. **Pre-existing — present on `4f49513`, not introduced here** — but it lands directly in P4b's needs-review screen and should be decided before that screen ships |
+
 ### 7c. Epics C–I — not yet built
 
 Per PRD §9: C (15 ACs), D (14), E (14), F (14), G (4), H (3), I (3) have no
@@ -657,8 +786,58 @@ already does.
 | A — SMS ingestion (P2) | 19 ACs | 13 + 1 (AC-A4.2 closed by P3a) | 3 | 2 (1 device, 1 QA-found test gap → now KHA-66) | Merged — verified against the branch before merge |
 | B — instruments/transactions, **P3a slice only** | 20 AC rows | 17 | 3 (each waiting on KHA-26/28/40, not on P3a) | 0 | Merged (PR #11) — verified against head `51bb730` |
 | B — **P3b-1 slice** (KHA-27/28/29/70) | 15 AC/invariant rows | 9 | 6 (P4 categories, P5 income view, KHA-26, KHA-78, D-QA-4) | 0 | Merged (PR #18) — verified against head `3ba320d` |
-| B — **P3b-2 mutation surface** (KHA-26/64/66/74/78/79/80 + KHA-69) | 25 AC/invariant rows | 17 | 6 | 1 not tested (AC-B8.3, disclosed → KHA-86) | **PR #20 open** — verified against head `61efd7b` |
+| B — **P3b-2 mutation surface** (KHA-26/64/66/74/78/79/80 + KHA-69) | 25 AC/invariant rows | 17 | 6 | 1 not tested (AC-B8.3, disclosed → KHA-86) | Merged (PR #20) — verified against head `61efd7b` |
+| B — **P3b-3 merge-safety gate** (KHA-87/88/89 + KHA-90 O-QA-5/7/8) | 22 AC/invariant rows | 16 | 5 | 0 | **PR #24 open** — verified against head `8761e3e` |
 | B — remainder + C–I | ~124 ACs | — | — | — | Not yet built |
+
+**Overall (pass 5, PR #24): `QA: PASS 24`.** All five claimed local gates were
+reproduced on head `8761e3e` (analyze clean, format clean at 183 files, **1040
+passing / 3 skipped / 0 failing**, money-type guard clean, debug APK built —
+`docs/evidence/qa-pr24/gate-reproduction-8761e3e.md`). A second, 17-probe
+adversarial round aimed specifically at the new hybrid rule found **seven
+defects and two observations, none merge-blocking, and none of them a
+regression of what this PR fixed**.
+
+**Both PR #20 High-severity findings are genuinely closed, verified by
+execution, not by reading the diff.** `report.fees.base` stays `9.2` and
+`report.spend.base` stays `150` across the merges that used to null them; the
+`merge_undo` audit entry exists with a real `b → null` before/after and is
+written from the same timestamp as the survivor row it describes, i.e. inside
+one `transaction()` block; `restore()`'s identity check holds and a dangling
+survivor id no longer aborts an undo. The QA probes that asserted the defects
+were **inverted in place**, keeping the original fixtures and the original
+comment — verified by diff, not taken on trust.
+
+**On the design question the review turned on** — the engineer implemented a
+*hybrid* (refuse on genuine disagreement, gap-fill on absence) where the
+dispatch asked for a pure refusal. QA's finding is that **the hybrid is sound
+and the reasoning for it is correct**: a null is an absence, the null-then-value
+pair is the D2 shape ADR-017 exists to resolve (QA's own A1/A2 are exactly that
+shape), and pure refuse-on-any-difference would have made the merge safe and
+useless. Zero is defended as a value rather than read as a gap (KHA-25 survives,
+probe H1), and a carried value becomes the survivor's own for the next
+comparison (probe J3).
+
+Its weak point is **not the rule but the granularity it is applied at.** Where a
+value is one object — `MoneyColumns` — the hybrid is airtight: probe H2 confirms
+amount, currency and `_minor` always move as one unit, so the verbatim-copy
+justification holds and cannot pair one row's minor with another's amount. Where
+a value is spread across independent columns, the same rule runs field-by-field
+and composes badly: the FX block is four separate gap-fills (**D-QA-15**), the
+transfer verdict's group id is gated on its state (**D-QA-18**), and a triple
+missing one column reads as absent and is overwritten (**D-QA-14**). The
+"one value = one unit" discipline the money triple gets should extend to both.
+
+The one finding worth a reviewer's attention beyond the list is **D-QA-17**: the
+new `chainWouldForm` guard is correct in isolation and **defeated by
+composition** with the D-QA-7 scalar-pointer degradation this PR explicitly
+disclosed and deferred. That disclosure argues the degradation is "reduced
+convenience, not lost traceability" — accurate as far as it goes, but the same
+scalar is the *input to the chain guard*, so the deferral has a safety
+consequence the disclosure does not name. It loses no money and creates no
+unreachable row; it recreates the traceability shape the guard was added to
+prevent. KHA-88 must stay open, and its remaining scope is now larger than the
+PR states.
 
 **Overall (pass 4, PR #20):** **QA: PASS 20.** All five claimed local gates were
 reproduced exactly (analyze clean, format clean at 181 files, **986 passing / 3
