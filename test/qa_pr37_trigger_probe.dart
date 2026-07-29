@@ -1,12 +1,11 @@
 // QA probe for PR #37 / KHA-108 — THROWAWAY, deleted with this branch.
 //
-// This file is written exactly as `dart format` emits it and contains exactly
-// ONE defect: an unused import. So if `.github/workflows/qa-pr-lint.yml`
-// really runs `flutter analyze --fatal-infos`, this PR must go RED on
-// `unused_import`. A green check would mean the workflow's lint steps are
-// being skipped and the check is green because it checked nothing.
+// Round 2: identical formatting, but 'dart:convert' is now USED. The previous
+// commit's only defect was the unused import and the job went red; if this
+// commit goes green, the red is attributable to `flutter analyze
+// --fatal-infos` catching `unused_import` and nothing else.
 import 'dart:convert';
 
 String qaPr37TriggerProbe() {
-  return 'qa-pr-lint has teeth';
+  return jsonEncode(<String, String>{'probe': 'qa-pr-lint has teeth'});
 }
