@@ -183,7 +183,16 @@ void main() {
           categoryId: 'utilities_bills',
         );
 
-        final int variant = await billFrom('sec kahraba 0042');
+        // **The variant carries a structural marker beside its terminal
+        // number, and that changed at ADR-008 v1.4 (KHA-106).** It used to be
+        // `sec kahraba 0042`, absorbed by the withdrawn length signal. A bare
+        // digit run is no longer cosmetic variance — nothing in the string says
+        // `0042` is a terminal id rather than part of the name — so the case
+        // that still exercises AC-D2.3 is the one PRD §3.4 actually observes: a
+        // marker word beside the run. Written in the KHA-107 order (marker
+        // AFTER the digits) precisely because that ordering was broken until
+        // v1.4.
+        final int variant = await billFrom('sec kahraba 0042 terminal');
         final CategorizationOutcome outcome = await service
             .categorizeTransaction(transactionId: variant);
 
@@ -192,6 +201,17 @@ void main() {
           (await transactionDao.byId(variant)).categoryId,
           'utilities_bills',
         );
+
+        // …and the disclosed cost, in the same test so the pair is read
+        // together: the uncorroborated form is FLAGGED rather than merged.
+        // That is AC-D2.3's stated direction — "match, or flag; never silently
+        // merge" — not a regression.
+        final int bare = await billFrom('sec kahraba 0042');
+        final CategorizationOutcome bareOutcome = await service
+            .categorizeTransaction(transactionId: bare);
+        expect(bareOutcome.result, isNot(CategorizationResult.applied));
+        expect((await transactionDao.byId(bare)).categoryId, isNull);
+        expect((await transactionDao.byId(bare)).needsReview, isTrue);
       },
     );
 

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../features/categorization/categories.dart'
+    show categoryReviewReasons;
+import '../../features/categorization/learned_rules.dart';
 import '../../features/ingestion/duplicate_policy.dart';
 import '../../features/ingestion/review_queue.dart';
 import '../../features/ledger/internal_transfer.dart';
@@ -7,6 +10,7 @@ import '../../features/ledger/ledger_mapping.dart';
 import '../../features/parsing/parse_outcome.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../theme/app_colors.dart';
+import '../widgets/category_widgets.dart';
 
 /// **S-18 — Needs Review Inbox.** Mockup: `docs/mockups/needs-review.html`.
 ///
@@ -43,6 +47,31 @@ import '../theme/app_colors.dart';
 /// existing at all is the product admitting it is imperfect; an empty one is
 /// good news and should look like it. An amber "0 items" would read as a
 /// warning about nothing.
+///
+/// ## **KHA-32 — the low-confidence tab finally has low-confidence rows in it**
+///
+/// design.md S-18 always described this tab as *"normal rows with the review
+/// flag, tapping the chip opens the same S-12/13 flow"*. Until P4b it only ever
+/// held ADR-017's possible duplicates, because nothing produced a *category*
+/// flag and nothing routed this screen. Both are now true, so the tab renders
+/// two kinds of card and tells them apart by `reviewReason`:
+///
+///  - a **duplicate** flag asks *"are these two charges the same thing?"* and
+///    offers merge / keep-both;
+///  - a **categorization** flag asks one of `CategoryReviewReason`'s three
+///    questions and offers the correction sheet.
+///
+/// They share a tab rather than getting a fourth, because both are *"the app
+/// has the facts and needs a judgement about its own data"* — which is the
+/// distinction the three tabs are actually drawn on. Splitting further would
+/// make the user check four places for two kinds of answer.
+///
+/// AC-C4.1's indicator, AC-C4.3's clearing and AC-C1.2's counting all land
+/// here: the flag is an icon **and** the words "Needs review" (NFR-U4, never
+/// colour alone), the confidence is shown in words plus its figure, and
+/// answering the category question clears the flag through
+/// `TransactionDao.setUserCategory` — which clears *only* a flag the
+/// categorizer raised, so a duplicate question stays open.
 class NeedsReviewScreen extends StatelessWidget {
   final List<ReviewQueueItem> unparsed;
   final List<FlaggedTransactionItem> flagged;
@@ -77,6 +106,25 @@ class NeedsReviewScreen extends StatelessWidget {
   final void Function(TransferReviewItem item, bool isOwnAccount)?
   onTransferVerdict;
 
+  /// **KHA-32.** Each flagged transaction's current category and how sure the
+  /// app was, keyed by transaction id.
+  ///
+  /// A map alongside the list rather than a field on [FlaggedTransactionItem],
+  /// because that type lives in `features/ingestion` and architecture §3 says
+  /// ingestion never imports categorization. The presentation layer already
+  /// depends on both, so it is the layer that joins them — the same technique
+  /// `categorization_providers.dart` uses to bind the categorizer into the
+  /// pipeline.
+  ///
+  /// A row with no entry renders no chip at all rather than an invented
+  /// *Uncategorized* one: "we have not read this row's category" and "this row
+  /// is uncategorized" are different claims.
+  final Map<int, CategoryAssignment> categoryAssignments;
+
+  /// **KHA-32/KHA-33 — §6.1's third entry point.** Opens the S-12 correction
+  /// sheet for a flagged row. Null renders the chip read-only.
+  final void Function(FlaggedTransactionItem item)? onCategorize;
+
   const NeedsReviewScreen({
     required this.unparsed,
     required this.flagged,
@@ -88,6 +136,8 @@ class NeedsReviewScreen extends StatelessWidget {
     this.onMergeDuplicate,
     this.onKeepBothDuplicates,
     this.onTransferVerdict,
+    this.categoryAssignments = const <int, CategoryAssignment>{},
+    this.onCategorize,
     super.key,
   });
 
@@ -135,6 +185,8 @@ class NeedsReviewScreen extends StatelessWidget {
                       onOpen: onOpenFlagged,
                       onMerge: onMergeDuplicate,
                       onKeepBoth: onKeepBothDuplicates,
+                      assignment: categoryAssignments[item.transactionId],
+                      onCategorize: onCategorize,
                     ),
                   ),
                   _TabList<TransferReviewItem>(
@@ -390,16 +442,33 @@ class _FlaggedCard extends StatelessWidget {
   final void Function(FlaggedTransactionItem)? onMerge;
   final void Function(FlaggedTransactionItem)? onKeepBoth;
 
+  /// KHA-32. Null when the caller supplied no category information for this
+  /// row, in which case no chip is rendered — see [NeedsReviewScreen].
+  final CategoryAssignment? assignment;
+  final void Function(FlaggedTransactionItem)? onCategorize;
+
   const _FlaggedCard({
     required this.item,
     required this.onOpen,
     this.onMerge,
     this.onKeepBoth,
+    this.assignment,
+    this.onCategorize,
   });
 
   bool get _isDuplicateFlag =>
       item.reviewReason == ReviewReason.possibleDuplicate ||
       item.reviewReason == ReviewReason.possibleAuthorisationPosting;
+
+  /// True when the flag came from the **categorizer** rather than from
+  /// ADR-017's duplicate detection.
+  ///
+  /// Derived from `CategoryReviewReason`'s own vocabulary via
+  /// `categoryReviewReasons`, not from a second list written here: the two
+  /// reason sets are deliberately disjoint (see `category_fields.dart`), and a
+  /// hand-copied membership test would be the place they silently converge.
+  bool get _isCategoryFlag =>
+      categoryReviewReasons.contains(item.reviewReason ?? '');
 
   @override
   Widget build(BuildContext context) {
@@ -450,6 +519,46 @@ class _FlaggedCard extends StatelessWidget {
                               style: text.bodySmall,
                             ),
                           ),
+                        ],
+                      ),
+                    ],
+                    // **AC-C4.1** — the needs-review indicator, and **KHA-32**'s
+                    // confidence display, on the row itself rather than one tap
+                    // away. The chip is §6.1's entry point: tapping it is tap 1
+                    // of the two-tap correction.
+                    if (_isCategoryFlag) ...<Widget>[
+                      const SizedBox(height: 4),
+                      Text(
+                        categoryReviewQuestion(l10n, item.reviewReason),
+                        style: text.bodySmall?.copyWith(
+                          color: AppColors.ink700,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: <Widget>[
+                          const NeedsReviewBadge(),
+                          if (assignment != null)
+                            CategoryChip(
+                              key: Key(
+                                'needsReview.categoryChip.'
+                                '${item.transactionId}',
+                              ),
+                              category: assignment!.category,
+                              band: assignment!.band,
+                              compact: true,
+                              onTap: onCategorize == null
+                                  ? null
+                                  : () => onCategorize!(item),
+                            ),
+                          if (assignment != null)
+                            ConfidenceIndicator(
+                              band: assignment!.band,
+                              confidence: assignment!.confidence,
+                            ),
                         ],
                       ),
                     ],

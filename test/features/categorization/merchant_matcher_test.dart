@@ -126,14 +126,20 @@ void main() {
     for (final String variant in <String>[
       'panda foods',
       'PANDA  FOODS',
-      'PANDA FOODS 1420',
-      'PANDA-FOODS-0042',
       'PANDA FOODS BRANCH',
       // `PANDA FOODS STORE RIYADH` left this list at ADR-008 v1.3 (KHA-98):
       // the city name is a proper noun and is no longer stripped, so this is a
       // *different key* — a branch, not a cosmetic variant. It is asserted
       // below as the flagged case it now is.
+      //
+      // `PANDA FOODS 1420` and `PANDA-FOODS-0042` left it at ADR-008 v1.4
+      // (KHA-106): a BARE digit run is no longer absorbed, because the length
+      // signal that absorbed it also merged `QAMART 1000` with `QAMART 2000`
+      // at confidence 1.00. What still absorbs a store number is a structural
+      // marker beside it — the two rows below — and that is now read on either
+      // side of the run (KHA-107).
       'PANDA FOODS STORE 0042',
+      'PANDA FOODS 0042 STORE',
     ]) {
       test('"$variant" matches the PANDA FOODS rule', () {
         final MerchantMatch match = MerchantMatcher.match(variant, store);
@@ -141,6 +147,32 @@ void main() {
         expect(match.canAutoApply, isTrue);
       });
     }
+
+    test('KHA-106 — an UNCORROBORATED store number is flagged, not '
+        'auto-applied: the disclosed cost, executed', () {
+      // The other side of the rows removed above. `PANDA FOODS 1420` keys as
+      // itself, and against `PANDA FOODS` the multiset Jaccard is 2/3 ≈ 0.67 —
+      // below the 0.80 T3 floor — so it reaches no tier that may auto-apply.
+      //
+      // This is deliberately the same shape as the KHA-98 city case below: a
+      // narrower normalisation trades a merge we cannot verify for a question
+      // the user answers once. Recorded as a test so a future "improvement"
+      // that widens the strip again fails CI instead of passing quietly.
+      for (final String numbered in <String>[
+        'PANDA FOODS 1420',
+        'PANDA-FOODS-0042',
+      ]) {
+        final MerchantMatch match = MerchantMatcher.match(numbered, store);
+        expect(
+          match.canAutoApply,
+          isFalse,
+          reason:
+              '"$numbered" carries nothing that says 1420/0042 is not part '
+              'of the name, so the app must ask rather than merge',
+        );
+        expect(match.needsReview, isTrue);
+      }
+    });
 
     test('KHA-98 — a branch identified by a CITY name is flagged, not '
         'auto-applied', () {

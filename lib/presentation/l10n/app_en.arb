@@ -679,5 +679,282 @@
   "@needsReviewTabTransfers": {
     "description": "S-18 gains an AC-B11.2 tab: transfers awaiting the user's judgement, kept apart from unparsed messages and duplicate flags because the question is a different one.",
     "placeholders": {"count": {"type": "int"}}
-  }
+  },
+
+  "commonCancel": "Cancel",
+  "@commonCancel": {"description": "P4b shared button label. Reused across the reassignment, rename and rule dialogs so the same action never reads two ways."},
+  "commonSave": "Save",
+  "@commonSave": {"description": "P4b shared button label."},
+  "commonDelete": "Delete",
+  "@commonDelete": {"description": "P4b shared button label for a destructive action, always paired with an icon (NFR-U4)."},
+  "commonEdit": "Edit",
+  "@commonEdit": {"description": "P4b shared button/tooltip label."},
+  "commonRename": "Rename",
+  "@commonRename": {"description": "S-14's rename affordance tooltip (AC-C3.4)."},
+  "commonCreate": "Create",
+  "@commonCreate": {"description": "S-14's new-category submit."},
+  "commonConfirm": "Confirm",
+  "@commonConfirm": {"description": "S-13's explicit scope confirmation, for a user who does not want to wait for the auto-confirm."},
+  "commonUndo": "Undo",
+  "@commonUndo": {"description": "AC-C5.2's snackbar action. design.md §6.6 chose undo over a blocking confirmation for category corrections."},
+  "commonRetry": "Try again",
+  "@commonRetry": {"description": "design.md §3.4's recoverable-error action."},
+
+  "categoriesTitle": "Categories",
+  "@categoriesTitle": {"description": "S-14 app bar title (docs/mockups/categories-rules.html)."},
+  "categoriesEmptyTitle": "No categories yet",
+  "@categoriesEmptyTitle": {"description": "S-14 empty state — only reachable before the design §4 starter list has been seeded."},
+  "categoriesEmptyBody": "Your starter categories will appear here as soon as the app finishes setting up.",
+  "@categoriesEmptyBody": {"description": "S-14 empty state body. States what will happen rather than leaving a blank screen."},
+  "categoriesUnavailable": "Your categories could not be loaded. Nothing has been changed.",
+  "@categoriesUnavailable": {"description": "design.md §3.4 Error state for S-14. Reassures that a failed READ changed nothing, because a user seeing an error about their categories will assume the worst."},
+  "categoryGroupSpending": "Spending",
+  "@categoryGroupSpending": {"description": "design.md §4's first bucket: categories that compete for budget share and appear in breakdowns."},
+  "categoryGroupMoneyMovement": "Money movement",
+  "@categoryGroupMoneyMovement": {"description": "design.md §4's second bucket: income/transfers/withdrawals, excluded from spend totals."},
+  "categoryRowTransactionCount": "{count, plural, =0{No transactions} one{1 transaction} other{{count} transactions}}",
+  "@categoryRowTransactionCount": {
+    "description": "S-14 row caption. The number S-15 quotes back on delete, so it is shown before the user commits to anything.",
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "categoryRowSystemCaption": "{count, plural, =0{System category — cannot be renamed or deleted} one{1 transaction · System category} other{{count} transactions · System category}}",
+  "@categoryRowSystemCaption": {
+    "description": "The Uncategorized row. Says WHY no affordances are offered, so their absence reads as deliberate rather than as a missing feature (design.md §4, AC-C1.1).",
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "categoryRenameTitle": "Rename category",
+  "@categoryRenameTitle": {"description": "AC-C3.4 — the id is stable across a rename, so nothing is re-categorized."},
+  "categoryRenamed": "Renamed to {name}",
+  "@categoryRenamed": {
+    "description": "Rename confirmation.",
+    "placeholders": {"name": {"type": "String"}}
+  },
+  "categoryDeleteTitle": "Delete \"{name}\"?",
+  "@categoryDeleteTitle": {
+    "description": "S-15 dialog title.",
+    "placeholders": {"name": {"type": "String"}}
+  },
+  "categoryDeleteInUseBody": "{count, plural, one{This category has 1 transaction. Choose what happens to it:} other{This category has {count} transactions. Choose what happens to them:}}",
+  "@categoryDeleteInUseBody": {
+    "description": "AC-C3.3 — the delete is blocked until the user decides. The sentence states the requirement rather than warning vaguely.",
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "categoryDeleteEmptyBody": "Nothing is using this category, so nothing else will change.",
+  "@categoryDeleteEmptyBody": {"description": "The no-decision-needed path. Asking where zero transactions should go would be theatre."},
+  "categoryDeleteReassignLabel": "Move its transactions to",
+  "@categoryDeleteReassignLabel": {"description": "S-15's picker label. Uncategorized is one of the options (AC-C3.3's 'or set to Uncategorized')."},
+  "categoryDeleted": "Deleted {name}",
+  "@categoryDeleted": {
+    "description": "Delete confirmation.",
+    "placeholders": {"name": {"type": "String"}}
+  },
+
+  "categoryPickerTitle": "Choose a category",
+  "@categoryPickerTitle": {"description": "S-12 sheet title when the transaction names no merchant."},
+  "categoryPickerTitleFor": "Categorize · {merchant}",
+  "@categoryPickerTitleFor": {
+    "description": "S-12 sheet title. Naming the merchant is what makes the scope question that follows make sense.",
+    "placeholders": {"merchant": {"type": "String"}}
+  },
+  "categoryPickerSearchHint": "Search categories",
+  "@categoryPickerSearchHint": {"description": "design.md §6.2's search field."},
+  "categoryPickerRecent": "Recent",
+  "@categoryPickerRecent": {"description": "design.md §6.2's last-three-used row."},
+  "categoryPickerNoResults": "No category matches \"{query}\"",
+  "@categoryPickerNoResults": {
+    "description": "design.md §3.4's Filtered-empty state, which must read differently from a true empty.",
+    "placeholders": {"query": {"type": "String"}}
+  },
+  "categoryPickerNewCategory": "New category",
+  "@categoryPickerNewCategory": {"description": "design.md §6.5's inline create affordance."},
+  "categoryNewNameLabel": "Category name",
+  "@categoryNewNameLabel": {"description": "§6.5's name field."},
+  "categoryNewIconLabel": "Icon",
+  "@categoryNewIconLabel": {"description": "§6.5's icon choice."},
+  "categoryNewCreateAndUse": "Create and use",
+  "@categoryNewCreateAndUse": {"description": "§6.5 — the new category is applied to the transaction the user was correcting, which is why they opened the form."},
+  "categoryNewDuplicateName": "A category with this name already exists — choose another name",
+  "@categoryNewDuplicateName": {"description": "AC-C3.2. Names the problem rather than saying 'invalid input' (brand.md voice principle 4). CategoryDao.createCustom folds the name, so case, spacing and Arabic orthography all collide."},
+
+  "categoryAppliedAs": "Categorized as {category}",
+  "@categoryAppliedAs": {
+    "description": "design.md §6.4's in-sheet confirmation. The category is ALREADY applied when this renders — the scope strip must not read as if the correction were still pending.",
+    "placeholders": {"category": {"type": "String"}}
+  },
+  "categoryScopeQuestion": "Apply this to future transactions from \"{merchant}\" too?",
+  "@categoryScopeQuestion": {
+    "description": "US-D5 / AC-C2.3's scope question.",
+    "placeholders": {"merchant": {"type": "String"}}
+  },
+  "categoryScopeQuestionGeneric": "Apply this to future transactions from this merchant too?",
+  "@categoryScopeQuestionGeneric": {"description": "The same question when the merchant has no resolved name."},
+  "categoryScopeFuture": "This and future ones",
+  "@categoryScopeFuture": {"description": "AC-D5.1's default option, pre-selected because it trains the learning loop (US-D2/D3)."},
+  "categoryScopeFutureHint": "Creates or updates this merchant's rule",
+  "@categoryScopeFutureHint": {"description": "Shown while the affected count is still loading, so a number never appears out of nowhere."},
+  "categoryScopeFutureCount": "{count, plural, =0{Creates or updates this merchant's rule} one{Also fills in 1 earlier uncategorized transaction} other{Also fills in {count} earlier uncategorized transactions}}",
+  "@categoryScopeFutureCount": {
+    "description": "AC-C5.1 + AC-D5.3 — the bulk half, stated BEFORE the user commits. Only uncategorized rows are counted; rewriting an already-categorized one is AC-D4.4's operation and asks separately.",
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "categoryScopeThisOnly": "Just this transaction",
+  "@categoryScopeThisOnly": {"description": "US-D5's one-off (e.g. a supermarket purchase that was actually a gift)."},
+  "categoryScopeThisOnlyHint": "Leaves this merchant's existing rule exactly as it is",
+  "@categoryScopeThisOnlyHint": {"description": "AC-D5.2's guarantee, stated where the choice is made."},
+  "categoryScopeAutoConfirm": "Applying in a moment…",
+  "@categoryScopeAutoConfirm": {"description": "design.md §6.4's auto-confirm. Deliberately not a live countdown: a ticking number invites the user to wait for it, and the whole point is that they need not."},
+
+  "correctionAppliedToOne": "Category updated",
+  "@correctionAppliedToOne": {"description": "AC-C2.1's immediate save, for a correction that touched one row."},
+  "correctionAppliedToMany": "Updated {count} transactions from {merchant}",
+  "@correctionAppliedToMany": {
+    "description": "AC-D5.3 — the merchant-wide option states how many existing transactions were affected. Mirrors the mockup's toast wording.",
+    "placeholders": {"count": {"type": "int"}, "merchant": {"type": "String"}}
+  },
+
+  "categoryAutoApplied": "Applied automatically",
+  "@categoryAutoApplied": {"description": "design.md §3.3's 'Auto-categorized by rule' indicator, as the sparkle icon's semantics label so the fact reaches a screen-reader user (NFR-U4/U1)."},
+  "categoryConfidenceHigh": "Confident match",
+  "@categoryConfidenceHigh": {"description": "KHA-32's confidence display, banded. At or above autoApplyThreshold (AC-D2.2)."},
+  "categoryConfidenceLow": "Not sure",
+  "@categoryConfidenceLow": {"description": "Below the threshold, or a tier that may never auto-apply. The app is asking (AC-C4.1)."},
+  "categoryConfidenceNone": "No match found",
+  "@categoryConfidenceNone": {"description": "AC-D2.4 — a never-before-seen merchant, never confidently categorized by coincidence."},
+  "categoryConfidenceWithValue": "{label} ({percent}%)",
+  "@categoryConfidenceWithValue": {
+    "description": "The band plus the raw figure. The band is what a person acts on; the figure is what makes the app checkable, and hiding it would sit oddly beside an audit trail this product otherwise exposes in full.",
+    "placeholders": {"label": {"type": "String"}, "percent": {"type": "int"}}
+  },
+
+  "reviewReasonUnknownMerchant": "We have not seen this merchant before — where does its spending belong?",
+  "@reviewReasonUnknownMerchant": {"description": "CategoryReviewReason.unknownMerchant. Three reasons, three questions — collapsing them would make the inbox say the wrong sentence about half its rows."},
+  "reviewReasonNoRuleForMerchant": "We know this merchant, but nobody has said which category it belongs in",
+  "@reviewReasonNoRuleForMerchant": {"description": "CategoryReviewReason.noRuleForMerchant."},
+  "reviewReasonLowConfidence": "We found a close match but we are not sure enough to apply it",
+  "@reviewReasonLowConfidence": {"description": "CategoryReviewReason.lowConfidenceCategory — including every T4 'did you mean' suggestion, which ADR-008 forbids applying at any confidence."},
+  "reviewReasonGeneric": "This one needs your judgement",
+  "@reviewReasonGeneric": {"description": "Fallback for an unrecognised review reason — §5.2's forward-compatibility rule applied to a stored vocabulary."},
+  "reviewInboxUnavailable": "The review inbox could not be loaded. Nothing has been changed.",
+  "@reviewInboxUnavailable": {"description": "design.md §3.4 Error state for S-18. Never rendered as an empty inbox: 'nothing needs review' is this screen's good-news state and showing it wrongly is the worst thing it can do."},
+  "reviewCountAllClear": "All caught up",
+  "@reviewCountAllClear": {"description": "design.md §5's ReviewCountCard at zero: it recedes visually. A queue that shouted about being empty would train the user to ignore it."},
+  "reviewCountNeedsReview": "{count, plural, one{1 item needs review} other{{count} items need review}}",
+  "@reviewCountNeedsReview": {
+    "description": "AC-C4.2 — the count of items needing review, visible from the main screen.",
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "reviewCountBreakdown": "{uncategorized} uncategorized · {flagged} flagged",
+  "@reviewCountBreakdown": {
+    "description": "What the badge number is made of. AC-C1.2 counts uncategorized rows in this queue, and a user who did not know that would be looking for that many PROBLEMS. Deliberately does NOT include unparsed messages: KHA-32's done-check defines the badge as flagged plus uncategorized, and S-18's own tabs carry the message count. The two figures overlap (a row can be both flagged and uncategorized), so they do not add up to the headline — which is why the headline is a union, not a sum.",
+    "placeholders": {"uncategorized": {"type": "int"}, "flagged": {"type": "int"}}
+  },
+  "reviewCountUnavailable": "The review count is unavailable right now",
+  "@reviewCountUnavailable": {"description": "design.md §3.4 Error state. A failed read must never render as a reassuring zero."},
+
+  "learnedRulesTitle": "Learned rules",
+  "@learnedRulesTitle": {"description": "S-16 app bar title (US-D4)."},
+  "learnedRulesEmptyTitle": "No rules yet",
+  "@learnedRulesEmptyTitle": {"description": "S-16 empty state."},
+  "learnedRulesEmptyBody": "Correcting any transaction's category teaches a rule automatically, so the next one from that merchant arrives already sorted.",
+  "@learnedRulesEmptyBody": {"description": "The copy does real work: it explains how rules come into existence, so an empty screen reads as 'you have not corrected anything yet' rather than 'this feature is broken'."},
+  "learnedRulesUnavailable": "Your learned rules could not be loaded. Nothing has been changed.",
+  "@learnedRulesUnavailable": {"description": "design.md §3.4 Error state for S-16."},
+  "ruleAppliedCount": "{count, plural, =0{Not applied yet} one{Applied to 1 transaction} other{Applied to {count} transactions}}",
+  "@ruleAppliedCount": {
+    "description": "AC-D4.1's per-rule detail.",
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "ruleSourceSeed": "· Built in",
+  "@ruleSourceSeed": {"description": "A seed rule versus one the user taught. AC-D3.1 makes a user rule outrank a seed rule, so the two should not look identical."},
+  "ruleEditTitle": "Edit rule for {merchant}",
+  "@ruleEditTitle": {
+    "description": "S-17 dialog title.",
+    "placeholders": {"merchant": {"type": "String"}}
+  },
+  "ruleEditCurrentCategory": "Currently: {category}",
+  "@ruleEditCurrentCategory": {
+    "description": "S-17 — what the rule says today.",
+    "placeholders": {"category": {"type": "String"}}
+  },
+  "ruleEditNewCategory": "New category",
+  "@ruleEditNewCategory": {"description": "AC-D4.2 — changing this changes what future transactions get."},
+  "ruleReapplyPrompt": "{count, plural, =0{No existing transactions would change.} one{Also re-apply this to 1 existing transaction from this merchant?} other{Also re-apply this to {count} existing transactions from this merchant?}}",
+  "@ruleReapplyPrompt": {
+    "description": "AC-D4.4's required prompt. The count is computed BEFORE the dialog can promise it, so the button cannot name a number the write does not deliver.",
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "ruleReapplyPromptCounting": "Checking how many existing transactions this would change…",
+  "@ruleReapplyPromptCounting": {"description": "Shown while the count is in flight. The re-apply button stays disabled until it arrives — a button reading 'Yes, ? transactions' would ask the user to consent to something unspecified."},
+  "ruleReapplyYes": "{count, plural, =0{Re-apply} other{Yes, {count} transactions}}",
+  "@ruleReapplyYes": {
+    "description": "AC-D4.4's affirmative.",
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "ruleReapplyNo": "Going forward only",
+  "@ruleReapplyNo": {"description": "AC-D4.4's negative — AC-D4.2 without the history rewrite."},
+  "ruleReappliedCount": "{count, plural, =0{Rule updated. No existing transactions needed changing.} one{Rule updated and re-applied to 1 transaction} other{Rule updated and re-applied to {count} transactions}}",
+  "@ruleReappliedCount": {
+    "description": "AC-D4.4's confirmation. Each affected transaction also got its own audit entry naming the rule — a bulk re-apply that wrote no history would be a defect (KHA-34).",
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "ruleUpdatedGoingForward": "Rule updated. Existing transactions were left as they are.",
+  "@ruleUpdatedGoingForward": {"description": "AC-D4.2 alone — states the half the user chose NOT to do, so 'nothing visibly happened' is explained rather than mysterious."},
+  "ruleEditRefused": "That category is no longer available, so the rule was not changed",
+  "@ruleEditRefused": {"description": "KHA-104's refusal reaching the user. The rule is declined rather than written against a category nothing can render."},
+  "ruleDeleteTitle": "Delete the rule for {merchant}?",
+  "@ruleDeleteTitle": {
+    "description": "AC-D4.3's confirmation.",
+    "placeholders": {"merchant": {"type": "String"}}
+  },
+  "ruleDeleteBody": "Future transactions from this merchant will arrive uncategorized. Transactions you have already categorized keep their categories.",
+  "@ruleDeleteBody": {"description": "AC-D4.3, both halves. A user who believes deleting a rule will un-categorize a year of history will never delete a bad rule."},
+  "ruleDeleted": "Rule deleted",
+  "@ruleDeleted": {"description": "AC-D4.3 confirmation."},
+
+  "categoryWhyThisCategory": "Why this category?",
+  "@categoryWhyThisCategory": {"description": "KHA-31 — every automatic categorization stays traceable to its audit entry. Loaded on demand, because it is a second query for a question asked rarely."},
+  "categoryProvenanceUser": "You chose this category.",
+  "@categoryProvenanceUser": {"description": "category_source = 'user'. Deliberately not phrased as a confidence: 'you told us' is a different kind of fact from 'we are sure'."},
+  "categoryProvenanceAutomatic": "A learned rule applied this automatically, at {percent}% confidence.",
+  "@categoryProvenanceAutomatic": {
+    "description": "AC-D2.2 / AC-F5.2 — the automatic case, naming the rule below.",
+    "placeholders": {"percent": {"type": "int"}}
+  },
+  "categoryProvenanceUndecided": "The app looked and could not decide, so this is left uncategorized.",
+  "@categoryProvenanceUndecided": {"description": "category_source = 'none'. A real answer, not an absence — AC-D2.4's honest outcome."},
+  "categoryProvenanceUnknownSource": "This category was set before the app started recording how.",
+  "@categoryProvenanceUnknownSource": {"description": "A row written before P4a. Saying so is better than inventing a provenance."},
+  "categoryProvenanceRule": "Rule: {merchant}",
+  "@categoryProvenanceRule": {
+    "description": "AC-F5.2 — which rule fired, resolved from the live rule row.",
+    "placeholders": {"merchant": {"type": "String"}}
+  },
+  "categoryProvenanceRuleGone": "The rule that did this has since been deleted.",
+  "@categoryProvenanceRuleGone": {"description": "Honest rather than a dangling id. KHA-103 clears category_rule_id with the rule, so this is a genuine 'no longer exists', not a lookup failure."},
+  "categoryProvenanceNoHistory": "No categorization history for this transaction yet.",
+  "@categoryProvenanceNoHistory": {"description": "An empty trail is a claim, so it is only ever shown after a successful read."},
+  "categoryProvenanceEntry": "{when} · {actor}",
+  "@categoryProvenanceEntry": {
+    "description": "One audit line, shown verbatim rather than summarised (NFR-A2).",
+    "placeholders": {"when": {"type": "String"}, "actor": {"type": "String"}}
+  },
+  "categoryProvenanceUnavailable": "The history for this category could not be loaded.",
+  "@categoryProvenanceUnavailable": {"description": "design.md §3.4 Error state. An empty history is a claim a failed read has not established."},
+  "categoryActorUser": "You",
+  "@categoryActorUser": {"description": "ADR-010 actor 'user'."},
+  "categoryActorRule": "A learned rule",
+  "@categoryActorRule": {"description": "ADR-010 actor 'system_rule' — the distinction between what the app did and what the person did is the whole value of the trail."},
+  "categoryActorSystem": "The app",
+  "@categoryActorSystem": {"description": "ADR-010 actor 'system'."},
+  "categoryLockedBody": "Your categories are encrypted and stay locked until you unlock the app.",
+  "@categoryLockedBody": {"description": "design.md §3.4's Locked state. ADR-005 makes the lock cryptographic, so this is a statement of fact rather than a UI courtesy."},
+
+  "transactionUnavailable": "This transaction could not be loaded.",
+  "@transactionUnavailable": {"description": "design.md §3.4 Error state for S-11, including KHA-74's unreadable-amount case."},
+  "transactionGoneTitle": "This transaction is no longer here",
+  "@transactionGoneTitle": {"description": "Reachable without any bug: deleted or merged away while this screen was open."},
+  "transactionGoneBody": "It was deleted or merged into another transaction. You can find it under Recently deleted.",
+  "@transactionGoneBody": {"description": "US-B8 — nothing is destroyed, and the user is told where it went."},
+  "completionMessageGone": "That message is no longer in the review queue",
+  "@completionMessageGone": {"description": "CompletionMessageUnavailable — two screens open on one queue, or a background sweep reclassified it. Not a crash."}
 }

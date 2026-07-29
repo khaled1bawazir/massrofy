@@ -102,21 +102,23 @@ abstract final class CategorizationConfig {
   /// a T3 match is even considered (KHA-100 — see [autoApplyThreshold]).
   static const double tokenSetJaccardFloor = 0.80;
 
-  /// **KHA-99 — corroboration signal (ii) for a trailing digit run.**
-  ///
-  /// A trailing all-digit token is stripped from a merchant string only when it
-  /// is corroborated as a store/terminal/reference number. One of the two
-  /// signals is length: a run of at least this many digits is a till, terminal
-  /// or reference id, not a branch number a human says out loud. (The other
-  /// signal is adjacency to a structural word — `PANDA STORE 1234`. See
-  /// `MerchantKey.referenceMarkerTokens`.)
-  ///
-  /// **A tunable with O-1's posture, not a safety rule.** The *value* is tuned
-  /// against the corpus; the *bar* — that a strip must be corroborated at all —
-  /// is architecture (ADR-008 v1.3) and is not tunable from here. Lowering this
-  /// to 1 would restore the KHA-99 defect for `QAMART 100` / `QAMART 200`;
-  /// raising it only makes the pipeline more conservative.
-  static const int referenceDigitRunMinLength = 4;
+  // **`referenceDigitRunMinLength` was deleted here at ADR-008 v1.4
+  // (KHA-106).** It is recorded as a comment rather than removed without trace,
+  // because the temptation it represents is going to recur: a digit-length
+  // threshold reads like an obvious tuning knob and it is not one.
+  //
+  // It was corroboration signal (ii) for the trailing-digit strip: "a run of ≥N
+  // digits is a till/terminal id". At N = 4 it merged `QAMART 1000` and
+  // `QAMART 2000` into ONE merchant row at confidence 1.00 — and no value of N
+  // fixes that, because a length signal decides strippability from the run
+  // alone and always leaves the shared prefix as the residue. **Every** N
+  // collapses some pair of sibling outlets; N only chooses which pair.
+  //
+  // So it was deleted rather than retuned. O-1's posture — "the value is
+  // tuning, the bar is not" — cannot protect a constant whose existence *is*
+  // the bar. Do not reintroduce it, and do not add any other corroborator that
+  // is not itself a `MerchantKey.noiseTokens` word: that property is what makes
+  // `MerchantKey.of` idempotent (see its doc comment).
 
   /// **T3 output band.** Jaccard [tokenSetJaccardFloor] maps to
   /// [tokenSetConfidenceFloor]; Jaccard `1.0` maps to

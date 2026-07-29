@@ -789,4 +789,430 @@ class AppLocalizationsEn extends AppLocalizations {
   String needsReviewTabTransfers(int count) {
     return 'Transfers ($count)';
   }
+
+  @override
+  String get commonCancel => 'Cancel';
+
+  @override
+  String get commonSave => 'Save';
+
+  @override
+  String get commonDelete => 'Delete';
+
+  @override
+  String get commonEdit => 'Edit';
+
+  @override
+  String get commonRename => 'Rename';
+
+  @override
+  String get commonCreate => 'Create';
+
+  @override
+  String get commonConfirm => 'Confirm';
+
+  @override
+  String get commonUndo => 'Undo';
+
+  @override
+  String get commonRetry => 'Try again';
+
+  @override
+  String get categoriesTitle => 'Categories';
+
+  @override
+  String get categoriesEmptyTitle => 'No categories yet';
+
+  @override
+  String get categoriesEmptyBody =>
+      'Your starter categories will appear here as soon as the app finishes setting up.';
+
+  @override
+  String get categoriesUnavailable =>
+      'Your categories could not be loaded. Nothing has been changed.';
+
+  @override
+  String get categoryGroupSpending => 'Spending';
+
+  @override
+  String get categoryGroupMoneyMovement => 'Money movement';
+
+  @override
+  String categoryRowTransactionCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count transactions',
+      one: '1 transaction',
+      zero: 'No transactions',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String categoryRowSystemCaption(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count transactions · System category',
+      one: '1 transaction · System category',
+      zero: 'System category — cannot be renamed or deleted',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get categoryRenameTitle => 'Rename category';
+
+  @override
+  String categoryRenamed(String name) {
+    return 'Renamed to $name';
+  }
+
+  @override
+  String categoryDeleteTitle(String name) {
+    return 'Delete \"$name\"?';
+  }
+
+  @override
+  String categoryDeleteInUseBody(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          'This category has $count transactions. Choose what happens to them:',
+      one: 'This category has 1 transaction. Choose what happens to it:',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get categoryDeleteEmptyBody =>
+      'Nothing is using this category, so nothing else will change.';
+
+  @override
+  String get categoryDeleteReassignLabel => 'Move its transactions to';
+
+  @override
+  String categoryDeleted(String name) {
+    return 'Deleted $name';
+  }
+
+  @override
+  String get categoryPickerTitle => 'Choose a category';
+
+  @override
+  String categoryPickerTitleFor(String merchant) {
+    return 'Categorize · $merchant';
+  }
+
+  @override
+  String get categoryPickerSearchHint => 'Search categories';
+
+  @override
+  String get categoryPickerRecent => 'Recent';
+
+  @override
+  String categoryPickerNoResults(String query) {
+    return 'No category matches \"$query\"';
+  }
+
+  @override
+  String get categoryPickerNewCategory => 'New category';
+
+  @override
+  String get categoryNewNameLabel => 'Category name';
+
+  @override
+  String get categoryNewIconLabel => 'Icon';
+
+  @override
+  String get categoryNewCreateAndUse => 'Create and use';
+
+  @override
+  String get categoryNewDuplicateName =>
+      'A category with this name already exists — choose another name';
+
+  @override
+  String categoryAppliedAs(String category) {
+    return 'Categorized as $category';
+  }
+
+  @override
+  String categoryScopeQuestion(String merchant) {
+    return 'Apply this to future transactions from \"$merchant\" too?';
+  }
+
+  @override
+  String get categoryScopeQuestionGeneric =>
+      'Apply this to future transactions from this merchant too?';
+
+  @override
+  String get categoryScopeFuture => 'This and future ones';
+
+  @override
+  String get categoryScopeFutureHint =>
+      'Creates or updates this merchant\'s rule';
+
+  @override
+  String categoryScopeFutureCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Also fills in $count earlier uncategorized transactions',
+      one: 'Also fills in 1 earlier uncategorized transaction',
+      zero: 'Creates or updates this merchant\'s rule',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get categoryScopeThisOnly => 'Just this transaction';
+
+  @override
+  String get categoryScopeThisOnlyHint =>
+      'Leaves this merchant\'s existing rule exactly as it is';
+
+  @override
+  String get categoryScopeAutoConfirm => 'Applying in a moment…';
+
+  @override
+  String get correctionAppliedToOne => 'Category updated';
+
+  @override
+  String correctionAppliedToMany(int count, String merchant) {
+    return 'Updated $count transactions from $merchant';
+  }
+
+  @override
+  String get categoryAutoApplied => 'Applied automatically';
+
+  @override
+  String get categoryConfidenceHigh => 'Confident match';
+
+  @override
+  String get categoryConfidenceLow => 'Not sure';
+
+  @override
+  String get categoryConfidenceNone => 'No match found';
+
+  @override
+  String categoryConfidenceWithValue(String label, int percent) {
+    return '$label ($percent%)';
+  }
+
+  @override
+  String get reviewReasonUnknownMerchant =>
+      'We have not seen this merchant before — where does its spending belong?';
+
+  @override
+  String get reviewReasonNoRuleForMerchant =>
+      'We know this merchant, but nobody has said which category it belongs in';
+
+  @override
+  String get reviewReasonLowConfidence =>
+      'We found a close match but we are not sure enough to apply it';
+
+  @override
+  String get reviewReasonGeneric => 'This one needs your judgement';
+
+  @override
+  String get reviewInboxUnavailable =>
+      'The review inbox could not be loaded. Nothing has been changed.';
+
+  @override
+  String get reviewCountAllClear => 'All caught up';
+
+  @override
+  String reviewCountNeedsReview(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count items need review',
+      one: '1 item needs review',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String reviewCountBreakdown(int uncategorized, int flagged) {
+    return '$uncategorized uncategorized · $flagged flagged';
+  }
+
+  @override
+  String get reviewCountUnavailable =>
+      'The review count is unavailable right now';
+
+  @override
+  String get learnedRulesTitle => 'Learned rules';
+
+  @override
+  String get learnedRulesEmptyTitle => 'No rules yet';
+
+  @override
+  String get learnedRulesEmptyBody =>
+      'Correcting any transaction\'s category teaches a rule automatically, so the next one from that merchant arrives already sorted.';
+
+  @override
+  String get learnedRulesUnavailable =>
+      'Your learned rules could not be loaded. Nothing has been changed.';
+
+  @override
+  String ruleAppliedCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Applied to $count transactions',
+      one: 'Applied to 1 transaction',
+      zero: 'Not applied yet',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get ruleSourceSeed => '· Built in';
+
+  @override
+  String ruleEditTitle(String merchant) {
+    return 'Edit rule for $merchant';
+  }
+
+  @override
+  String ruleEditCurrentCategory(String category) {
+    return 'Currently: $category';
+  }
+
+  @override
+  String get ruleEditNewCategory => 'New category';
+
+  @override
+  String ruleReapplyPrompt(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          'Also re-apply this to $count existing transactions from this merchant?',
+      one: 'Also re-apply this to 1 existing transaction from this merchant?',
+      zero: 'No existing transactions would change.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get ruleReapplyPromptCounting =>
+      'Checking how many existing transactions this would change…';
+
+  @override
+  String ruleReapplyYes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Yes, $count transactions',
+      zero: 'Re-apply',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get ruleReapplyNo => 'Going forward only';
+
+  @override
+  String ruleReappliedCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Rule updated and re-applied to $count transactions',
+      one: 'Rule updated and re-applied to 1 transaction',
+      zero: 'Rule updated. No existing transactions needed changing.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get ruleUpdatedGoingForward =>
+      'Rule updated. Existing transactions were left as they are.';
+
+  @override
+  String get ruleEditRefused =>
+      'That category is no longer available, so the rule was not changed';
+
+  @override
+  String ruleDeleteTitle(String merchant) {
+    return 'Delete the rule for $merchant?';
+  }
+
+  @override
+  String get ruleDeleteBody =>
+      'Future transactions from this merchant will arrive uncategorized. Transactions you have already categorized keep their categories.';
+
+  @override
+  String get ruleDeleted => 'Rule deleted';
+
+  @override
+  String get categoryWhyThisCategory => 'Why this category?';
+
+  @override
+  String get categoryProvenanceUser => 'You chose this category.';
+
+  @override
+  String categoryProvenanceAutomatic(int percent) {
+    return 'A learned rule applied this automatically, at $percent% confidence.';
+  }
+
+  @override
+  String get categoryProvenanceUndecided =>
+      'The app looked and could not decide, so this is left uncategorized.';
+
+  @override
+  String get categoryProvenanceUnknownSource =>
+      'This category was set before the app started recording how.';
+
+  @override
+  String categoryProvenanceRule(String merchant) {
+    return 'Rule: $merchant';
+  }
+
+  @override
+  String get categoryProvenanceRuleGone =>
+      'The rule that did this has since been deleted.';
+
+  @override
+  String get categoryProvenanceNoHistory =>
+      'No categorization history for this transaction yet.';
+
+  @override
+  String categoryProvenanceEntry(String when, String actor) {
+    return '$when · $actor';
+  }
+
+  @override
+  String get categoryProvenanceUnavailable =>
+      'The history for this category could not be loaded.';
+
+  @override
+  String get categoryActorUser => 'You';
+
+  @override
+  String get categoryActorRule => 'A learned rule';
+
+  @override
+  String get categoryActorSystem => 'The app';
+
+  @override
+  String get categoryLockedBody =>
+      'Your categories are encrypted and stay locked until you unlock the app.';
+
+  @override
+  String get transactionUnavailable => 'This transaction could not be loaded.';
+
+  @override
+  String get transactionGoneTitle => 'This transaction is no longer here';
+
+  @override
+  String get transactionGoneBody =>
+      'It was deleted or merged into another transaction. You can find it under Recently deleted.';
+
+  @override
+  String get completionMessageGone =>
+      'That message is no longer in the review queue';
 }
