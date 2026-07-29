@@ -86,3 +86,14 @@ Format per entry:
   something a human can open and see working before the *entire* domain model is done. This is
   a planning/sequencing change for `docs/build-plan.md`'s next `/kickoff`, not a P3b-2 change —
   P3b-2 keeps building on the existing plan. Revisit when scoping the next project's phase 0.**
+
+- **[2026-07-29] [process]** A gate result is only evidence for the exact tree it was measured
+  on, twice now. First, a CI-timing claim was derived from summed background-`sleep` durations
+  instead of measured elapsed time, and reopened an Urgent issue on a hang that never happened
+  (PR #16). Second, `QA: PASS 20`'s "format clean (181 files, 0 changed)" was true of PR #20's
+  branch and was then read as if it also covered PR #22's branch, which added two files the
+  claim never saw — CI caught it, but only because it re-runs the gate; a human skimming the
+  verdict would not have. **-> Any pass/fail claim (test count, format-clean, "N files changed")
+  must name the commit SHA it was measured on, and a reviewer must re-run the gate on the
+  CURRENT head rather than citing an earlier verdict — a stale-but-true-when-written claim is
+  indistinguishable from a fabricated one to whoever reads it later.**
