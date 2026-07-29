@@ -2,10 +2,24 @@ STATUS: Approved
 TIER: personal
 # Massrofy — Personal Spending Tracker from Bank SMS
 
-**Version:** 0.3 (adds bank/account/card hierarchy and real SMS format patterns)
-**Date:** 2026-07-27
+**Version:** 0.4 (Addendum A — user-declared bank senders; see the addendum status line below)
+**Date:** 2026-07-27 (v0.3), 2026-07-30 (Addendum A)
 **Author:** product-owner agent (v0.1), revised directly per human decisions (v0.2)
 **Phase:** 1 — Requirements
+
+> **ADDENDUM A STATUS: DRAFT - awaiting human approval.**
+> On 2026-07-30, after a real-device finding (Linear **KHA-128**: the bundled rule pack
+> configures 2 of the user's 7 banks, and both patterns were guessed wrong — the phone shows
+> `Jazira Bank`, which matches none of them), one capability (**C17**), two stories
+> (**US-A6**, **US-B16**), two out-of-scope rows (**X18**, **X19**) and one privacy
+> requirement (**NFR-P4a**) were added. Every addendum item is tagged
+> **`[Addendum A — DRAFT]`**.
+> Everything else in this document stays `Approved` and `/build` may continue against it.
+> **The tagged items are NOT authorised for build** until the human changes `DRAFT` to
+> `APPROVED` in this block. The product-owner does not self-approve.
+> **Process note:** US-A6 needs one screen `docs/design.md` does not contain (an unrecognized-
+> sender review screen), so approving it also triggers a `/revise-design` round — the same
+> shape as architecture.md's H-15. It does **not** reopen gate 1 for the rest of the PRD.
 
 ---
 
@@ -81,6 +95,7 @@ The founder/sole user of the app.
 | C14 | Import a bank statement (PDF/CSV) and reconcile it against SMS-derived transactions, adding any that were missed and feeding the learning loop |
 | C15 | Capture non-spending money movement from SMS too — income/salary credits, ATM withdrawals, and transfers between the user's own accounts — so the app shows total spent vs. total kept, not just card spend. Transfers between the user's own accounts must never be counted as spending. |
 | C16 | Cloud backup/sync of the (small) local dataset, so data survives a lost/replaced device |
+| C17 | **`[Addendum A — DRAFT]`** Let the user declare that SMS from a sender the app does not recognize are from one of their banks (naming that bank if it is new), so a bank the app was never configured for — or one that changed its sender ID — starts being tracked without waiting for a new app version |
 
 ### 3.2 Out of scope (v1) — explicitly
 
@@ -102,6 +117,8 @@ These are deliberately excluded. Some may return in a later version; none should
 | X15 | Email or push-notification-based transaction capture | Confirmed out — SMS is the only ingestion channel (was OQ-9) |
 | X16 | Publishing to an app store | Personal side-load (APK install) only for now (was OQ-4) |
 | X17 | Hard, non-recoverable delete of a single transaction from the UI | Deletes are soft/hidden by default so a mistaken delete is recoverable; only "erase everything" (US-F3) is a true hard delete (was OQ-8) |
+| X18 **`[Addendum A — DRAFT]`** | A rule-authoring UI — letting the user write or edit sender/message patterns, message templates, or field-extraction mappings | C17 deliberately stops at *sender recognition*. Once a sender is recognized, the already-built unparsed queue (US-A4) plus manual completion (AC-A4.2) turn its messages into transactions with no pattern-writing at all. Authoring parsing rules is a specialist task, it is where a wrong guess silently corrupts amounts, and user-supplied patterns would be an executable-input surface the rule-pack design deliberately has none of. Keeping **rule content** an engineering data task (KHA-128) is the right split |
+| X19 **`[Addendum A — DRAFT]`** | A persisted "not my bank / ignore this sender" list | The unrecognized-sender list is shown only on demand, so there is nothing nagging the user that needs suppressing — and persisting it would mean storing metadata about senders the user has just confirmed are *not* financial, which is exactly what NFR-P4 exists to prevent. Revisit only if the list proves noisy in real use |
 
 > **Moved from out-of-scope to in-scope (v1)** following human review: budgets/alerts (was X5, now C13), cloud backup/sync (was X10, now C16), statement PDF/CSV reconciliation (was X11, now C14).
 
@@ -140,6 +157,8 @@ Stories are grouped by capability area, kept small, and each is independently te
 - **US-A3** — As the Owner, I want the app to import my existing SMS history on first run so that I have spending data from day one instead of starting empty.
 - **US-A4** — As the Owner, I want SMS the app couldn't understand to be shown in an "unparsed" area rather than silently dropped so that I know nothing is missing.
 - **US-A5** — As the Owner, I want the app to ignore duplicate SMS for the same transaction so that my totals aren't inflated.
+- **US-A6** **`[Addendum A — DRAFT]`** — As the Owner, I want to tell the app that messages from a sender it doesn't recognize are from one of my banks, so that a bank the app was never configured for (or one that changed its sender ID) starts being tracked without waiting for a new version of the app.
+  > *Why this exists, in one paragraph, because it is the justification for the whole story:* the app decides "is this SMS from a bank?" by matching the sender string against patterns shipped inside the app. Whoever writes those patterns is guessing at a string they cannot see; the person holding the phone can read the exact string with zero guesswork. On 2026-07-30 that guess was wrong for both configured banks and absent for five more (KHA-128), and because an unmatched sender is discarded with nothing retained, the user saw `0.00 SAR` with nothing in the review queue either and no way to tell the app it was wrong. This is the same philosophy as the merchant-learning loop (US-D1–D5) — *the user corrects what the app got wrong and it sticks* — applied one layer up, at the bank/sender layer instead of the merchant/category layer. It does **not** replace shipping correct patterns (KHA-128); it means the *next* wrong or changed sender ID costs the user thirty seconds instead of costing them an app release.
 
 ### Epic B — Banks, accounts, cards, and the transaction record
 - **US-B1** — As the Owner, I want each detected transaction to show amount, currency, merchant/payee, date-time, and which account/card it hit so that I can identify it at a glance.
@@ -149,6 +168,8 @@ Stories are grouped by capability area, kept small, and each is independently te
 - **US-B13** — As the Owner, I want debit/current accounts tracked as their own instrument type, separate from cards, under each bank, so that "money sitting in my account" and "credit card spend" don't get conflated.
 - **US-B14** — As the Owner, I want a card recognized as belonging to the account that funds/settles it (where the SMS indicates that link, e.g. a credit card repayment debited from an account) so that the app understands the real money flow between my account and my card, not just two unrelated instruments.
 - **US-B15** — As the Owner, I want a new bank, account, or card to be created automatically the first time an SMS mentions it (bank identified from the SMS sender/content), so that I don't have to pre-register my accounts and cards by hand.
+- **US-B16** **`[Addendum A — DRAFT]`** — As the Owner, I want to give a bank the name I actually call it, so that my bank list reads the way I think about my money rather than however the app or the SMS spelled it. *(This is the "edit bank names" half of the human's 2026-07-30 request; US-A6 is the "add" half. It is the bank-level equivalent of US-B3, which only covers accounts and cards.)*
+  > **ID note for whoever raises `docs/design.md` §10 D-13's recommended story** (a formal story for the S-48/S-49 manual add-account/add-card screens): `US-B16` is now taken — use **US-B17**.
 - **US-B4** — As the Owner, I want to add a transaction manually so that cash spending and non-SMS purchases are included in my totals.
 - **US-B5** — As the Owner, I want to edit a transaction's details when the parser got something wrong so that my records are accurate.
 - **US-B6** — As the Owner, I want to delete or exclude a transaction (e.g. a reversed charge) so that my totals reflect reality.
@@ -239,6 +260,20 @@ Written as Given/When/Then so QA can automate them directly. Each criterion is s
 - AC-A5.2 — **Given** two SMS from two different senders describe the same underlying transaction (e.g. an authorization alert and a posting alert for the same charge), **when** both are processed, **then** the app flags them as a possible duplicate for user confirmation rather than silently merging or silently double-counting.
 - AC-A5.3 — **Given** two genuinely separate purchases at the same merchant, for the same amount, on the same day, **when** both are processed, **then** both transactions are retained (they may be flagged as possible duplicates, but must not be auto-removed).
 
+**US-A6 — Recognize a sender the app was never configured for `[Addendum A — DRAFT]`**
+
+*Scope guard for the whole block: the user names banks and identifies senders. The user never writes, pastes, or edits a pattern, template, or field mapping (X18).*
+
+- AC-A6.1 — **Given** the app has SMS access, **when** the user opens the "Banks & senders" screen (reachable from Settings, and linked from Home's zero/empty state and from an empty Needs Review queue), **then** it lists, in two clearly separated groups, (a) the senders in the current lookback window that the app **does** recognize and (b) the senders it does **not**, each shown as the exact sender string as it appears on the phone, with a count of messages from it in that window — so that "the app is finding nothing" and "the app is not recognizing my bank" are distinguishable by the user without help.
+- AC-A6.2 — **Given** an unrecognized sender whose string alone does not identify it (e.g. a short code), **when** the user taps that one sender, **then** the app shows a redaction-applied preview of at most its single most recent message so the user can decide; the preview is not persisted, and no other sender's content is shown.
+- AC-A6.3 — **Given** an unrecognized sender the user identifies as one of their banks, **when** they link it either to a bank the app already knows or to a new bank they name themselves, **then** messages from that sender are treated as financial from that point on, and the link is recorded in the audit trail (NFR-A2) as a user action.
+- AC-A6.4 — **Given** the user has just linked a sender, **when** the link is saved, **then** the app re-scans that sender's existing messages over the same lookback window as the initial import (AC-A3.1), and every one of them ends as either a parsed transaction or an item in the Needs Review queue — never discarded (NFR-A7, AC-A4.4).
+- AC-A6.5 — **Given** a linked sender whose message format no rule in any active rule pack can parse, **when** its messages are processed, **then** they appear in the Needs Review / unparsed list with their sanitized text and can be completed into real transactions through the existing flow (AC-A4.1, AC-A4.2). **The user gets value from a linked sender without any parsing rule ever being written for it.**
+- AC-A6.6 — **Given** the user supplies or confirms a sender string, **when** it is stored and matched against incoming messages, **then** it is matched **literally** — whole-string, case-insensitive, surrounding whitespace trimmed — and is never interpreted as a regular expression or any other executable expression.
+- AC-A6.7 — **Given** the user linked sender S to bank B, **when** a later rule-pack update adds its own pattern matching S for that same bank, **then** messages from S still resolve to the single bank B — no second bank entity, no split totals, no duplicated accounts or cards — and the pack's parsing rules now take effect for those messages.
+- AC-A6.8 — **Given** a linked sender, **when** the user removes the link, **then** future messages from that sender stop being ingested, and transactions already created from it are retained unchanged with their provenance intact (they are real records of real money, not artefacts of the link).
+- AC-A6.9 — **Given** unrecognized senders the user chooses **not** to link, **when** they leave the screen, **then** nothing about those senders or their messages has been persisted anywhere — the list is derived on demand and NFR-P4's discard behaviour is unchanged (NFR-P4a).
+
 ### Epic B — Transaction record and cards
 
 **US-B1 — Transaction fields**
@@ -274,6 +309,10 @@ Written as Given/When/Then so QA can automate them directly. Each criterion is s
 **US-B15 — Auto-creation on first mention**
 - AC-B15.1 — **Given** an SMS references a bank, account, or card the app has never seen, **when** it is processed, **then** the corresponding entities are created automatically with no setup step required from the user.
 - AC-B15.2 — **Given** an auto-created instrument, **when** the user views it before renaming it, **then** it is labelled using its raw identifier (e.g. masked card/account number) so it's still identifiable.
+
+**US-B16 — Rename a bank `[Addendum A — DRAFT]`**
+- AC-B16.1 — **Given** any bank in the app (created from a rule pack or created by the user via US-A6), **when** the user renames it, **then** the new name appears everywhere that bank is referenced, and the bank's underlying identity is unchanged — its accounts, cards, totals and history all stay attached to it (the same guarantee AC-B3.1/B3.2 give for instruments).
+- AC-B16.2 — **Given** a bank the user has renamed, **when** a later SMS or rule-pack update supplies a different display name for that same bank, **then** the user's name wins and is not silently overwritten (the US-D3/AC-D3.2 principle — a user's explicit choice outranks the app's — applied to bank names).
 
 **US-B4 — Manual entry**
 - AC-B4.1 — **Given** the user is on the transaction list, **when** they add a transaction with amount, date, merchant, category, and card/cash source, **then** it is saved and included in all totals and breakdowns.
@@ -477,6 +516,7 @@ Even as a personal app, this system holds a complete record of one individual's 
 | NFR-P2 | Cloud backup/sync (C16) is approved for v1, since the dataset is expected to stay small. It must be encrypted (NFR-S1/S5, AC-I2.1) and the user must be able to see/control what is backed up (US-F4). Categorization and parsing logic itself still runs on-device by default. |
 | NFR-P3 | If any part of *processing* (parsing, categorization) is ever proposed to run off-device — as opposed to encrypted backup storage, which is approved — it must be an explicit, opt-in, clearly-labelled choice, and must be listed here as a change. |
 | NFR-P4 | The app must not read, index, or retain SMS from non-financial senders beyond the momentary classification step needed to reject them. |
+| NFR-P4a **`[Addendum A — DRAFT]`** | **NFR-P4's discard behaviour is deliberately left unchanged by US-A6.** The unrecognized-sender list is derived in memory, on demand, from the SMS inbox the app already has permission to read, and is never persisted. Content from an unlinked sender may be shown only one sender at a time, only at the user's request, redaction-applied, and is never stored (AC-A6.2). Only a sender the user affirmatively links becomes persisted configuration (AC-A6.3); everything else leaves no trace (AC-A6.9). **A retained log of unmatched-sender messages was considered as the alternative "toehold" for the user to correct from, and rejected:** it would mean permanently accumulating metadata — and possibly content — about senders that are genuinely not financial (friends, delivery services, marketing), which is the exact harm NFR-P4 exists to prevent, in order to solve a problem an on-demand read of a store the app can already read solves for free. |
 | NFR-P5 | The user must be able to delete all stored data completely and verifiably (US-F3). |
 | NFR-P6 | The app must state, in-product, what is collected, where it is stored, and what leaves the device (US-F4). |
 | NFR-P7 | Data retention: SMS-derived records are retained until the user deletes them; the app must not retain data after a user-initiated erase (see OQ-8 for whether a retention period is desired for the audit trail). |
@@ -570,6 +610,14 @@ All items originally raised as Open Questions were answered by the human. Resolu
 - **Soft-delete / restore UX:** deciding to hide rather than hard-delete a transaction (OQ-8) implies a new capability — a "recently deleted / hidden" view with a restore action — that wasn't in the original story set. Added as US-B8 below.
 - **Auto-categorization confidence threshold:** OQ-14's qualitative answer ("clear names work immediately, the rest improves step by step") is enough to design against, but the exact numeric/behavioural threshold for the "needs review" flag (AC-C4.1) is still a phase-3/4 design decision, not a product decision.
 
+### Open questions raised by Addendum A (2026-07-30) — need a human decision
+
+| ID | Question | Why it is a genuine decision, not a detail |
+|---|---|---|
+| **OQ-21** | Should the unrecognized-sender check also appear as a **first-run onboarding step** (right after the initial import), or only on demand from Settings as AC-A6.1 specifies? | The live failure was a silent `0.00 SAR` on a fresh install: a first-run step would have caught it inside the first minute. The cost is one more screen in a first-run flow that is already seven screens long, shown at the moment the user has least reason to trust the app with a list of everyone who texts them. I have specified the on-demand path only, and I am not confident that is the right call. |
+| **OQ-22** | When a sender is linked but **nothing from it can be auto-parsed**, should the app say so explicitly per bank (e.g. "Jazira Bank: 12 messages, none could be read automatically"), or is landing them in the Needs Review queue enough? | This is the difference between the user understanding "this bank needs a parser update, expect to fill these in by hand for now" and the user silently doing manual data entry forever while assuming that is normal — which is the failure mode §1 says kills the product ("the user does not abandon the app because upkeep is too manual"). Architecture already has somewhere to put it (the Settings → Diagnostics parser-health panel, ADR-015), so the cost is low; the question is whether the app should confess this in the main flow instead. |
+| **OQ-23** | Sequencing against **KHA-128**: build US-A6 first (the user can self-serve all 5 missing banks immediately), or KHA-128's verified sender patterns first (the 7 known banks work out of the box, including on a clean install), or both — and in which order? | **Product-owner recommendation: KHA-128 first, US-A6 next.** KHA-128 is hours of verified data work and it fixes the number the user is looking at right now; US-A6 is a new screen plus a `/revise-design` round. They are complements, not substitutes — KHA-128 makes today right, US-A6 makes every future sender change the user's own thirty-second fix instead of an app release. Neither cancels the other. |
+
 ---
 
 ## 9. Traceability Summary
@@ -578,8 +626,8 @@ For downstream phases: every acceptance criterion is prefixed `AC-<story-id>.<n>
 
 | Epic | Stories | ACs | Status |
 |---|---|---|---|
-| A — SMS ingestion | US-A1..A5 | 19 | Resolved; more samples welcome but not blocking |
-| B — Banks, accounts, cards & transactions | US-B1..B15 | 46 | Resolved |
+| A — SMS ingestion | US-A1..A6 | 28 | US-A1..A5 resolved; **US-A6 is `[Addendum A — DRAFT]`** — 9 ACs, not authorised for build until the addendum is approved |
+| B — Banks, accounts, cards & transactions | US-B1..B16 | 48 | US-B1..B15 resolved; **US-B16 is `[Addendum A — DRAFT]`** — 2 ACs |
 | C — Categorization | US-C1..C5 | 15 | Resolved; default category list to be proposed in phase 3 |
 | D — Learning loop | US-D1..D5 | 14 | Resolved; confidence threshold is a phase-3/4 design decision |
 | E — Insight & reporting | US-E1..E5 | 14 | Resolved |
