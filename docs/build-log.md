@@ -734,3 +734,71 @@ Massrofy APK. See build-plan §7.3 row 5.
 **Deferred deliberately:** KHA-85 + KHA-108 + KHA-67 as one devops-engineer sweep after P4b.
 
 ---
+
+## 2026-07-29 — P4 exit → P5 entry (sixth supervision turn)
+
+**Supervisor:** manager (opus). **`main`:** `4177199`. **Open PRs: zero.**
+*First turn under `TIER: personal` — this entry is deliberately ~40 lines, not 300.*
+
+### Verified
+
+P4b merged (PR #34); KHA-32/33/34/97/106/107 all `Done`; `QA: PASS 34`. Follow-ups
+KHA-110/111 filed, both Low, neither blocking. P5 (KHA-35–41 + KHA-86) all `Backlog`.
+**KHA-36 is unblocked** — its blocker KHA-101 closed with PR #30.
+
+### Two corrections to the briefing I was given
+
+1. **KHA-67 is already `Done`** (2026-07-28 19:02). The "post-P4b devops sweep" was sized as
+   three items; it is **two** (KHA-108, KHA-85). Its own rationale — "three separate *opus*
+   devops dispatches is the wrong trade" — has also lapsed: commit `dc3f362` moved
+   devops-engineer to **sonnet**. Both premises of the deferral are gone.
+2. **Real-device verification is not zero.** KHA-71 and KHA-75 were both found *and* fixed
+   against a real Honor Magic V5, device-verified. The app lock gate has been passed on
+   hardware. The true gap is narrower and worth stating precisely: **no journey walk past
+   the lock**, which was impossible before PR #34 because nothing existed past
+   `HomePlaceholderScreen`.
+
+### Decisions
+
+**1. Do the devops sweep now — but not as a blocking phase.** KHA-108 has now cost two QA
+rounds (PR #28, #35 showed zero check runs). P5 is the largest QA surface in the build, so
+the cost recurs. KHA-85 is High and corrupts the tracker *silently* by closing future work.
+Two small sonnet items. It touches only `.github/workflows/ci.yml` — **zero file overlap
+with any P5 code**, so it runs in parallel and gates nothing.
+
+**2. Gate P5 entry on an emulator journey walk. Yes.** P4b is the first build a human can
+actually open, so the value of a runtime walk is at its maximum *now* and the cost is at its
+minimum. The pattern argues for it: every prior real-device session found a **new** first-run
+blocker. KHA-77 (a failing `unlockedDatabaseSessionProvider` leaves the app "unlocked" with
+no database and no error state) is open, Medium, and is exactly the shape a walk would expose.
+Building 8 more screens above an unwalked shell is how one shell defect becomes eight
+reworks.
+
+The apparent objection — R-17's re-key window — **does not apply**. An emulator AVD is
+disposable; the window is spent by an install whose data must be *preserved*. Constraint
+stated in the dispatch: emulator only, **not** a side-load onto the real phone with
+ingestion live. That remains KHA-53/P10's job.
+
+**3. Trimmed `docs/build-plan.md` 1,125 → ~150 lines (v2.0).** Chose to do it now rather
+than defer: every future supervision turn reads this file, it had diverged from reality
+repeatedly, and the P4/P5 boundary is the cheapest moment — nothing in flight referenced the
+cut sections. v1.6 is preserved in git (`137418c`). Kept a compressed §6 "live constraints"
+because R-17's expiry condition and KHA-7's status are operational knowledge, not ceremony.
+
+### Cost note
+
+| Agent | Tier | Ran |
+|---|---|---|
+| manager (this turn) | opus | Supervision only — ~10 Linear queries, ~4 GitHub queries, 2 doc writes. No code. |
+
+P4 total shape: P4a + P4a-1 + P4b = 3 code PRs, 3 QA passes, 3 review passes, all opus. The
+split-PR experiment holds up — P4a-1 absorbed eleven defects without re-opening P4a. Note
+for future economics: devops and frontend moved to **sonnet** in `dc3f362`, so infrastructure
+sweeps are now materially cheaper than when this one was deferred.
+
+### Next dispatch
+
+**qa-tester (opus) — emulator journey walk on `main` @ `4177199`**, using the local
+`massrofy_test` AVD. **In parallel: devops-engineer (sonnet) — KHA-108 + KHA-85.**
+
+---
