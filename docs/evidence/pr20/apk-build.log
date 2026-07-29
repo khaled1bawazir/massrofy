@@ -1,0 +1,8 @@
+If you don't see a plugins block, your project was likely created with an older template version, in which case it is most likely defined in the top-level build.gradle file (C:\Users\aasb2\OneDrive\Desktop\Massrofy\.claude\worktrees\agent-a2d0869a6077f979f\android/build.gradle) by the ext.kotlin_version property.
+
+warning: [options] source value 8 is obsolete and will be removed in a future release
+warning: [options] target value 8 is obsolete and will be removed in a future release
+warning: [options] To suppress warnings about obsolete options, use -Xlint:-options.
+3 warnings
+Running Gradle task 'assembleDebug'...                             70.4s
+✓ Built build\app\outputs\flutter-apk\app-debug.apk
