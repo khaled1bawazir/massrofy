@@ -10,9 +10,73 @@ import 'audit_log_dao.dart';
 import 'user_edited_fields.dart';
 
 export '../../core/types/edited.dart' show Edited;
-export 'user_edited_fields.dart' show TransactionField, decodeUserEditedFields;
+export 'user_edited_fields.dart'
+    show TransactionField, decodeUserEditedFields, encodeUserEditedFields;
 
 part 'transaction_dao.g.dart';
+
+/// One stored ADR-002 money triple, carried **verbatim** between two rows.
+///
+/// ## Why a triple of raw column values and not a `Money`
+///
+/// KHA-87's fix has to move an absorbed row's fee (or converted amount) onto
+/// the survivor without changing it. Parsing the stored text into a [Money]
+/// and re-serialising it would be a round trip through two conversions that
+/// can *fail* (`Money.tryParse` returns null on anything it does not like) and
+/// that recomputes `..._minor` — the non-authoritative indexing column ADR-002
+/// says is never the source of truth. A byte-for-byte copy of the three
+/// columns cannot lose a fraction, cannot fail, and cannot disagree with what
+/// the original write path stored.
+///
+/// There is deliberately no `double`/`num` anywhere in this type. The
+/// authoritative value is [amount], an exact decimal **string**.
+final class MoneyColumns {
+  /// The authoritative exact decimal string, e.g. `'9.2'`.
+  final String amount;
+
+  /// ISO-ish currency code as stored, e.g. `'SAR'`.
+  final String currency;
+
+  /// The non-authoritative minor-unit column, copied as-is (may be null on a
+  /// row written before the exponent for its currency was known).
+  final int? minor;
+
+  const MoneyColumns({
+    required this.amount,
+    required this.currency,
+    this.minor,
+  });
+
+  /// Reads the triple off a row, or null when the row holds no such amount.
+  ///
+  /// Both text columns must be present: half a money triple is not a value,
+  /// and treating it as one is how a currency-less number reaches a total.
+  static MoneyColumns? read(String? amount, String? currency, int? minor) {
+    if (amount == null || currency == null) {
+      return null;
+    }
+    return MoneyColumns(amount: amount, currency: currency, minor: minor);
+  }
+
+  /// Value equality on the **authoritative** pair only. Two rows written by
+  /// this app for the same amount hold byte-identical text (the same reasoning
+  /// `MergePlan.between` already applies to `amount_amount`), and `minor` is
+  /// derived, so letting it participate would make a merge refuse on a
+  /// difference that carries no information.
+  @override
+  bool operator ==(Object other) =>
+      other is MoneyColumns &&
+      other.amount == amount &&
+      other.currency == currency;
+
+  @override
+  int get hashCode => Object.hash(amount, currency);
+
+  /// NFR-S4: an amount is not personal data, but keep the habit of terse
+  /// diagnostics anyway.
+  @override
+  String toString() => 'MoneyColumns($amount $currency)';
+}
 
 /// The fields a merge will copy onto the surviving transaction.
 ///
@@ -24,6 +88,22 @@ part 'transaction_dao.g.dart';
 /// information that was missing. Letting it write null would let it delete
 /// information, which is the R-8 failure mode wearing a different hat.
 ///
+/// ## KHA-87 — the money-bearing fields are here now
+///
+/// P3b-2 shipped this type carrying five descriptive fields only. QA (D-QA-5 /
+/// D-QA-6) demonstrated the consequence by execution: the absorbed row is
+/// soft-deleted *whole*, so its FX fee and its bank-supplied converted amount
+/// left the ledger with it and a reported figure — `report.fees.base`,
+/// `report.spend.base` — silently went from a real number to null. That is
+/// KHA-74's failure mode (money absent from a total with no signal) arriving
+/// through a new write path.
+///
+/// So the money columns now travel under the **same** gap-fill rule as the
+/// descriptive ones: copied only when the survivor has nothing there, never
+/// overwriting. Where both rows hold a value and the values disagree,
+/// `MergePlan.between` refuses the pair outright rather than picking a winner
+/// — see `MergeRefusal` in `lib/features/ledger/transaction_merge.dart`.
+///
 /// Built by `MergePlan.between` in
 /// `lib/features/ledger/transaction_merge.dart`, which is where the policy
 /// (and its tests) live.
@@ -34,12 +114,73 @@ final class MergeEnrichment {
   final DateTime? occurredAt;
   final int? instrumentId;
 
+  // --- KHA-87: the money-bearing columns -----------------------------------
+
+  /// PRD §3.4's separately-reported FX/international fee.
+  final MoneyColumns? feeAmount;
+
+  /// ADR-009's bank-supplied conversion into the base currency.
+  final MoneyColumns? convertedAmount;
+
+  /// Informational only; never summed (see the column's own doc comment).
+  final MoneyColumns? remainingBalance;
+
+  /// The FX rate as an exact decimal **string** (ADR-002: a rate is not a
+  /// float and not a `Money`).
+  final String? fxRate;
+  final DateTime? fxRateDate;
+  final String? fxRateSource;
+
+  /// ADR-009 case 4. **The one field here that is not a gap-fill**: it is
+  /// derived state ("this row has no conversion at all"), so when a merge
+  /// hands the survivor a conversion it must also stop claiming the survivor
+  /// is waiting for one. `MergePlan.between` sets this to `false` in exactly
+  /// that case and leaves it null otherwise.
+  final bool? conversionPending;
+
+  // --- AC-B11.2: the user's internal-transfer verdict ----------------------
+
+  /// A decision the **user** recorded (`internal` | `candidate` | `external`),
+  /// carried with its group id or not at all.
+  ///
+  /// Not money, but it decides whether money counts: an `internal` leg is out
+  /// of spend and an `external` one is in it, and a stored verdict outranks
+  /// anything the read-time detector would derive. Leaving it on a
+  /// soft-deleted row would make the user's answer silently stop applying and
+  /// move the spend figure — in *either* direction, so there is no "safe" way
+  /// to drop it. A disagreement between the two rows is refused
+  /// (`MergeRefusal.spendEffectDiffers`) rather than resolved here.
+  final String? internalTransferState;
+  final String? internalTransferGroupId;
+
+  // --- KHA-89 / D-QA-11: protection travels with the value -----------------
+
+  /// Field names (from [TransactionField]) whose value is being copied from
+  /// the absorbed row **and was user-edited there**.
+  ///
+  /// Without this, a merge copies a person's correction onto the survivor and
+  /// the survivor records it as parser output, so the next automated writer
+  /// (another merge, a re-scan, P7's statement import) is free to overwrite
+  /// it. AC-B5.3 is *"user intent outranks the parser, always"*, and intent
+  /// that silently loses its protection in transit does not outrank anything.
+  final Set<String> protectedFields;
+
   const MergeEnrichment({
     this.merchantRawText,
     this.referenceNumber,
     this.counterpartyName,
     this.occurredAt,
     this.instrumentId,
+    this.feeAmount,
+    this.convertedAmount,
+    this.remainingBalance,
+    this.fxRate,
+    this.fxRateDate,
+    this.fxRateSource,
+    this.conversionPending,
+    this.internalTransferState,
+    this.internalTransferGroupId,
+    this.protectedFields = const <String>{},
   });
 
   /// Nothing to copy — the survivor already knew everything the other row did.
@@ -53,11 +194,30 @@ final class MergeEnrichment {
       referenceNumber == null &&
       counterpartyName == null &&
       occurredAt == null &&
-      instrumentId == null;
+      instrumentId == null &&
+      feeAmount == null &&
+      convertedAmount == null &&
+      remainingBalance == null &&
+      fxRate == null &&
+      fxRateDate == null &&
+      fxRateSource == null &&
+      conversionPending == null &&
+      internalTransferState == null &&
+      internalTransferGroupId == null &&
+      protectedFields.isEmpty;
+
+  /// True when this merge moves a **reported money figure** onto the survivor.
+  ///
+  /// Separate from [isEmpty] so a caller (and a test) can distinguish "the
+  /// survivor gained a merchant name" from "the survivor gained the fee that
+  /// would otherwise have left the ledger". `remainingBalance` is excluded
+  /// deliberately: it enters no total.
+  bool get carriesMoney =>
+      feeAmount != null || convertedAmount != null || fxRate != null;
 
   /// No merchant, no counterparty (NFR-S4).
   @override
-  String toString() => 'MergeEnrichment(empty: $isEmpty)';
+  String toString() => 'MergeEnrichment(empty: $isEmpty, money: $carriesMoney)';
 }
 
 /// A P1-minimal ledger DAO — see `lib/data/db/tables/transaction_table.dart`
@@ -260,6 +420,29 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
   /// (NFR-A2) instead of the previously hard-coded `from: 'true'` — which was
   /// a *claim* about the prior state rather than an observation of it, and
   /// would have been a lie for any row that was not actually deleted.
+  ///
+  /// ## KHA-88 / D-QA-8 — undoing a merge touches a **second** row
+  ///
+  /// Restoring a row that was merged away is how a user undoes a merge, so
+  /// this method also has to unpick the survivor's half of the link. P3b-2
+  /// wrote that as an unconditional clear, which was correct only for a
+  /// survivor that had ever absorbed exactly one row. QA reproduced both
+  /// consequences:
+  ///
+  ///  1. **It cleared a pointer that named a different row.** With two merges
+  ///     into one survivor, undoing the *first* nulled the survivor's pointer
+  ///     to the *second*. The two halves of the link then contradicted each
+  ///     other and nothing in the app could detect it. The clear is now
+  ///     guarded by an identity check: the survivor's
+  ///     `merged_from_transaction_id` is cleared **only when it names the row
+  ///     being restored**.
+  ///  2. **It wrote to the survivor and audited nothing against it.** NFR-A2
+  ///     is *"every mutation writes an append-only audit entry"*, and
+  ///     `transaction_merge.dart` says in its own words that *"an undo that
+  ///     left no trace would be its own audit failure"* — which was true of
+  ///     the absorbed row only. The survivor now gets its own `merge_undo`
+  ///     entry, appended **inside this same `transaction()` block** as the
+  ///     write it describes, so the row and its history cannot drift apart.
   Future<void> restore({
     required int id,
     required String actor,
@@ -308,18 +491,63 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
       );
 
       if (existing.mergedIntoId != null) {
+        final int survivorId = existing.mergedIntoId!;
+
+        // The restored row stops claiming it was absorbed. Unconditional, and
+        // safely so: this pointer is on the row being restored, so it cannot
+        // name anybody else's merge.
         await (update(
           transactions,
         )..where((Transactions t) => t.id.equals(id))).write(
           const TransactionsCompanion(mergedIntoId: Value<int?>(null)),
         );
-        await (update(transactions)
-              ..where((Transactions t) => t.id.equals(existing.mergedIntoId!)))
-            .write(
-              const TransactionsCompanion(
-                mergedFromTransactionId: Value<int?>(null),
+
+        // The survivor's half, guarded. `getSingleOrNull` rather than
+        // `getSingle` because a dangling id is data we should not crash on:
+        // the undo of *this* row's merge must still complete.
+        final TransactionRow? survivor =
+            await (select(transactions)
+                  ..where((Transactions t) => t.id.equals(survivorId)))
+                .getSingleOrNull();
+
+        // **The identity check (D-QA-8).** Clear the survivor's pointer only
+        // when it actually names the row being restored. If the survivor has
+        // since absorbed a different duplicate, that later merge is none of
+        // this undo's business and its link stays intact.
+        if (survivor != null && survivor.mergedFromTransactionId == id) {
+          await (update(
+            transactions,
+          )..where((Transactions t) => t.id.equals(survivorId))).write(
+            TransactionsCompanion(
+              mergedFromTransactionId: const Value<int?>(null),
+              updatedAt: Value<DateTime>(timestamp),
+            ),
+          );
+
+          // NFR-A2: the survivor row was mutated, so the survivor's own
+          // history records it. Without this the change history reads
+          // "created, merged" with no reversal, and US-F5 shows a merge that
+          // was undone as though it still stands.
+          //
+          // A distinct action name (`merge_undo`, not `restore`) because this
+          // entry is about a row that was never deleted and is not being
+          // restored — it is the survivor losing an absorbed duplicate.
+          await auditLogDao.append(
+            entityType: 'transaction',
+            entityId: survivorId.toString(),
+            action: 'merge_undo',
+            actor: actor,
+            actorDetail: actorDetail ?? 'duplicate_merge_undo_survivor',
+            changedAt: timestamp,
+            fieldChanges: <AuditFieldChange>[
+              AuditFieldChange(
+                field: 'mergedFromTransactionId',
+                from: id.toString(),
+                to: null,
               ),
-            );
+            ],
+          );
+        }
       }
     });
   }
@@ -1006,11 +1234,23 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
   /// Both audit entries are written inside this one `transaction()` block, so
   /// the merge is atomic across both rows and their history (KHA-64: *"a merge
   /// that loses the merged-away side's history is a defect"*).
+  ///
+  /// ## O-QA-5 — [actor] is required, with no default
+  ///
+  /// This method is public, and until KHA-90 it defaulted `actor` to `'user'`.
+  /// A future background caller could therefore have merged two rows and
+  /// written an audit entry claiming a *person* did it, by omitting one named
+  /// argument. NFR-A2's whole point is telling "the user did this" apart from
+  /// "a rule did this", and an audit trail that can be wrong about which is
+  /// worse than one that is merely incomplete. Making it required costs one
+  /// argument at the single existing call site and forces any future
+  /// non-user caller to say so out loud, in the same place a reviewer is
+  /// already looking.
   Future<void> mergeDuplicatePair({
     required int survivorId,
     required int mergedAwayId,
     required MergeEnrichment enrichment,
-    String actor = 'user',
+    required String actor,
     String? actorDetail,
     DateTime? now,
   }) {
@@ -1022,6 +1262,30 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
       final TransactionRow mergedAway = await (select(
         transactions,
       )..where((Transactions t) => t.id.equals(mergedAwayId))).getSingle();
+
+      // --- 0. Does the survivor's protected set change? --------------------
+      //
+      // D-QA-11: a value the merge copies from the absorbed row was, on that
+      // row, a *user correction*. It has to arrive on the survivor still
+      // marked as one, or the survivor holds a user-authored value the app
+      // believes came from the parser and the next automated writer is free
+      // to overwrite it. Computed here (rather than in `MergePlan`) because
+      // it is a union with what the survivor already had, which only the row
+      // read a line above knows.
+      //
+      // `null` means "no change", which keeps it consistent with every other
+      // enrichment field on this method: null is always "leave it alone".
+      final Set<String> survivorProtected = decodeUserEditedFields(
+        survivor.userEditedFields,
+      );
+      final Set<String> unionProtected = <String>{
+        ...survivorProtected,
+        ...enrichment.protectedFields,
+      };
+      final String? mergedProtectedFields =
+          unionProtected.length == survivorProtected.length
+          ? null
+          : encodeUserEditedFields(unionProtected);
 
       // --- 1. The survivor absorbs whatever it was missing -----------------
       final List<AuditFieldChange> survivorChanges = <AuditFieldChange>[
@@ -1060,6 +1324,72 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
             from: survivor.instrumentId?.toString(),
             to: enrichment.instrumentId.toString(),
           ),
+        // --- KHA-87: the money the survivor is absorbing -------------------
+        //
+        // Recorded field by field so US-F5 can answer "why did this
+        // transaction's fee appear out of nowhere?" with "the merge on the
+        // 29th carried it from the other alert" rather than with silence.
+        if (enrichment.feeAmount != null)
+          AuditFieldChange(
+            field: 'feeAmount',
+            from: survivor.feeAmountAmount,
+            to: enrichment.feeAmount!.amount,
+          ),
+        if (enrichment.convertedAmount != null)
+          AuditFieldChange(
+            field: 'convertedAmount',
+            from: survivor.convertedAmountAmount,
+            to: enrichment.convertedAmount!.amount,
+          ),
+        if (enrichment.remainingBalance != null)
+          AuditFieldChange(
+            field: 'remainingBalance',
+            from: survivor.remainingBalanceAmount,
+            to: enrichment.remainingBalance!.amount,
+          ),
+        if (enrichment.fxRate != null)
+          AuditFieldChange(
+            field: 'fxRate',
+            from: survivor.fxRate,
+            to: enrichment.fxRate,
+          ),
+        if (enrichment.fxRateDate != null)
+          AuditFieldChange(
+            field: 'fxRateDate',
+            from: survivor.fxRateDate?.toUtc().toIso8601String(),
+            to: enrichment.fxRateDate!.toUtc().toIso8601String(),
+          ),
+        if (enrichment.fxRateSource != null)
+          AuditFieldChange(
+            field: 'fxRateSource',
+            from: survivor.fxRateSource,
+            to: enrichment.fxRateSource,
+          ),
+        if (enrichment.conversionPending != null)
+          AuditFieldChange(
+            field: 'conversionPending',
+            from: survivor.conversionPending.toString(),
+            to: enrichment.conversionPending.toString(),
+          ),
+        if (enrichment.internalTransferState != null)
+          AuditFieldChange(
+            field: 'internalTransferState',
+            from: survivor.internalTransferState,
+            to: enrichment.internalTransferState,
+          ),
+        if (enrichment.internalTransferGroupId != null)
+          AuditFieldChange(
+            field: 'internalTransferGroupId',
+            from: survivor.internalTransferGroupId,
+            to: enrichment.internalTransferGroupId,
+          ),
+        // --- KHA-89 / D-QA-11: the protection travelling with the value ----
+        if (mergedProtectedFields != null)
+          AuditFieldChange(
+            field: 'userEditedFields',
+            from: survivor.userEditedFields,
+            to: mergedProtectedFields,
+          ),
       ];
 
       await (update(
@@ -1081,6 +1411,59 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
           instrumentId: enrichment.instrumentId == null
               ? const Value<int?>.absent()
               : Value<int?>(enrichment.instrumentId),
+          // KHA-87. Each money triple is written whole or not at all —
+          // `Value.absent()` on every one of its three columns — so a survivor
+          // can never end up holding an amount without its currency.
+          feeAmountAmount: enrichment.feeAmount == null
+              ? const Value<String?>.absent()
+              : Value<String?>(enrichment.feeAmount!.amount),
+          feeAmountCurrency: enrichment.feeAmount == null
+              ? const Value<String?>.absent()
+              : Value<String?>(enrichment.feeAmount!.currency),
+          feeAmountMinor: enrichment.feeAmount == null
+              ? const Value<int?>.absent()
+              : Value<int?>(enrichment.feeAmount!.minor),
+          convertedAmountAmount: enrichment.convertedAmount == null
+              ? const Value<String?>.absent()
+              : Value<String?>(enrichment.convertedAmount!.amount),
+          convertedAmountCurrency: enrichment.convertedAmount == null
+              ? const Value<String?>.absent()
+              : Value<String?>(enrichment.convertedAmount!.currency),
+          convertedAmountMinor: enrichment.convertedAmount == null
+              ? const Value<int?>.absent()
+              : Value<int?>(enrichment.convertedAmount!.minor),
+          remainingBalanceAmount: enrichment.remainingBalance == null
+              ? const Value<String?>.absent()
+              : Value<String?>(enrichment.remainingBalance!.amount),
+          remainingBalanceCurrency: enrichment.remainingBalance == null
+              ? const Value<String?>.absent()
+              : Value<String?>(enrichment.remainingBalance!.currency),
+          remainingBalanceMinor: enrichment.remainingBalance == null
+              ? const Value<int?>.absent()
+              : Value<int?>(enrichment.remainingBalance!.minor),
+          fxRate: enrichment.fxRate == null
+              ? const Value<String?>.absent()
+              : Value<String?>(enrichment.fxRate),
+          fxRateDate: enrichment.fxRateDate == null
+              ? const Value<DateTime?>.absent()
+              : Value<DateTime?>(enrichment.fxRateDate),
+          fxRateSource: enrichment.fxRateSource == null
+              ? const Value<String?>.absent()
+              : Value<String?>(enrichment.fxRateSource),
+          conversionPending: enrichment.conversionPending == null
+              ? const Value<bool>.absent()
+              : Value<bool>(enrichment.conversionPending!),
+          internalTransferState: enrichment.internalTransferState == null
+              ? const Value<String?>.absent()
+              : Value<String?>(enrichment.internalTransferState),
+          internalTransferGroupId: enrichment.internalTransferGroupId == null
+              ? const Value<String?>.absent()
+              : Value<String?>(enrichment.internalTransferGroupId),
+          // D-QA-11. `absent()` when nothing new is protected, so a merge that
+          // copies only parser output leaves the column exactly as it was.
+          userEditedFields: mergedProtectedFields == null
+              ? const Value<String?>.absent()
+              : Value<String?>(mergedProtectedFields),
           mergedFromTransactionId: Value<int?>(mergedAwayId),
           // The pair has been resolved by the user, so the duplicate flag that
           // asked them to resolve it comes off.

@@ -3,8 +3,25 @@
 /// Written by qa-tester against head `61efd7b`, 2026-07-29. These are *attack*
 /// tests, not coverage tests: each one tries to make the code do something the
 /// PR body claims is structurally impossible. A probe that **passes** is
-/// evidence the claim holds; a probe marked `DEFECT` documents an executed
-/// reproduction of behaviour that contradicts a stated property.
+/// evidence the claim holds; a probe marked `DEFECT` documented an executed
+/// reproduction of behaviour that contradicted a stated property.
+///
+/// ---
+///
+/// ## P3b-3 (KHA-87 / KHA-88 / KHA-89 / KHA-90) — the DEFECT probes are
+/// INVERTED, not deleted
+///
+/// Every probe that asserted a defect now asserts the fix, in place, keeping
+/// the original scenario and the original comment about what used to happen.
+/// That is the pattern `docs/lessons.md` records from KHA-79: a QA probe is
+/// written to fail loudly the moment someone reverts a fix, and deleting it
+/// converts "we fixed this" into "we removed the evidence". Each inverted
+/// assertion is marked `INVERTED (was: ...)` so a reader can see both states.
+///
+/// Two probes were **not** inverted because the finding was resolved as a
+/// deliberate decision rather than a code change — B2 (D-QA-7), F6 (D-QA-12)
+/// and G2 (O-QA-7). Those keep asserting the behaviour, retitled, and now pin
+/// the decision so it cannot drift back by accident.
 ///
 /// The scrutiny is deliberately lopsided toward `transaction_merge.dart` /
 /// `TransactionDao.mergeDuplicatePair`, because `docs/build-plan.md` names it
@@ -111,8 +128,8 @@ void main() {
   // =========================================================================
   group('PROBE A — money that leaves the ledger through the merge', () {
     test(
-      'A1 DEFECT — the absorbed row\'s FX fee vanishes from the fee total; '
-      'MergeEnrichment has no fee field so it cannot be carried across',
+      'A1 FIXED (KHA-87) — the absorbed row\'s FX fee is carried onto the '
+      'survivor, so the fee total is unchanged by resolving a duplicate',
       () async {
         // Two alerts for one international purchase. The terser one (the
         // survivor, chosen because it is older — which is exactly what the
@@ -140,90 +157,139 @@ void main() {
         expect(result, isA<MergeCompleted>());
 
         final PeriodReport after = await reportNow();
-        // EXPECTED (per "a merge is structurally incapable of deleting
-        // information"): the 9.20 fee is still reported somewhere.
-        // ACTUAL: it is gone. The fee's only carrier was soft-deleted and
-        // MergeEnrichment has no `feeAmount` field to move it onto the
-        // survivor. No error, no flag, no count — the KHA-74 failure mode
-        // (money silently absent from a total) reintroduced via the merge path.
+        // INVERTED (was: `after.fees.base` is null). Resolving a duplicate does
+        // not change what the bank charged. `MergeEnrichment` carries the fee
+        // triple now, under the same gap-fill rule as the descriptive fields.
         expect(
-          after.fees.base,
-          isNull,
+          after.fees.base!.toCanonicalString(),
+          '9.2',
           reason:
-              'DEFECT: the fee total dropped from 9.20 SAR to nothing because '
-              'the merge soft-deleted the only row carrying the fee and cannot '
-              'copy it to the survivor',
+              'the fee survives the merge — this assertion is the KHA-87 '
+              'regression guard: if it ever reads null again, the money '
+              'columns have fallen out of MergePlan/MergeEnrichment',
         );
-        // And the survivor demonstrably did not absorb it:
-        expect((await dao.byId(survivor)).feeAmountAmount, isNull);
-        // The absorbed row still holds it — nothing was destroyed, which is the
-        // R-8 property holding — but nothing surfaces it either.
+        // The survivor absorbed it, whole triple, byte-for-byte.
+        final TransactionRow kept = await dao.byId(survivor);
+        expect(kept.feeAmountAmount, '9.2');
+        expect(kept.feeAmountCurrency, 'SAR');
+        // The absorbed row still holds its own copy — nothing was destroyed,
+        // which is the R-8 property holding as it always did.
         expect((await dao.byId(fuller)).feeAmountAmount, '9.2');
       },
     );
 
-    test('A2 DEFECT — merging a converted foreign purchase into an '
-        'unconverted duplicate silently DROPS it out of the base-currency '
-        'spend total', () async {
-      // The classic D2 shape for a foreign card purchase: the first alert is
-      // the terse "purchase of USD 40.00" with no conversion yet
-      // (conversionPending), the second carries the settled SAR figure.
-      // The review inbox defaults the OLDER row as survivor.
-      final int survivorUnconverted = await sms(
+    test('A1b (KHA-87) — two rows that state DIFFERENT fees are refused '
+        'rather than merged: a disagreement about money is a question for '
+        'the user', () async {
+      final int a = await sms(
         messageId: 1,
-        amount: '40.00',
-        currency: 'USD',
+        fee: Money.parse('9.20', currency: 'SAR'),
       );
-      final int laterConverted = await sms(
+      final int b = await sms(
         messageId: 2,
+        fee: Money.parse('5.00', currency: 'SAR'),
+      );
+
+      final MergeResult result = await merge.merge(
+        survivorId: a,
+        mergedAwayId: b,
+        confirmedByUser: true,
+      );
+      expect((result as MergeRejected).reason, MergeRefusal.feeDiffers);
+      // A refusal is not a mutation.
+      expect((await dao.byId(b)).isDeleted, isFalse);
+      expect((await reportNow()).fees.base!.toCanonicalString(), '14.2');
+    });
+
+    test(
+      'A2 FIXED (KHA-87) — merging a converted foreign purchase into an '
+      'unconverted duplicate keeps it in the base-currency spend total',
+      () async {
+        // The classic D2 shape for a foreign card purchase: the first alert is
+        // the terse "purchase of USD 40.00" with no conversion yet
+        // (conversionPending), the second carries the settled SAR figure.
+        // The review inbox defaults the OLDER row as survivor.
+        final int survivorUnconverted = await sms(
+          messageId: 1,
+          amount: '40.00',
+          currency: 'USD',
+        );
+        final int laterConverted = await sms(
+          messageId: 2,
+          amount: '40.00',
+          currency: 'USD',
+          converted: Money.parse('150.00', currency: 'SAR'),
+        );
+
+        final PeriodReport before = await reportNow();
+        expect(
+          before.spend.base!.toCanonicalString(),
+          '150',
+          reason:
+              'one of the two rows converts, so 150 SAR reaches the base '
+              'total (the other is reported as unconverted)',
+        );
+        expect(before.spend.unconverted, isNotEmpty);
+
+        expect(
+          (await merge.merge(
+            survivorId: survivorUnconverted,
+            mergedAwayId: laterConverted,
+            confirmedByUser: true,
+          )),
+          isA<MergeCompleted>(),
+        );
+
+        final PeriodReport after = await reportNow();
+        // INVERTED (was: `after.spend.base` is null). The survivor absorbs the
+        // conversion the other alert carried, so one movement remains and it
+        // still reaches the headline SAR figure.
+        expect(
+          after.spend.base!.toCanonicalString(),
+          '150',
+          reason:
+              'the convertible figure moved to the survivor rather than being '
+              'soft-deleted with the row that held it',
+        );
+        expect(
+          (await dao.byId(survivorUnconverted)).convertedAmountAmount,
+          '150',
+        );
+        expect(
+          (await dao.byId(survivorUnconverted)).convertedAmountCurrency,
+          'SAR',
+        );
+        // And nothing is left on the "we could not convert this" line, because
+        // there is nothing left unconverted.
+        expect(after.spend.unconverted, isEmpty);
+      },
+    );
+
+    test('A2b (KHA-87) — two rows stating DIFFERENT converted amounts are '
+        'refused', () async {
+      final int a = await sms(
+        messageId: 1,
         amount: '40.00',
         currency: 'USD',
         converted: Money.parse('150.00', currency: 'SAR'),
       );
-
-      final PeriodReport before = await reportNow();
-      expect(
-        before.spend.base!.toCanonicalString(),
-        '150',
-        reason:
-            'one of the two rows converts, so 150 SAR reaches the base '
-            'total (the other is reported as unconverted)',
+      final int b = await sms(
+        messageId: 2,
+        amount: '40.00',
+        currency: 'USD',
+        converted: Money.parse('151.20', currency: 'SAR'),
       );
-      expect(before.spend.unconverted, isNotEmpty);
-
-      expect(
-        (await merge.merge(
-          survivorId: survivorUnconverted,
-          mergedAwayId: laterConverted,
-          confirmedByUser: true,
-        )),
-        isA<MergeCompleted>(),
+      final MergeResult result = await merge.merge(
+        survivorId: a,
+        mergedAwayId: b,
+        confirmedByUser: true,
       );
-
-      final PeriodReport after = await reportNow();
-      // EXPECTED: after resolving a duplicate, the base spend figure should be
-      // 150 SAR — one movement, converted.
-      // ACTUAL: the base figure is null. MergePlan compared only
-      // amount/currency/direction/type; it never looked at
-      // convertedAmount/fxRate, and MergeEnrichment has no field for either.
-      // The row that COULD be converted was soft-deleted; the survivor cannot
-      // be. The headline SAR total lost 150 SAR to a "safe" operation.
-      expect(
-        after.spend.base,
-        isNull,
-        reason:
-            'DEFECT: base-currency spend went from 150 SAR to nothing. The '
-            'merge chose the row that cannot be converted and discarded the '
-            'one that could.',
-      );
-      expect(
-        (await dao.byId(survivorUnconverted)).convertedAmountAmount,
-        isNull,
-      );
+      expect((result as MergeRejected).reason, MergeRefusal.conversionDiffers);
+      expect((await dao.byId(b)).isDeleted, isFalse);
     });
 
-    test('A3 — the native-currency figure is NOT lost by A2 (the damage is '
-        'bounded to the base-currency view)', () async {
+    test('A3 — the native-currency figure is intact after the A2 merge, and '
+        'now so is the base one', () async {
       final int a = await sms(messageId: 1, amount: '40.00', currency: 'USD');
       final int b = await sms(
         messageId: 2,
@@ -234,21 +300,21 @@ void main() {
       await merge.merge(survivorId: a, mergedAwayId: b, confirmedByUser: true);
 
       final PeriodReport after = await reportNow();
-      // The USD movement itself is intact and visible — this is what stops
-      // A2 being a total money-vanishing bug rather than a total-integrity
-      // one. The user can still see "40.00 USD"; what they lose is its
-      // contribution to the SAR headline, and they are told via
-      // `unconverted`.
+      // The USD movement itself is intact and visible, as it always was.
       expect(after.spend.byCurrency.single.currencyCode, 'USD');
       expect(after.spend.byCurrency.single.net.toCanonicalString(), '40');
-      expect(after.spend.unconverted, isNotEmpty);
+      // INVERTED (was: `unconverted` is not empty). The survivor can convert
+      // now, so the "N transactions not converted" line has nothing to say.
+      expect(after.spend.unconverted, isEmpty);
+      expect(after.spend.base!.toCanonicalString(), '150');
     });
 
-    test('A4 — MergePlan does not compare fee or converted amount, which is '
-        'the root cause of A1/A2', () async {
-      // Pinning the root cause directly so a fix can be verified here: two
-      // rows that differ ONLY in their money-adjacent columns are considered
-      // mergeable.
+    test('A4 FIXED (the root cause of A1/A2) — MergePlan compares AND carries '
+        'the money-adjacent columns', () async {
+      // The root-cause probe, inverted. Two rows differing ONLY in their
+      // money-adjacent columns, with the survivor holding none of them: the
+      // merge is still allowed (these are one movement) but the enrichment is
+      // no longer empty — it now moves every one of those figures across.
       final int a = await sms(messageId: 1, amount: '152.75');
       final int b = await sms(
         messageId: 2,
@@ -261,19 +327,216 @@ void main() {
         survivor: await dao.byId(a),
         mergedAway: await dao.byId(b),
       );
+      expect(assessment, isA<MergeAllowed>());
+      final MergeEnrichment enrichment =
+          (assessment as MergeAllowed).enrichment;
       expect(
-        assessment,
-        isA<MergeAllowed>(),
+        enrichment.isEmpty,
+        isFalse,
         reason:
-            'DEFECT root cause: the refusal guard covers amount, currency, '
-            'direction and type only. Fee and converted amount are neither '
-            'compared nor carried.',
+            'INVERTED: the enrichment used to have nothing to say about fee, '
+            'converted amount or rate. It carries all three now.',
+      );
+      expect(enrichment.carriesMoney, isTrue);
+      expect(enrichment.feeAmount!.amount, '9.2');
+      expect(enrichment.feeAmount!.currency, 'SAR');
+      expect(enrichment.convertedAmount!.amount, '152.75');
+      expect(enrichment.fxRate, '1.0');
+    });
+
+    test('A5 (KHA-87) — the enrichment never OVERWRITES a money column: a '
+        'survivor that already states a fee keeps its own', () async {
+      // The other half of the rule. Same fee on both rows is not a
+      // disagreement, so the merge proceeds — and writes nothing, because
+      // there is no gap to fill.
+      final int a = await sms(
+        messageId: 1,
+        fee: Money.parse('9.20', currency: 'SAR'),
+      );
+      final int b = await sms(
+        messageId: 2,
+        fee: Money.parse('9.20', currency: 'SAR'),
+      );
+      final MergeAssessment assessment = MergePlan.between(
+        survivor: await dao.byId(a),
+        mergedAway: await dao.byId(b),
+      );
+      expect((assessment as MergeAllowed).enrichment.feeAmount, isNull);
+
+      await merge.merge(survivorId: a, mergedAwayId: b, confirmedByUser: true);
+      expect((await dao.byId(a)).feeAmountAmount, '9.2');
+      // One movement, one fee. Not two.
+      expect((await reportNow()).fees.base!.toCanonicalString(), '9.2');
+    });
+
+    test('A6 (KHA-87) — the same magnitude in a DIFFERENT currency is a '
+        'disagreement, not a match: `Money`-style currency comparison holds '
+        'for the fee too', () async {
+      final int a = await sms(
+        messageId: 1,
+        fee: Money.parse('9.20', currency: 'SAR'),
+      );
+      final int b = await sms(
+        messageId: 2,
+        fee: Money.parse('9.20', currency: 'USD'),
+      );
+      final MergeAssessment assessment = MergePlan.between(
+        survivor: await dao.byId(a),
+        mergedAway: await dao.byId(b),
       );
       expect(
-        (assessment as MergeAllowed).enrichment.isEmpty,
-        isTrue,
-        reason: 'and the enrichment has nothing to say about either',
+        (assessment as MergeRefused).reason,
+        MergeRefusal.feeDiffers,
+        reason: '9.20 SAR is not 9.20 USD, and never silently matches it',
       );
+    });
+
+    test('A7 (KHA-87) — a survivor waiting for a conversion stops waiting '
+        'once a merge hands it one (ADR-009 case 4)', () async {
+      // `conversionPending` is derived state, not an observation, so it is
+      // recomputed rather than gap-filled. A survivor that gains a converted
+      // amount must stop claiming it is still pending, or the "not converted"
+      // line keeps counting a row that now converts.
+      final int pending = await dao.insertFromParsedSms(
+        amount: Money.parse('40.00', currency: 'USD'),
+        conversionPending: true,
+        occurredAt: DateTime.utc(2026, 7, 15, 10),
+        direction: 'debit',
+        transactionType: TransactionType.posPurchase,
+        affectsSpend: true,
+        sourceMessageId: 1,
+        rulePackId: 'sa-core',
+        rulePackVersion: '2026.07.28',
+        ruleId: 'baj-pos-purchase-ar',
+      );
+      final int settled = await sms(
+        messageId: 2,
+        amount: '40.00',
+        currency: 'USD',
+        converted: Money.parse('150.00', currency: 'SAR'),
+      );
+
+      expect(
+        await merge.merge(
+          survivorId: pending,
+          mergedAwayId: settled,
+          confirmedByUser: true,
+        ),
+        isA<MergeCompleted>(),
+      );
+
+      final TransactionRow kept = await dao.byId(pending);
+      expect(kept.convertedAmountAmount, '150');
+      expect(kept.conversionPending, isFalse);
+    });
+
+    test('A7b (KHA-87) — a user\'s internal-transfer verdict on the absorbed '
+        'row is carried, not soft-deleted with it (AC-B11.2)', () async {
+      // Not money, but it decides whether money counts. Dropping it would make
+      // the user's answer stop applying and move the spend figure — and unlike
+      // the fee case there is no "safe" direction: losing `external` can lower
+      // the total, losing `internal` can raise it.
+      final int survivor = await sms(messageId: 1);
+      final int decided = await sms(messageId: 2);
+      await dao.setInternalTransferDecision(
+        transactionIds: <int>[decided],
+        state: InternalTransferState.external,
+        groupId: 'grp-1',
+      );
+
+      expect(
+        await merge.merge(
+          survivorId: survivor,
+          mergedAwayId: decided,
+          confirmedByUser: true,
+        ),
+        isA<MergeCompleted>(),
+      );
+
+      final TransactionRow kept = await dao.byId(survivor);
+      expect(kept.internalTransferState, InternalTransferState.external);
+      expect(kept.internalTransferGroupId, 'grp-1');
+    });
+
+    test('A7c (KHA-87) — two rows with CONTRADICTING transfer verdicts are '
+        'refused', () async {
+      final int a = await sms(messageId: 1);
+      final int b = await sms(messageId: 2);
+      await dao.setInternalTransferDecision(
+        transactionIds: <int>[a],
+        state: InternalTransferState.internal,
+        groupId: 'grp-a',
+      );
+      await dao.setInternalTransferDecision(
+        transactionIds: <int>[b],
+        state: InternalTransferState.external,
+        groupId: 'grp-b',
+      );
+
+      final MergeAssessment assessment = MergePlan.between(
+        survivor: await dao.byId(a),
+        mergedAway: await dao.byId(b),
+      );
+      expect(
+        (assessment as MergeRefused).reason,
+        MergeRefusal.spendEffectDiffers,
+      );
+    });
+
+    test('A8 (KHA-87) — the compared/carried set covers every money-bearing '
+        'column on `transactions`, so a new one cannot silently join the '
+        '"neither compared nor carried" set', () async {
+      // QA's done check, as an executable claim. For each money-bearing
+      // column, a row that differs ONLY in that column must produce either a
+      // refusal or a non-empty enrichment — never a silent `MergeAllowed`
+      // with `isEmpty == true`, which is what A4 used to demonstrate.
+      //
+      // `remaining_balance` is included even though it enters no total: the
+      // point of the check is that the column was *considered*, not that it
+      // moves a headline figure.
+      final Map<String, Future<int> Function(int messageId)> differsOnlyIn =
+          <String, Future<int> Function(int)>{
+            'fee_amount': (int m) => sms(
+              messageId: m,
+              fee: Money.parse('9.20', currency: 'SAR'),
+            ),
+            'converted_amount': (int m) => sms(
+              messageId: m,
+              converted: Money.parse('152.75', currency: 'SAR'),
+            ),
+            'fx_rate': (int m) => sms(messageId: m, fxRate: '3.75'),
+            'remaining_balance': (int m) => dao.insertFromParsedSms(
+              amount: Money.parse('152.75', currency: 'SAR'),
+              remainingBalance: Money.parse('1000.00', currency: 'SAR'),
+              occurredAt: DateTime.utc(2026, 7, 15, 10),
+              direction: 'debit',
+              transactionType: TransactionType.posPurchase,
+              affectsSpend: true,
+              sourceMessageId: m,
+              rulePackId: 'sa-core',
+              rulePackVersion: '2026.07.28',
+              ruleId: 'baj-pos-purchase-ar',
+            ),
+          };
+
+      int messageId = 100;
+      for (final MapEntry<String, Future<int> Function(int)> entry
+          in differsOnlyIn.entries) {
+        final int plain = await sms(messageId: messageId++);
+        final int richer = await entry.value(messageId++);
+        final MergeAssessment assessment = MergePlan.between(
+          survivor: await dao.byId(plain),
+          mergedAway: await dao.byId(richer),
+        );
+        expect(
+          assessment is MergeRefused ||
+              (assessment as MergeAllowed).enrichment.isEmpty == false,
+          isTrue,
+          reason:
+              '${entry.key} is neither compared nor carried — the KHA-87 '
+              'shape has reappeared for a new column',
+        );
+      }
     });
   });
 
@@ -294,9 +557,9 @@ void main() {
       expect((await dao.byId(b)).mergedIntoId, a);
     });
 
-    test('B2 DEFECT — a survivor that absorbs a SECOND duplicate silently '
-        'forgets the first: `merged_from_transaction_id` is a single scalar '
-        'that gets overwritten', () async {
+    test('B2 ACCEPTED AND DOCUMENTED — a survivor that absorbs a SECOND '
+        'duplicate keeps only the latest pointer; the first stays reachable '
+        'from its own row and from the audit trail', () async {
       // Three alerts for one purchase is not exotic — a bank sending a POS
       // alert, a "card used" alert and a settlement alert produces exactly
       // this, and the D2 reference-number tier flags all of them.
@@ -317,25 +580,37 @@ void main() {
         confirmedByUser: true,
       );
 
-      // EXPECTED: the survivor records that it absorbed BOTH rows.
-      // ACTUAL: it records only the most recent one. The link to `first` is
-      // gone from the survivor's row. It survives on `first.mergedIntoId` and
-      // in the audit trail, so this is a degradation rather than a loss —
-      // but the PR's stated property is "pointers both ways", and after a
-      // second merge that is only true for one of the two absorbed rows.
+      // The behaviour is unchanged and the DOC is what moved (D-QA-7):
+      // `transaction_merge.dart` no longer claims "pointers both ways" per
+      // survivor, it claims it per merge, and names where the earlier link
+      // remains readable. A set-valued link is tracked on KHA-88.
+      //
+      // These assertions are the guard on that reachability claim, which is
+      // the thing that makes the degradation acceptable. If any of them
+      // breaks, the survivor's earlier merge really has become unrecoverable.
+      expect((await dao.byId(survivor)).mergedFromTransactionId, second);
       expect(
-        (await dao.byId(survivor)).mergedFromTransactionId,
-        second,
-        reason:
-            'DEFECT: the pointer to the first absorbed row was silently '
-            'overwritten by the second merge',
+        (await dao.byId(first)).mergedIntoId,
+        survivor,
+        reason: 'the first absorbed row still names its survivor',
       );
-      expect((await dao.byId(first)).mergedIntoId, survivor);
+      final List<AuditEntryRow> survivorHistory = await auditLogDao.queryFor(
+        'transaction',
+        survivor.toString(),
+      );
+      expect(
+        survivorHistory.where((AuditEntryRow e) => e.action == 'merge'),
+        hasLength(2),
+        reason:
+            'and both merges are in the survivor\'s own change history, with '
+            'their before/after — so US-F5 can reconstruct the pair the '
+            'column no longer holds',
+      );
     });
 
-    test('B3 DEFECT (HIGH) — undoing the FIRST of two merges corrupts the '
-        'survivor\'s link to the SECOND, and does so with no audit entry on '
-        'the survivor at all', () async {
+    test('B3 FIXED (KHA-88, HIGH) — undoing the FIRST of two merges leaves '
+        'the survivor\'s link to the SECOND alone, and writes nothing to the '
+        'survivor to audit', () async {
       final int survivor = await sms(messageId: 11);
       final int first = await sms(messageId: 22);
       final int second = await sms(messageId: 33);
@@ -357,36 +632,30 @@ void main() {
         survivor.toString(),
       )).length;
 
-      // The user undoes the FIRST merge (restores `first`). `restore()` is
-      // written as though a survivor can only ever have absorbed one row: it
-      // unconditionally nulls `mergedFromTransactionId` on
-      // `existing.mergedIntoId`, without checking that the pointer it is
-      // clearing actually refers to the row being restored.
+      // The user undoes the FIRST merge (restores `first`). `restore()` now
+      // clears the survivor's `mergedFromTransactionId` **only when it names
+      // the row being restored** — the identity check that was missing.
       await merge.undo(first);
 
-      // EXPECTED: `second` is still recorded as absorbed into `survivor`.
-      // ACTUAL: the survivor now claims to have absorbed nothing, while
-      // `second` still claims to be merged into it. The two halves of the
-      // "pointers both ways" property now contradict each other, and nothing
-      // in the app can detect it.
+      // INVERTED (was: the survivor's pointer became null). `second` is still
+      // recorded as absorbed into `survivor`, and the two halves of the link
+      // agree with each other again.
       expect(
         (await dao.byId(survivor)).mergedFromTransactionId,
-        isNull,
+        second,
         reason:
-            'DEFECT: restoring `first` cleared the survivor\'s pointer to '
-            '`second`',
+            'undoing an unrelated merge must not touch this one — the '
+            'KHA-88 / D-QA-8 regression guard',
       );
-      expect(
-        (await dao.byId(second)).mergedIntoId,
-        survivor,
-        reason: 'while `second` still points back — the links now disagree',
-      );
+      expect((await dao.byId(second)).mergedIntoId, survivor);
       expect((await dao.byId(second)).isDeleted, isTrue);
+      // ...and the row that WAS undone is genuinely back.
+      expect((await dao.byId(first)).isDeleted, isFalse);
+      expect((await dao.byId(first)).mergedIntoId, isNull);
 
-      // NFR-A2: "every mutation writes an append-only audit entry". The
-      // survivor's row WAS mutated (its mergedFromTransactionId changed) and
-      // the survivor's history says nothing about it. The only audit entry
-      // written was against the restored row's id.
+      // NFR-A2 the other way round: no entry against the survivor because
+      // nothing was written to the survivor. The audit trail is complete
+      // precisely because the mutation did not happen.
       final int auditEntriesAfter = (await auditLogDao.queryFor(
         'transaction',
         survivor.toString(),
@@ -394,18 +663,13 @@ void main() {
       expect(
         auditEntriesAfter,
         auditEntriesBefore,
-        reason:
-            'DEFECT: the survivor row was written to but gained no audit '
-            'entry — NFR-A2 gap on the restore path',
+        reason: 'no write to the survivor, so nothing to record',
       );
-      // The chain itself is still intact; this is a completeness gap, not a
-      // tampering one.
       expect(await auditLogDao.verifyChainIntegrity(), isTrue);
     });
 
-    test('B4 — even a plain single-merge undo mutates the survivor with no '
-        'audit entry against the survivor (the same NFR-A2 gap, minimal '
-        'case)', () async {
+    test('B4 FIXED (KHA-88) — a plain single-merge undo DOES write an audit '
+        'entry against the survivor it mutates (NFR-A2)', () async {
       final int a = await sms(messageId: 1);
       final int b = await sms(messageId: 2);
       await merge.merge(survivorId: a, mergedAwayId: b, confirmedByUser: true);
@@ -420,25 +684,35 @@ void main() {
         a.toString(),
       );
 
-      // The survivor's mergedFromTransactionId went b -> null, silently.
+      // The survivor's mergedFromTransactionId went b -> null...
       expect((await dao.byId(a)).mergedFromTransactionId, isNull);
-      expect(
-        afterUndo.length,
-        beforeUndo.length,
-        reason:
-            'DEFECT: the survivor\'s change history reads "merge" with no '
-            'matching reversal, so US-F5 shows a merge that was undone as '
-            'though it still stands',
-      );
+      // ...and INVERTED (was: `afterUndo.length == beforeUndo.length`), the
+      // survivor's own change history now records the reversal, so US-F5 can
+      // no longer show an undone merge as though it still stands.
+      expect(afterUndo.length, beforeUndo.length + 1);
+      final AuditEntryRow reversal = afterUndo.last;
+      expect(reversal.action, 'merge_undo');
+      expect(reversal.actor, 'user');
+      expect(reversal.actorDetail, 'duplicate_merge_undo');
+      // A genuine before/after, not a claim: b -> null.
+      expect(reversal.fieldChangesJson, contains('mergedFromTransactionId'));
+      expect(reversal.fieldChangesJson, contains('"$b"'));
+      // The survivor's history reads create, merge, merge_undo.
+      expect(afterUndo.map((AuditEntryRow e) => e.action), <String>[
+        'create',
+        'merge',
+        'merge_undo',
+      ]);
+      expect(await auditLogDao.verifyChainIntegrity(), isTrue);
     });
 
-    test('B6 DEFECT — merge CHAINS are possible in the survivor direction, '
-        'contradicting the "no chains" claim, and a chained undo double-counts '
-        'the movement', () async {
-      // The PR's own test is named "an already-merged row cannot be merged
-      // again — no chains". It pins the *absorbed* direction only: merging a
+    test('B6 FIXED (D-QA-9) — merge CHAINS are refused in the SURVIVOR '
+        'direction too, so "no chains" is now true in both', () async {
+      // P3b-2's own test is named "an already-merged row cannot be merged
+      // again — no chains". It pinned the *absorbed* direction only: merging a
       // soft-deleted row is refused by `MergeRefusal.notLive`. A SURVIVOR is
-      // still live, so it can itself be merged away into a third row.
+      // still live, so it could itself be merged away into a third row,
+      // orphaning the row it had absorbed.
       final int a = await sms(messageId: 11);
       final int b = await sms(messageId: 22);
       final int c = await sms(messageId: 33);
@@ -449,39 +723,41 @@ void main() {
         mergedAwayId: b,
         confirmedByUser: true,
       );
+      // INVERTED (was: `isA<MergeCompleted>()`).
       expect(
-        chained,
-        isA<MergeCompleted>(),
+        (chained as MergeRejected).reason,
+        MergeRefusal.chainWouldForm,
         reason:
-            'DEFECT: a -> b -> c chain is permitted; "no chains" is only '
-            'true in one direction',
+            'b has already absorbed a, so merging b away would build the '
+            'a -> b -> c chain the doc claims cannot exist',
       );
 
-      // One movement, counted once. So far so good.
-      expect((await reportNow()).spend.base!.toCanonicalString(), '152.75');
+      // The refusal wrote nothing: b is still live and still records absorbing
+      // a, c is untouched, and the two live movements are both counted.
+      expect((await dao.byId(b)).isDeleted, isFalse);
+      expect((await dao.byId(b)).mergedFromTransactionId, a);
+      expect((await dao.byId(c)).mergedFromTransactionId, isNull);
+      expect((await reportNow()).spend.base!.toCanonicalString(), '305.5');
+      expect(await auditLogDao.verifyChainIntegrity(), isTrue);
+    });
 
-      // Now the user undoes the SECOND merge, which is the one they just
-      // made. `b` comes back live — but `a` is still soft-deleted pointing at
-      // `b`, and `b` no longer records that it absorbed `a` (B2's overwrite
-      // is not involved here; `restore` cleared `c`'s pointer, and `b`'s own
-      // `mergedFromTransactionId` was never touched).
-      await merge.undo(b);
-      expect(
-        (await reportNow()).spend.base!.toCanonicalString(),
-        '305.5',
-        reason:
-            'b and c both live again — inflation, which is the SAFE '
-            'direction, but the user now has a duplicate they already '
-            'resolved once and no flag telling them so',
+    test('B6b (D-QA-9) — the absorbed direction still refuses, so the claim '
+        'is pinned on BOTH sides rather than one', () async {
+      final int a = await sms(messageId: 11);
+      final int b = await sms(messageId: 22);
+      final int c = await sms(messageId: 33);
+      await merge.merge(survivorId: a, mergedAwayId: b, confirmedByUser: true);
+
+      // b is soft-deleted, so re-merging it anywhere is `notLive`. This is the
+      // half P3b-2 already had; it is asserted alongside B6 so a future change
+      // cannot satisfy one direction by breaking the other.
+      final MergeResult again = await merge.merge(
+        survivorId: c,
+        mergedAwayId: b,
+        confirmedByUser: true,
       );
-      expect((await dao.byId(a)).isDeleted, isTrue);
-      expect(
-        (await dao.byId(b)).mergedFromTransactionId,
-        a,
-        reason:
-            'b still records absorbing a, so the chain is at least '
-            'reconstructible',
-      );
+      expect((again as MergeRejected).reason, MergeRefusal.notLive);
+      expect((await dao.byId(b)).mergedIntoId, a);
     });
 
     test('B7 — concurrent merges of the same pair do not both apply (SQLite '
@@ -555,25 +831,35 @@ void main() {
       );
     });
 
-    test('C2 — no production code outside TransactionMergeService reaches '
-        'TransactionDao.mergeDuplicatePair', () async {
-      // A behavioural restatement of the PR's structural claim. The DAO
-      // method is nonetheless PUBLIC and defaults `actor` to 'user', so the
-      // only thing standing between a future background caller and an
-      // unconfirmed merge is convention plus this test. Recorded as an
-      // observation, not a defect: the service layer is genuinely the only
-      // caller today.
-      expect(
-        () => dao.mergeDuplicatePair(
-          survivorId: 1,
-          mergedAwayId: 2,
-          enrichment: MergeEnrichment.none,
-        ),
-        isNotNull,
-        reason:
-            'the DAO method is reachable directly — the guard lives one '
-            'layer up, in the service',
+    test('C2 HARDENED (O-QA-5) — the DAO merge is still public, but `actor` '
+        'is now a required argument with no default', () async {
+      // The DAO method is reachable directly; the confirmation guard lives one
+      // layer up, in the service, and that is by design. What changed is the
+      // *audit* consequence of reaching it: `actor` used to default to 'user',
+      // so a future background caller could have merged two rows and written
+      // an audit entry claiming a person did it, by omitting one argument.
+      //
+      // The compiler enforces this now, which is why this call has to name an
+      // actor at all. Deleting `actor:` from the line below is a build error —
+      // that IS the assertion, and it is stronger than anything expect() can
+      // say at runtime.
+      final int a = await sms(messageId: 1, merchant: null);
+      final int b = await sms(messageId: 2, merchant: 'EXTRA MART');
+      await dao.mergeDuplicatePair(
+        survivorId: a,
+        mergedAwayId: b,
+        enrichment: const MergeEnrichment(merchantRawText: 'EXTRA MART'),
+        actor: 'system_rule',
+        actorDetail: 'probe_c2',
       );
+
+      // And the entry says what actually happened, rather than 'user'.
+      final AuditEntryRow entry = (await auditLogDao.queryFor(
+        'transaction',
+        a.toString(),
+      )).last;
+      expect(entry.action, 'merge');
+      expect(entry.actor, 'system_rule');
     });
 
     test('C3 — a refusal is not a mutation: no audit entry, no column '
@@ -620,13 +906,17 @@ void main() {
       expect((await dao.byId(a)).merchantRawText, isNull);
     });
 
-    test('D2 DEFECT — a user edit on the LOSING side is silently discarded in '
-        'favour of the parser\'s value on the survivor', () async {
+    test('D2 FIXED (KHA-89) — a user edit on the LOSING side is no longer '
+        'discarded for the parser\'s value: the pair is refused so the user '
+        'decides', () async {
       // The user corrects the merchant on row `b`. Then a duplicate pair is
       // resolved with `a` (which still holds the parser's mis-read) as the
-      // survivor. AC-B5.3 says user intent outranks the parser *always*; here
-      // the parser's value wins because the rule is implemented as "don't
-      // overwrite the survivor" rather than "prefer the user-edited value".
+      // survivor. AC-B5.3 says user intent outranks the parser *always*.
+      //
+      // The fix is a refusal rather than "the correction wins": letting it win
+      // would make a merge overwrite a populated field, breaking the
+      // never-overwrite property, and would have the app arbitrate between two
+      // statements only the user can reconcile.
       final int a = await sms(messageId: 1, merchant: 'ALINMA*POS*3311');
       final int b = await sms(messageId: 2, merchant: 'ALINMA*POS*3311');
       await TransactionEditService(database: db, transactionDao: dao).edit(
@@ -636,25 +926,51 @@ void main() {
         ),
       );
 
-      await merge.merge(survivorId: a, mergedAwayId: b, confirmedByUser: true);
+      final MergeResult result = await merge.merge(
+        survivorId: a,
+        mergedAwayId: b,
+        confirmedByUser: true,
+      );
+      // INVERTED (was: MergeCompleted, and `a` kept the parser text).
+      expect((result as MergeRejected).reason, MergeRefusal.userEditDiffers);
+
+      // Nothing was written: both rows are live, and the correction is still
+      // on a row the user can see rather than on a soft-deleted one.
+      expect((await dao.byId(a)).merchantRawText, 'ALINMA*POS*3311');
+      expect((await dao.byId(b)).merchantRawText, 'Panda Hypermarket');
+      expect((await dao.byId(b)).isDeleted, isFalse);
+    });
+
+    test('D2b (KHA-89) — a user edit on the losing side that AGREES with the '
+        'survivor is not a disagreement, and the merge proceeds', () async {
+      // The refusal must be about contradiction, not about the mere presence
+      // of an edit — otherwise correcting a row would make it permanently
+      // unmergeable and the review inbox would fill up with pairs nobody can
+      // resolve.
+      final int a = await sms(messageId: 1, merchant: 'Panda Hypermarket');
+      final int b = await sms(messageId: 2, merchant: 'ALINMA*POS*3311');
+      await TransactionEditService(database: db, transactionDao: dao).edit(
+        b,
+        const TransactionEditDraft(
+          merchantRawText: Edited<String?>('Panda Hypermarket'),
+        ),
+      );
 
       expect(
-        (await dao.byId(a)).merchantRawText,
-        'ALINMA*POS*3311',
-        reason:
-            'DEFECT: the user\'s correction lost to the parser text '
-            'because it happened to be on the row the user chose to merge '
-            'away. Nothing warns them.',
+        await merge.merge(
+          survivorId: a,
+          mergedAwayId: b,
+          confirmedByUser: true,
+        ),
+        isA<MergeCompleted>(),
       );
-      // The correction is not destroyed — it is on the soft-deleted row — but
-      // it is off every list and every screen the user will look at.
-      expect((await dao.byId(b)).merchantRawText, 'Panda Hypermarket');
-      expect((await dao.byId(b)).isDeleted, isTrue);
+      expect((await dao.byId(a)).merchantRawText, 'Panda Hypermarket');
     });
 
     test(
-      'D3 DEFECT — a user-edited value COPIED onto the survivor by a merge '
-      'does not inherit its protection, so a later merge can overwrite it',
+      'D3 FIXED (KHA-89) — a user-edited value COPIED onto the survivor by a '
+      'merge arrives still protected, so a later automated write cannot '
+      'overwrite it',
       () async {
         // `a` has no merchant. `b`'s merchant is a user correction. The merge
         // copies it onto `a` — good — but does not add `merchantRawText` to
@@ -676,14 +992,25 @@ void main() {
         );
         expect((await dao.byId(a)).merchantRawText, 'Panda Hypermarket');
 
+        // INVERTED (was: `isEmpty`). The protection travelled with the value.
         expect(
           decodeUserEditedFields((await dao.byId(a)).userEditedFields),
-          isEmpty,
+          contains(TransactionField.merchantRawText),
           reason:
-              'DEFECT: the survivor now carries a user-authored value with '
-              'no AC-B5.3 protection on it — the next automated write (P7 '
-              'statement import, a re-scan, another merge) may overwrite it',
+              'the survivor holds a user-authored value and the app now knows '
+              'it — the next automated writer (a re-scan, another merge, P7\'s '
+              'statement import) will leave it alone',
         );
+
+        // Proved behaviourally, not just by the column: a third row carrying
+        // parser text cannot re-enrich the now-protected field.
+        final int c = await sms(messageId: 3, merchant: 'ALINMA*POS*3311');
+        await merge.merge(
+          survivorId: a,
+          mergedAwayId: c,
+          confirmedByUser: true,
+        );
+        expect((await dao.byId(a)).merchantRawText, 'Panda Hypermarket');
       },
     );
 
@@ -985,11 +1312,14 @@ void main() {
       ]);
     });
 
-    test('F6 DEFECT — undoing a merge does NOT reverse the enrichment, so the '
-        'survivor keeps data the merge gave it', () async {
-      // The file-level doc claims "restore() reverses the whole thing" and
-      // "the merge is REVERSIBLE". It reverses the soft delete and the
-      // pointers; it does not reverse the field copies.
+    test('F6 DECIDED AND DOCUMENTED (D-QA-12) — undoing a merge deliberately '
+        'does NOT reverse the enrichment; the doc now says so', () async {
+      // P3b-2's doc claimed "restore() reverses the whole thing". It reverses
+      // the soft delete and the link; it does not reverse the field copies,
+      // and `transaction_merge.dart`'s property 1 now states that as a
+      // decision with its reason: gap-filled information is not harmful, and
+      // stripping it on the way out would be the undo deleting information —
+      // the exact thing the never-overwrite property exists to prevent.
       final int a = await sms(messageId: 1, merchant: null, reference: null);
       final int b = await sms(
         messageId: 2,
@@ -1003,11 +1333,15 @@ void main() {
         (await dao.byId(a)).merchantRawText,
         'EXTRA MART',
         reason:
-            'DEFECT (low): after the undo, both rows are live and both '
-            'now claim the same merchant/reference. The undo is not an '
-            'inverse, contrary to the doc comment.',
+            'DECIDED: the survivor keeps what the merge gave it. Both rows '
+            'are live and both name the same merchant, and neither is wrong.',
       );
       expect((await dao.byId(b)).merchantRawText, 'EXTRA MART');
+      // What the undo IS an inverse of, and this is the part that matters for
+      // R-8: the soft delete and the link, on both sides.
+      expect((await dao.byId(b)).isDeleted, isFalse);
+      expect((await dao.byId(b)).mergedIntoId, isNull);
+      expect((await dao.byId(a)).mergedFromTransactionId, isNull);
     });
   });
 
@@ -1036,16 +1370,19 @@ void main() {
       );
     });
 
-    test('G2 OBSERVATION — an unknown currency code is NOT caught: `Money` '
-        'does not validate currency codes, so the doc over-claims', () async {
-      // `ledger_mapping.dart`'s library comment says a row is unreadable when
+    test('G2 DOCUMENTED (O-QA-7) — an unknown currency code is deliberately '
+        'NOT treated as unreadable, and the doc now says so', () async {
+      // `ledger_mapping.dart`'s comment used to say a row is unreadable when
       // "`amount_currency` is not a currency code this build understands".
       // `Money.tryParse` performs no such check — it stores whatever string it
-      // is handed. Behaviourally this is benign (the row lands in its own
-      // currency bucket and is reported as `unconverted`, so it is visible
-      // rather than dropped, which is what KHA-74 actually required), but the
-      // stated reason for `UnreadableReason.unparsableAmount` is wider than
-      // the code. Recorded as a documentation-accuracy observation.
+      // is handed — so that half of the sentence was never true.
+      //
+      // The SENTENCE was corrected rather than the code, because the current
+      // behaviour is the one KHA-74 asked for: the row lands in its own
+      // currency bucket and is reported as `unconverted`, so it is VISIBLE
+      // rather than dropped. Declaring it unreadable would hide a real
+      // transaction to protect a total that is already protected. This test
+      // pins that decision so nobody "fixes" it back.
       final int a = await sms(messageId: 1);
       await db.customStatement(
         'UPDATE transactions SET amount_currency = ? WHERE id = ?',

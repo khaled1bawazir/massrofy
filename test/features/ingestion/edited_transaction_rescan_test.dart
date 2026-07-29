@@ -9,6 +9,12 @@
 /// `RawMessageDao` — the same rig `deleted_transaction_rescan_test.dart` uses
 /// — rather than the bare DAO harness the merge probes run on.
 ///
+/// **P3b-3 (KHA-89 / D-QA-13): moved here from `test/security/` and renamed**,
+/// as QA asked, so it sits beside `deleted_transaction_rescan_test.dart` — its
+/// exact sibling, one AC apart. It is a re-scan test, not a security probe;
+/// filing it by the rig it happened to be written next to would have hidden it
+/// from whoever next goes looking for "what covers AC-B5.3's re-scan half?".
+///
 /// ## The gap
 ///
 /// AC-B5.3 has two halves. KHA-26 states them together:
@@ -54,9 +60,9 @@ import 'package:massrofy/features/ledger/transaction_edit.dart';
 import 'package:massrofy/features/parsing/rule_pack.dart';
 import 'package:massrofy/features/parsing/rule_pack_message_parser.dart';
 
-import '../support/fake_sms_source.dart';
-import '../support/plain_test_database.dart';
-import '../features/ingestion/support/load_bundled_pack.dart';
+import '../../support/fake_sms_source.dart';
+import '../../support/plain_test_database.dart';
+import 'support/load_bundled_pack.dart';
 
 final List<int> _qaChainKey = List<int>.generate(32, (int i) => i + 101);
 

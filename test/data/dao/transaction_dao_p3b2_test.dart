@@ -478,6 +478,7 @@ void main() {
       await dao.mergeDuplicatePair(
         survivorId: survivor,
         mergedAwayId: absorbed,
+        actor: 'user',
         enrichment: const MergeEnrichment(merchantRawText: 'EXTRA MART'),
       );
 
@@ -499,6 +500,7 @@ void main() {
       await dao.mergeDuplicatePair(
         survivorId: survivor,
         mergedAwayId: absorbed,
+        actor: 'user',
         enrichment: const MergeEnrichment(
           merchantRawText: 'EXTRA MART',
           referenceNumber: 'REF-9911',
@@ -521,6 +523,7 @@ void main() {
       await dao.mergeDuplicatePair(
         survivorId: survivor,
         mergedAwayId: absorbed,
+        actor: 'user',
         enrichment: MergeEnrichment.none,
       );
 
@@ -549,6 +552,7 @@ void main() {
       await dao.mergeDuplicatePair(
         survivorId: survivor,
         mergedAwayId: absorbed,
+        actor: 'user',
         enrichment: MergeEnrichment.none,
       );
 
@@ -563,6 +567,7 @@ void main() {
       await dao.mergeDuplicatePair(
         survivorId: survivor,
         mergedAwayId: absorbed,
+        actor: 'user',
         enrichment: MergeEnrichment.none,
       );
 
@@ -585,6 +590,7 @@ void main() {
           dao.mergeDuplicatePair(
             survivorId: 999999,
             mergedAwayId: absorbed,
+            actor: 'user',
             enrichment: MergeEnrichment.none,
           ),
           throwsA(anything),
@@ -617,6 +623,7 @@ void main() {
       await dao.mergeDuplicatePair(
         survivorId: a,
         mergedAwayId: b,
+        actor: 'user',
         enrichment: const MergeEnrichment(merchantRawText: 'EXTRA MART'),
       );
       await dao.softDelete(id: a, actor: 'user');
