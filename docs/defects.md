@@ -14,6 +14,197 @@ KHA-64 first half), PR #11, head `51bb730`. See `docs/test-plan.md` §1a, §6a a
 
 ## Summary
 
+### Pass 8 (PR #34, P4b — the categorization UI + ADR-008 v1.4 code fix)
+
+**No defect was found that blocks merge. Verdict: `QA: PASS 34`.** Head
+`0585fd4`.
+
+**Depth was deliberately asymmetric**, and that is a decision worth recording
+rather than a shortcut. `docs/PRD.md` now declares `TIER: personal`, so the new
+UI/CRUD surfaces got journeys plus five highest-value attack probes rather than
+a 30-probe sweep. **The merchant-matching engine was exempted from that
+trim**: `merchant_key.dart` has now needed *four* adversarial rounds to catch
+real money-correctness bugs (KHA-98, KHA-99, KHA-106, KHA-107), and every one of
+those was missed by a pass that checked *worked examples*. So this round
+attacked it **mechanically over a generated corpus** instead — 7,290 strings
+over a token alphabet spanning every kind the pipeline distinguishes, plus a
+**differential against ADR-008 v1.3's algorithm transcribed verbatim from
+`dc3f362`**, so the behaviour change could be *enumerated* rather than
+described.
+
+**The headline result: the fix is sound, and it is sound in the strong sense.**
+
+| Property | Evidence |
+|---|---|
+| **KHA-107 idempotence** — `of(of(x)) == of(x)` | **0 violations / 7,290 strings** (PROBE E1). The premise the proof rests on (`referenceMarkerTokens ⊆ noiseTokens`) asserted directly (E1b) |
+| **KHA-106 / KHA-98 / KHA-99 collision class** | **0 key classes span more than one name**, over the whole corpus (PROBE E2). This is the property all three defects violated, checked as a partition rather than as a pair |
+| **No THIRD dangerous cost** | v1.4 introduces **818 new merges** over the corpus and **not one joins two different names** (PROBE E4) |
+| **KHA-109 all-digit residual not worsened** | v1.4 **shrinks** it — 48 strings lose an all-digit key, 4 gain one (PROBE E5) |
+
+Both **KHA-106 and KHA-107 done-checks are met**, verified against the code and
+against the **inverted-in-place** PROBE M1/M2 (read in the diff — same fixtures,
+same comments, flipped assertions; neither was weakened or renamed to pass).
+
+**Three items raised, none merge-blocking:** one Low documentation-accuracy
+defect (**D-QA-34-1**), one test-strength gap (**G-QA-34-1**), one observation
+(**O-QA-34-1**). All three are below.
+
+**Reachability was verified by grepping the construction site**, per the
+`docs/lessons.md` rule — not from the fact that the widgets exist:
+`app.dart` → `HomePlaceholderScreen` (unlocked branch only) →
+`openNeedsReview` / `openCategoryManagement` / `openLearnedRules` /
+`openRecentlyDeleted`, and `NeedsReviewHost` → `openTransactionDetail` /
+`CompleteUnparsedHost`. **`app.dart` still routes nothing above the lock gate**,
+so no P4b screen is reachable before unlock. The conditional merge gate
+recorded in `docs/lessons.md` (KHA-87/88/94/96/98–105) is therefore correctly
+discharged: this PR routes all three named screens and all fourteen issues are
+closed.
+
+**Gates re-run by QA on `0585fd4` itself**, per the rule that a gate result is
+evidence only for the tree it was measured on:
+
+| Gate | Result on `0585fd4` |
+|---|---|
+| `flutter analyze` | clean — `No issues found!` |
+| `dart format --set-exit-if-changed lib test` | clean — **215 files, 0 changed** (216 / 0 with the QA probe added) |
+| `flutter test` | **1340 passing / 3 skipped / 1 failing** |
+
+The single failure is `privacy_overlay_release_mode_test`, which needs CI's
+dedicated `--dart-define=dart.vm.product=true` step. **QA confirms the
+engineer's disclosure is exact** — same count, same single environment-dependent
+test.
+
+---
+
+### D-QA-34-1 — ADR-008 v1.4's disclosed cost is **wider than the example that documents it** (Low, documentation-accuracy)
+
+**Found by:** PROBE E4b, `test/security/qa_pr34_probe_test.dart`. Executed.
+**Severity:** Low. **Not merge-blocking.** **Owner:** solution-architect.
+
+The PR and ADR-008 v1.4 disclose cost #2 with one worked example — a **4-digit**
+pair, `QAMART 1000 STORE` == `QAMART 2000 STORE` — and pin it as a test.
+
+The real class is **any digit run adjacent to a reference marker on either
+side, at any length**, and the sub-4-digit half of it is **genuinely new in
+v1.4**. The differential shows it directly:
+
+```
+ofV13('QANDA 100 STORE')  ->  'QANDA 100'   // v1.3: two identities
+ofV13('QANDA 200 STORE')  ->  'QANDA 200'
+of   ('QANDA 100 STORE')  ->  'QANDA'       // v1.4: ONE identity
+of   ('QANDA 200 STORE')  ->  'QANDA'
+```
+
+v1.3 read adjacency on the **left only**, so a right-hand marker did not
+corroborate and the run survived; the length signal only reached runs of >= 4.
+So three-digit numbered siblings with a trailing marker were two merchants
+before this PR and are one after it.
+
+**Why this is Low and not High.** It merges numbered siblings **of one name**,
+never two names — PROBES E2 and E4 prove that mechanically over 7,290 strings.
+And it is the **necessary consequence of order-insensitivity**: `QANDA STORE
+100` and `QANDA STORE 200` already merged under v1.3, so the permutation
+`QANDA 100 STORE` / `QANDA 200 STORE` *must* merge too, or KHA-107 is not fixed.
+The behaviour is right.
+
+**The defect is the disclosure, not the behaviour** — and that is exactly
+KHA-106's own filing rationale, quoted from that issue: *"the trade may well be
+the right one … but it was not **decided**"*. A future reader comparing the
+consequences list against the code will find the list narrower than the rule.
+
+**Fix (one sentence, no code):** state the cost as the *class* rather than the
+*example* — "a digit run adjacent to a reference marker on either side is
+stripped at any length, so numbered siblings carrying a marker share one key" —
+in ADR-008 settled answer 8 and in `referenceMarkerTokens`' doc comment.
+
+**Done check:** ADR-008 v1.4's consequences state the length-independence, or a
+test pins a sub-4-digit pair alongside the existing 4-digit one.
+
+---
+
+### G-QA-34-1 — KHA-97's done-check asks for the AC-C1.3 invariant on the **widget** path; no P4b test asserts it (coverage gap, Low)
+
+**Found by:** reading KHA-97's done-check against the shipped tests.
+**Severity:** Low — **the behaviour is correct; only the evidence was missing.**
+**Not merge-blocking.** **Owner:** mobile-engineer (or closeable as done).
+
+KHA-97's done-check says, verbatim:
+
+> both decisions leave the AC-C1.3 category-sum invariant intact (already
+> covered by `test/features/categorization/category_sum_invariant_test.dart` at
+> the data layer — **this adds the widget-level path**)
+
+Grepping `reconciles` / `AC-C1.3` in `test/widget/p4b_screens_test.dart` and
+`test/features/categorization/category_correction_test.dart` returns **nothing**.
+The widget-level half was not added. This is the KHA-22 shape from
+`docs/lessons.md` — a done-check that is not fully met while the issue reads as
+shipped.
+
+**QA supplied the missing coverage rather than only reporting it.** PROBES U1
+and U2 wire the **real `CategoryDao`** behind the real `CategoryManagementScreen`'s
+`onDelete` callback and drive the S-15 dialog with taps, so what is verified is
+the production write the button actually performs. **Both pass**, with the money
+figures checked as business oracles rather than self-consistency:
+
+* delete-with-uncategorize: total stays **175.00** (= 100 + 40 + 25 + 10 by
+  hand), `uncategorizedCount` goes 1 → 3, the category row is gone;
+* delete-with-reassign: `groceries` becomes **165.00** exactly (= 100 + 40 + 25),
+  i.e. the money **moved into the target**, not merely detached from the deleted
+  category;
+* AC-C3.3 verified as a property of the widget tree — `deleteConfirm.onPressed`
+  is `null` until a decision exists.
+
+**Done check:** met by `test/security/qa_pr34_probe_test.dart` PROBES U1/U2 as
+of this pass. The issue can be closed on that basis, or the tests moved into
+`p4b_screens_test.dart` if the engineer prefers them beside their siblings.
+
+---
+
+### G-QA-34-2 — the shipped AC-C5.2 undo test names the failure mode it must construct, and does not construct it (test-strength gap, Low)
+
+**Found by:** reading `category_correction_test.dart` against AC-C5.2.
+**Severity:** Low — **the production code is correct.** **Not merge-blocking.**
+
+The test *"rows that had DIFFERENT prior categories each get their own back,
+not a default"* states the risk exactly right in its own comment — *"this is the
+case a 'reset to Uncategorized' undo destroys"* — and then seeds **three rows
+whose prior category is all `null`**, asserting all three back to `null`. **A
+buggy undo that reset every row to Uncategorized would pass it unchanged.**
+
+The mixed case *is* reachable: the bulk fill only touches **uncategorized** rows
+(AC-C5.1), but the **target** row may already carry a category — a user
+correcting a wrong category is the product's highest-frequency interaction
+(NFR-U7).
+
+**QA constructed it (PROBE U5) and the production code passes**: one row
+starting at `dining` plus two blanks, corrected merchant-wide to `groceries`,
+then undone — the target returns to **`dining`** and the other two to **`null`**.
+Three rows, two different answers, neither a default. The audit chain still
+verifies. So `CategorySnapshot`'s six-column restore genuinely works; only the
+shipped test was weak.
+
+---
+
+### O-QA-34-1 — v1.4 also *improves* an undisclosed case (observation, not a defect)
+
+The differential surfaced a change in the safe direction that the PR does not
+mention: a bare number beside a marker used to key as that number, and now has
+**no identity at all**.
+
+```
+ofV13('100 STORE')      ->  '100'
+MerchantKey.ofOrNull('100 STORE')  ->  null
+```
+
+This is KHA-102's reasoning applied correctly — a string of nothing but
+structural tokens and a number cannot distinguish two businesses — and it
+**shrinks the KHA-109 all-digit-key residual** (48 strings lose an all-digit key
+across the corpus; 4 gain one, e.g. `LLC 2000` → `2000`, net −44). Recorded
+because an *undisclosed improvement* is still an undisclosed behaviour change,
+and KHA-109 remains open.
+
+---
+
 ### Pass 7 (PR #30, P4a-1 — merge-undo fixes + merchant-identity corroboration)
 
 **No defect was found that blocks merge. Verdict: `QA: PASS 30`.** Head
