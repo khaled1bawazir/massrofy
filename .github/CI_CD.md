@@ -170,6 +170,29 @@ shape above is the contract devops is producing for it to read.
 | `android-sqlcipher-integration-test` | ADR-003 — SQLCipher encryption, on a real Android emulator | See KHA-62 and KHA-67 (2026-07-28): known intermittent QEMU boot-hang flakiness on GitHub's shared runners. On a `pull_request` this job only runs when the PR touches `android/`, `lib/`, `integration_test/`, `pubspec.*`, or `ci.yml` itself (merges to `main` always run it). It retries the emulator once, after an explicit teardown and against a freshly created AVD. A healthy run finishes in ~15-20 min. See §5.1 for why its timeouts are shaped the way they are |
 | `ci` | fan-in of the above | this is the one status check to require in branch protection (§2.2) |
 
+### 5.0a `qa-pr-lint.yml` — lint coverage for QA-artifact PRs (KHA-108)
+
+`ci.yml` only triggers on `pull_request: branches: [main]`. Per `docs/lessons.md`,
+QA's verification PR is opened against the **code branch**, not `main` (so a
+squash-merge of the code PR can't orphan it) — which means every QA-artifact PR
+got zero check runs of its own under `ci.yml` alone. That has already been
+mistaken for a broken pipeline twice (PR #28, PR #35) before being correctly
+read as "by config, not failure," and it is also the reason a real lint issue
+on PR #30's QA branch was caught later than it should have been.
+
+`.github/workflows/qa-pr-lint.yml` closes the gap without duplicating `ci.yml`'s
+heavier jobs: it triggers on `pull_request: branches-ignore: [main]` (i.e.
+exactly the PRs `ci.yml` cannot see) and runs only
+`dart format --set-exit-if-changed` and `flutter analyze --fatal-infos` — the
+two gates that have actually caught something on a QA branch. It deliberately
+does not run tests, the emulator job, or the dependency scan: QA-artifact PRs
+are docs + test-file only by construction (proven per-PR via
+`git rev-parse 'HEAD^{tree}:lib'`, not merely asserted), so there is no
+production code path for those heavier gates to exercise. It is not wired into
+branch protection as a required check — QA PRs merge under the reviewer's own
+"confirm the diff is genuinely artifacts-only" judgement, not the same
+green-`ci`-gate `main` uses.
+
 ### 5.1 How to read `timeout-minutes` in `ci.yml` (KHA-67)
 
 `timeout-minutes` is **when GitHub starts cancelling**, not when the job or
@@ -246,3 +269,43 @@ should; the job name doesn't change).
 - If a signing secret is ever rotated, update it in **Settings -> Secrets and
   variables -> Actions** (or the `staging` environment) — nothing else needs
   to change.
+
+## 7. Linear auto-close mishandling (KHA-85) — accepted risk, process-mitigated
+
+Linear's GitHub integration has mishandled auto-close on this build in three
+directions: wrongful close of partially-addressed issues (KHA-64, KHA-78,
+KHA-90), incomplete close when a PR title lists many issues but Linear only
+follows the ones with an actual link/assignee relationship (PR #30 — 10 of 11
+needed manual transition), and a close triggered merely by a PR *documenting*
+a past auto-close bug and mentioning the issue number, with no closing keyword
+in the body at all (KHA-106, PR #32/#33).
+
+**The correct fix — turning off PR-merge auto-close in Linear's own GitHub
+integration settings — is not available on this workspace's plan** (confirmed
+directly by the human; that control is gated behind Linear's Business tier).
+Investigated and ruled out at the repo/workflow level for the reasons below;
+this is not a gap left unexamined:
+
+- **GitHub's own closing-keyword parsing (`Closes`/`Fixes`/`Resolves` + `#N`)
+  does not even apply here.** It only recognizes GitHub-native issue/PR
+  references (`#123`), never external-tracker IDs like `KHA-106`. There is no
+  repo config (`.github/*.yml` or otherwise) to suppress it regardless, but
+  it was never the mechanism firing in any of the three failure modes above —
+  Linear's own integration parses PR titles/bodies/branch names for its own
+  ID pattern independently of GitHub's keyword feature, which is exactly why
+  KHA-106 closed with the closing keyword already stripped.
+- **No `.github`-level setting exists to change how a third-party GitHub App
+  (Linear's integration) parses PR content.** That behaviour lives entirely
+  on Linear's side.
+- A PR-template/convention rule ("never write a bare `KHA-nnn` mention without
+  an explicit qualifier") was considered and rejected as the wrong shape of
+  fix: KHA-106 shows a bare mention isn't even required to trigger it, so a
+  wording convention would not close the gap it's aimed at, only add process
+  overhead for a false sense of safety.
+
+**Standing mitigation (already in place, not new):** the code-reviewer
+manually reconciles Linear state against the merge commit after every merge —
+see `docs/lessons.md`'s 2026-07-29 entries on both the wrongful-close and
+incomplete-close failure modes. This is the accepted, permanent mitigation
+until the workspace is ever upgraded to a Linear tier that exposes the
+integration setting. No further code-level fix exists to build here.

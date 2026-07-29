@@ -1,0 +1,106 @@
+# Massrofy — lint gate for QA-artifact PRs (KHA-108)
+#
+# WHY THIS FILE EXISTS, SEPARATELY FROM ci.yml:
+#
+# docs/lessons.md's standing rule (established after PR #21 was orphaned by a
+# squash-merge deleting its base branch) is that QA opens its verification PR
+# against the CODE BRANCH, not `main` — e.g. `qa/pr27-p4a-verification` into
+# `feature/p4a-categorization-spine` — and that QA PR merges into the code
+# branch before the code PR reaches `main`. See PR #28 and PR #35 for the
+# pattern in practice.
+#
+# ci.yml only triggers on `pull_request: branches: [main]`, so every QA
+# artifact PR — by construction, always based against something other than
+# `main` — gets ZERO check runs of its own. That has already been mistaken
+# for a broken pipeline by a reviewing agent twice (PR #28, PR #35) before
+# being correctly identified as "by config, not failure." It also means the
+# two gates that have actually caught a real defect on a QA branch before —
+# an unused-import lint failure on PR #30's QA branch, caught later than it
+# should have been specifically because of this gap — run nowhere on these
+# PRs at all.
+#
+# THE FIX, kept deliberately small (TIER: personal, see docs/PRD.md):
+# a second, lightweight workflow that fires on any PR whose BASE is not
+# `main` (i.e. exactly the QA-artifact-PR shape, plus any other non-main-base
+# PR that might exist) and runs only `dart format --set-exit-if-changed` and
+# `flutter analyze --fatal-infos`. NOT the full ci.yml suite: QA artifact PRs
+# are docs + test-file only by construction (see PR #28/#35's own "zero
+# production diff" proofs, which QA re-verifies via `git rev-parse
+# 'HEAD^{tree}:lib'` on every pass), so booting an emulator or building an
+# APK for one buys nothing and costs ~15-70 minutes it doesn't need. Analyze
+# + format is what actually catches an issue on this kind of PR (a stray
+# unused import in a new test file, a formatting slip) — see PR #30.
+#
+# `branches-ignore: [main]` is what keeps this from double-running work
+# ci.yml already does: any PR targeting `main` is ci.yml's job, full stop.
+# This workflow only ever picks up the PRs ci.yml cannot see.
+#
+# This is intentionally NOT wired into branch protection as a required
+# check — QA-artifact PRs merge into a feature branch under the reviewer's
+# own judgement (docs/lessons.md's "confirm the QA diff is genuinely
+# artifacts-only before merging it" obligation), not through the same
+# green-CI gate `main` uses. This workflow exists to surface a real problem
+# early, not to become a second merge gate to babysit.
+
+name: qa-pr-lint
+
+on:
+  pull_request:
+    branches-ignore: [main]
+
+# Same fast-fail-and-don't-waste-minutes posture as ci.yml.
+concurrency:
+  group: qa-pr-lint-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_CHANNEL: stable
+
+jobs:
+  analyze-and-format:
+    name: qa-pr-lint (analyze + format)
+    runs-on: ubuntu-latest
+    # A pure lint job with no emulator/network dependency; generous but not
+    # loose, consistent with ci.yml's money-type-guard sizing.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check whether the Flutter project exists yet
+        id: detect
+        run: |
+          if [ -f pubspec.yaml ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No pubspec.yaml at repo root yet — nothing to lint. Mirrors ci.yml's own pre-scaffold no-op behaviour."
+          fi
+
+      - name: Set up Java (required by the Flutter/Android toolchain)
+        if: steps.detect.outputs.exists == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        if: steps.detect.outputs.exists == 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+
+      - name: flutter pub get
+        if: steps.detect.outputs.exists == 'true'
+        run: flutter pub get
+
+      - name: "dart format --set-exit-if-changed (lint: formatting)"
+        if: steps.detect.outputs.exists == 'true'
+        run: dart format --set-exit-if-changed .
+
+      - name: "flutter analyze (lint: static analysis)"
+        if: steps.detect.outputs.exists == 'true'
+        run: flutter analyze --fatal-infos
