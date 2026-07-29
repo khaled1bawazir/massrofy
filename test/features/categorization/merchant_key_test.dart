@@ -5,8 +5,11 @@
 /// SMS is in this repository.
 library;
 
+// `CategorizationConfig` is no longer imported: ADR-008 v1.4 deleted
+// `referenceDigitRunMinLength`, and nothing else in this file's subject matter
+// is configurable. Merchant identity is decided by the rules in
+// `merchant_key.dart` alone (KHA-106).
 import 'package:flutter_test/flutter_test.dart';
-import 'package:massrofy/core/config/categorization_config.dart';
 import 'package:massrofy/core/text/canonical_text.dart';
 import 'package:massrofy/features/categorization/merchant_key.dart';
 
@@ -95,15 +98,23 @@ void main() {
       // `MerchantAlias`; the alternative was `MAKKAH BAKERY` and
       // `MADINAH BAKERY` becoming a single merchant row at confidence 1.00.
       // Pinned as its own case below.
+      //
+      // **Three rows left this list at ADR-008 v1.4 (KHA-106)** for the same
+      // shape of reason: `PANDA FOODS 1420`, `PANDA-FOODS-1420` and
+      // `PANDA*FOODS#0042` were absorbed only by the *length* corroboration
+      // signal, which is withdrawn because no threshold can be residue-safe.
+      // They are pinned as the disclosed cost in the KHA-106 test below rather
+      // than deleted. What still absorbs a store number is a marker word beside
+      // it — `PANDA FOODS STORE 1420` — which is PRD §3.4's observed shape and
+      // the case the product actually needs.
       const List<String> variants = <String>[
         'PANDA FOODS',
         'panda foods',
         '  Panda   Foods  ',
-        'PANDA FOODS 1420',
-        'PANDA-FOODS-1420',
         'PANDA FOODS STORE 1420',
+        'PANDA FOODS 1420 STORE', // KHA-107: the same three tokens, reordered
+        'PANDA-FOODS-STORE-1420',
         'PANDA FOODS BRANCH',
-        'PANDA*FOODS#0042',
       ];
       final Set<String> keys = variants.map(MerchantKey.of).toSet();
       expect(
@@ -178,40 +189,205 @@ void main() {
       );
     });
 
-    test('KHA-99 — a trailing digit run is stripped only when CORROBORATED, '
-        'and at most one of them', () {
-      // ADR-008 v1.3 settled answer 2, as a table.
+    test('KHA-99/106/107 — a digit run is stripped only when a structural '
+        'marker sits beside it, and at most one of them', () {
+      // **ADR-008 v1.4's worked-example table, verbatim.** The architect calls
+      // that table "the regression suite", so it is transcribed rather than
+      // paraphrased, and every row carries the reason from the ADR.
+      const Map<String, String> workedExamples = <String, String>{
+        // Marker BEFORE the run — PRD §3.4's observed shape, unchanged since
+        // v1.3.
+        'PANDA STORE 1234': 'PANDA',
+        'PANDA BRANCH 7': 'PANDA',
+        // Marker AFTER the run. KHA-107 closed: the run is trailing once
+        // structural noise is disregarded, so the two orderings are one shop.
+        'PANDA 1234 STORE': 'PANDA',
+        // No marker anywhere. **The disclosed cost of KHA-106** — pinned as
+        // its own case below too, because it is a cost we chose, not a bug.
+        'PANDA 1234': 'PANDA 1234',
+        'QANDA-9021': 'QANDA 9021',
+        // KHA-106 closed: two numbered outlets are two identities.
+        'QAMART 1000': 'QAMART 1000',
+        'QAMART 2000': 'QAMART 2000',
+        // …and the accepted collapse, disclosed rather than hidden: with a
+        // marker beside them, both DO collapse. Reordering changes this shape.
+        'QAMART 1000 STORE': 'QAMART',
+        'QAMART 2000 STORE': 'QAMART',
+        // KHA-99, still closed at three digits.
+        'QAMART 100': 'QAMART 100',
+        'QAMART 200': 'QAMART 200',
+        // Rule 2 — at most one run; two in a row are not a reference.
+        'QAMART 100 200 300': 'QAMART 100 200 300',
+        // Rule 3 — a bare number keeps whatever identity it has.
+        '4321': '4321',
+        // Rule 5 — leading digits are protected BY RULE 1: `ELEVEN` is not a
+        // noise token, so `7` is never a candidate.
+        '7 ELEVEN': '7 ELEVEN',
+        '7 ELEVEN STORE': '7 ELEVEN',
+        '7 ELEVEN 1234': '7 ELEVEN 1234',
+      };
+      workedExamples.forEach((String input, String expected) {
+        expect(MerchantKey.of(input), expected, reason: 'of("$input")');
+      });
 
-      // Corroborated by ADJACENCY to a structural marker — PRD §3.4's own
-      // observed shape. Preserved exactly as before.
-      expect(MerchantKey.of('PANDA STORE 1234'), 'PANDA');
-      expect(MerchantKey.of('PANDA BRANCH 7'), 'PANDA');
+      // The KHA-102 rows of the same table: the strip fires, and what is left
+      // is all noise, so there is no merchant identity at all.
+      expect(MerchantKey.ofOrNull('STORE 7'), isNull);
+      expect(
+        MerchantKey.ofOrNull('1234 STORE'),
+        isNull,
+        reason:
+            'ADR-008 v1.4: the candidate strips and the remainder is '
+            'all-noise — more conservative than v1.3, and correct',
+      );
 
-      // Corroborated by LENGTH: four or more digits is a till/terminal/
-      // reference id, not a branch number a human says out loud.
-      expect(MerchantKey.of('PANDA 1234'), 'PANDA');
-      expect(MerchantKey.of('QANDA-9021'), 'QANDA');
-
-      // NOT corroborated: a short bare number is part of the name, so two
-      // numbered outlets stay two identities. This is the KHA-99 defect.
-      expect(MerchantKey.of('QAMART 100'), 'QAMART 100');
-      expect(MerchantKey.of('QAMART 200'), 'QAMART 200');
+      // Two numbered outlets must stay two identities, stated as the
+      // inequality the defect was about rather than only as two equalities.
+      expect(
+        MerchantKey.of('QAMART 1000'),
+        isNot(MerchantKey.of('QAMART 2000')),
+        reason: 'KHA-106: the 4-digit sibling collision is closed',
+      );
       expect(MerchantKey.of('QAMART 100'), isNot(MerchantKey.of('QAMART 200')));
       expect(MerchantKey.of('CAFE 1'), isNot(MerchantKey.of('CAFE 2')));
+    });
 
-      // Rule 1 — at most ONE run. Two digit runs in a row are not a reference.
-      expect(MerchantKey.of('QAMART 100 200 300'), 'QAMART 100 200 300');
+    test('KHA-107 — the strip is ORDER-INSENSITIVE: a marker before the run '
+        'and a marker after it produce one key', () {
+      // The defect PROBE M1 reported: the same three tokens in two orders were
+      // two merchant identities, against PRD §3.4's promise that all renderings
+      // of one shop reach one key.
+      expect(
+        MerchantKey.of('PANDA 1234 STORE'),
+        MerchantKey.of('PANDA STORE 1234'),
+      );
+      expect(MerchantKey.of('PANDA 1234 STORE'), 'PANDA');
 
-      // Rule 2 — never strip the last non-digit-bearing thing. A bare number
-      // keeps whatever identity it has rather than becoming no merchant.
-      expect(MerchantKey.of('4321'), '4321');
+      // Swept over every reference marker, not only `STORE`, and in both
+      // orders — a fix that worked for one marker word and not the rest would
+      // pass a single-case test.
+      for (final String marker in MerchantKey.referenceMarkerTokens) {
+        expect(
+          MerchantKey.of('QANDA $marker 4821'),
+          MerchantKey.of('QANDA 4821 $marker'),
+          reason: 'marker "$marker" must corroborate from either side',
+        );
+        expect(MerchantKey.of('QANDA 4821 $marker'), 'QANDA');
+      }
+    });
 
-      // Rule 4 — leading digits keep their existing protection, unchanged.
-      expect(MerchantKey.of('7 ELEVEN'), '7 ELEVEN');
-      expect(MerchantKey.of('7 ELEVEN 1234'), '7 ELEVEN');
+    test('KHA-106 — the DISCLOSED COSTS are pinned as tests, so a future '
+        '"improvement" that reintroduces length stripping fails CI', () {
+      // ADR-008 v1.4 accepted two consequences explicitly. Neither is a bug,
+      // and both are exactly the kind of thing a later reader would "fix".
+      // Asserting them is what turns "we decided this" into something the build
+      // enforces.
 
-      // The tunable is the length, not the bar.
-      expect(CategorizationConfig.referenceDigitRunMinLength, 4);
+      // Cost 1 — a bare digit run is no longer absorbed into the chain key.
+      // The pair falls to T4 ("did you mean…"), which can never auto-apply, so
+      // the app ASKS rather than merging. That direction is the whole point.
+      expect(
+        MerchantKey.of('PANDA 1234'),
+        isNot(MerchantKey.of('PANDA')),
+        reason:
+            'EXPECTED, not a defect: with the length signal withdrawn there '
+            'is nothing in "PANDA 1234" that says 1234 is not part of the '
+            'name. Restoring this equality means restoring KHA-106.',
+      );
+
+      // Cost 2 — with a marker beside them, sibling outlets DO still collapse.
+      // This is signal (i) working as designed, and v1.4 discloses that
+      // reordering makes it reachable for a shape v1.3 did not reach.
+      expect(
+        MerchantKey.of('QAMART 1000 STORE'),
+        MerchantKey.of('QAMART 2000 STORE'),
+        reason:
+            'EXPECTED: `STORE` is the string stating that the run is not part '
+            'of the name. The repair for a wrong marker claim is the '
+            'alias-split affordance (ADR-008 settled answer 6 / H-15), not a '
+            'narrower strip.',
+      );
+      expect(MerchantKey.of('QAMART 1000 STORE'), 'QAMART');
+    });
+
+    test('KHA-106/107 — `of` is idempotent over the whole synthetic corpus, '
+        'and the invariant holds BY CONSTRUCTION', () {
+      // ADR-008 v1.4 requires this table-driven rather than as one case,
+      // because the previous single-case test (`PANDA STORE 1420`) passed
+      // while `PANDA 1234 STORE` was broken.
+      //
+      // The proof the code claims: every corroborator is itself a noise token,
+      // so no OUTPUT of `of` can contain one, so a second pass strips nothing.
+      // The corpus below is deliberately biased toward the shapes that make
+      // that argument load-bearing — markers on both sides, digits everywhere,
+      // all-noise strings, mixed scripts.
+      const List<String> corpus = <String>[
+        'PANDA 1234 STORE',
+        'PANDA STORE 1234',
+        'PANDA 1234',
+        'PANDA',
+        'QAMART 1000',
+        'QAMART 1000 STORE',
+        'QAMART 100 200 300',
+        '7 ELEVEN',
+        '7 ELEVEN STORE',
+        '7 ELEVEN 1234',
+        'STORE 7',
+        '1234 STORE',
+        '1234 STORE 5678',
+        'STORE 1234 BRANCH',
+        'QANDA BRANCH STORE 42',
+        'فرع QANDA 1234',
+        'مطعم البيك فرع الرياض',
+        'PANDA-FOODS-1420',
+        'PANDA*FOODS#0042',
+        '***',
+        'STORE',
+        '4321',
+        'RIYADH STORE',
+        'MAKKAH BAKERY',
+      ];
+      for (final String input in corpus) {
+        final String once = MerchantKey.of(input);
+        expect(
+          MerchantKey.of(once),
+          once,
+          reason: 'of(of("$input")) != of("$input") — the invariant is broken',
+        );
+        // …and a third pass, because "stable after two" and "a fixed point"
+        // are not the same claim.
+        expect(MerchantKey.of(MerchantKey.of(once)), once, reason: input);
+      }
+    });
+
+    test('KHA-106/107 — the proof\'s premises, asserted directly rather than '
+        'trusted', () {
+      // The idempotence argument rests on exactly two facts. If either stops
+      // holding, the invariant above becomes luck, so both are pinned here
+      // where a reader can see them beside the claim.
+
+      // Premise 1: every corroborator is itself stripped by step 7.
+      expect(
+        MerchantKey.referenceMarkerTokens.difference(MerchantKey.noiseTokens),
+        isEmpty,
+        reason:
+            'a corroborator that survives step 7 could appear in `of`\'s '
+            'output and corroborate a strip on the second pass',
+      );
+
+      // Premise 2: `CanonicalText.fold` is itself idempotent — steps 1-5 of
+      // the pipeline. ADR-008 v1.4 asks for this explicitly, since the proof
+      // rests on it.
+      for (final String input in <String>[
+        'PANDA STORE 1234',
+        'مطـــعم البيك',
+        'Panda-1420',
+        'ﺍﻟﺴﻼﻡ',
+        '  spaced   out  ',
+      ]) {
+        final String once = CanonicalText.fold(input);
+        expect(CanonicalText.fold(once), once, reason: 'fold("$input")');
+      }
     });
 
     test(
@@ -227,12 +403,17 @@ void main() {
       },
     );
 
-    test('only TRAILING digit runs are stripped — a leading number is part of '
-        'the name', () {
+    test('a LEADING number is part of the name and is never a candidate', () {
       // Stripping digit tokens anywhere would turn `7 ELEVEN` into `ELEVEN`,
       // inventing a different merchant out of a real name.
+      //
+      // At ADR-008 v1.4 this is no longer a special case for "leading": the
+      // candidate scan walks back from the end and stops at the first token
+      // that is neither a digit run nor noise, so `ELEVEN` shields the `7`.
       expect(MerchantKey.of('7 ELEVEN'), '7 ELEVEN');
-      expect(MerchantKey.of('7 ELEVEN 1234'), '7 ELEVEN');
+      expect(MerchantKey.of('7 ELEVEN STORE'), '7 ELEVEN');
+      expect(MerchantKey.of('7 ELEVEN 1234'), '7 ELEVEN 1234');
+      expect(MerchantKey.of('7 ELEVEN 1234 STORE'), '7 ELEVEN');
     });
 
     test('a merchant with a real name beside a noise word keeps a usable key', () {

@@ -137,41 +137,50 @@ void main() {
   // =========================================================================
   group('PROBE M — does the corroboration rule hold against strings nobody '
       'has tried yet?', () {
-    test('M1 DEFECT (D-QA-30-1) — `MerchantKey.of` is NOT idempotent, and its '
-        'own doc comment says it must be: a trailing digit run that only '
-        'becomes trailing AFTER noise removal is stripped on the second pass '
-        'but not the first', () async {
+    test('M1 INVERTED (was D-QA-30-1, fixed by KHA-107) — `MerchantKey.of` IS '
+        'idempotent, and a digit run that is trailing only modulo structural '
+        'noise is now stripped on the FIRST pass', () async {
+      // **Inverted in place at ADR-008 v1.4, per the convention the PR #27
+      // probes set.** The fixture, the raw string and the reasoning below are
+      // unchanged; only the assertions flip, so the diff shows exactly what
+      // behaviour moved.
+      //
       // `of`'s doc comment states the invariant and states why it matters:
       //   "Idempotent — of(of(x)) == of(x) — which matters because a key is
       //    computed when a merchant is created and recomputed on every later
       //    message. A pipeline that changed its own output on a second pass
       //    would stop matching the very rows it wrote."
       //
-      // The pipeline runs step 6 (digit strip) BEFORE step 7 (noise strip).
-      // So in `PANDA 1234 STORE` the digit run is not last when step 6 looks,
-      // and step 7 then removes `STORE` and *makes* it last. Feed the result
-      // back in and the digit run is now stripped.
+      // The pipeline still runs step 6 (digit strip) BEFORE step 7 (noise
+      // strip) — ADR-008 v1.4 rejects swapping them, because step 6 consumes
+      // the noise tokens as its evidence. What changed is *candidate
+      // selection*: the candidate is the last digit run with only noise after
+      // it, so in `PANDA 1234 STORE` the run IS a candidate on the first pass,
+      // and `STORE` corroborates it from the right-hand side.
       const String raw = 'PANDA 1234 STORE';
       final String once = MerchantKey.of(raw);
       final String twice = MerchantKey.of(once);
 
       expect(
         once,
-        'PANDA 1234',
-        reason: 'first pass: STORE removed, 1234 kept',
+        'PANDA',
+        reason:
+            'first pass: 1234 is trailing modulo noise and STORE '
+            'corroborates it from the right (KHA-107)',
       );
-      expect(twice, 'PANDA', reason: 'second pass: 1234 is now trailing');
+      expect(twice, 'PANDA', reason: 'second pass changes nothing');
       expect(
         twice,
-        isNot(once),
+        once,
         reason:
-            'D-QA-30-1: of(of(x)) != of(x) — the documented invariant '
-            'is false for this shape',
+            'of(of(x)) == of(x) — the documented invariant now holds. It is '
+            'true BY CONSTRUCTION: every corroborator is itself a noise '
+            'token, so no output of `of` can contain one.',
       );
 
-      // The user-visible consequence, and the reason this is filed rather than
-      // noted: two orderings of the SAME shop's name produce different keys,
-      // so PRD §3.4's "all renderings of one shop produce one key" fails here.
+      // The user-visible property that was failing: two orderings of the SAME
+      // shop's name are one key again, so PRD §3.4's "all renderings of one
+      // shop produce one key" holds for this shape.
       expect(
         MerchantKey.of('PANDA STORE 1234'),
         'PANDA',
@@ -179,23 +188,31 @@ void main() {
       );
       expect(
         MerchantKey.of('PANDA 1234 STORE'),
-        isNot(MerchantKey.of('PANDA STORE 1234')),
+        MerchantKey.of('PANDA STORE 1234'),
         reason:
-            'D-QA-30-1: the same three tokens in a different order are '
-            'two different merchant identities',
+            'the same three tokens in a different order are ONE merchant '
+            'identity — adjacency is read on either side (KHA-107)',
       );
     });
 
-    test('M2 DEFECT (D-QA-30-2) — KHA-99 is closed at 3 digits and OPEN at 4: '
-        'numbered sibling outlets with a 4-digit number still collapse to one '
-        'identity at confidence 1.00', () async {
-      // KHA-99's done-check names `QAMART 100` / `QAMART 200`, and that pair is
-      // genuinely fixed. But the length signal (corroboration (ii)) fires on
-      // any run of `referenceDigitRunMinLength` = 4 or more digits with no
-      // other corroboration at all, so the very same defect survives one digit
+    test('M2 INVERTED (was D-QA-30-2, fixed by KHA-106) — the length signal is '
+        'gone, so numbered sibling outlets with a 4-digit number are two '
+        'identities and never auto-apply each other\'s rule', () async {
+      // **Inverted in place at ADR-008 v1.4.** Same fixtures, same reasoning,
+      // flipped assertions.
+      //
+      // KHA-99's done-check names `QAMART 100` / `QAMART 200`, and that pair
+      // was genuinely fixed. But corroboration signal (ii) fired on any run of
+      // `referenceDigitRunMinLength` = 4 or more digits with no other
+      // corroboration at all, so the very same defect survived one digit
       // further along. Four-digit outlet numbers are not exotic.
-      expect(CategorizationConfig.referenceDigitRunMinLength, 4);
-
+      //
+      // The architect's answer was not to retune the constant but to DELETE
+      // it, because a length signal decides strippability from the run alone
+      // and always leaves the shared prefix as the residue — so every value of
+      // N collapses some pair of siblings. The constant no longer exists, and
+      // that absence is asserted by the fact that this file no longer compiles
+      // against it (see the removed import of `CategorizationConfig`).
       expect(
         MerchantKey.of('QAMART 100'),
         'QAMART 100',
@@ -207,20 +224,49 @@ void main() {
         reason: 'KHA-99 fixed',
       );
 
-      // …and here is the same shape one digit longer.
-      expect(MerchantKey.of('QAMART 1000'), 'QAMART');
-      expect(MerchantKey.of('QAMART 2000'), 'QAMART');
+      // …and here is the same shape one digit longer, now closed too.
+      expect(MerchantKey.of('QAMART 1000'), 'QAMART 1000');
+      expect(MerchantKey.of('QAMART 2000'), 'QAMART 2000');
       expect(
         MerchantKey.of('QAMART 1000'),
-        MerchantKey.of('QAMART 2000'),
+        isNot(MerchantKey.of('QAMART 2000')),
         reason:
-            'D-QA-30-2: two distinct numbered outlets, one merchant_key — '
-            'the KHA-98/99 collision shape, unreached by either done-check',
+            'two distinct numbered outlets, two merchant_keys — the '
+            'KHA-98/99 collision shape is closed at every digit length',
       );
 
-      // Executed end to end, because a key collision alone is only half the
-      // story: this is the tier and confidence it lands at.
+      // Executed end to end, because differing keys are only half the story:
+      // T3 or T4 could still reunite them. This is the tier and confidence the
+      // pair actually lands at, and the ADR predicts it precisely — Jaccard
+      // 1/3 = 0.33 (no T3); DL 1 − 1/11 ≈ 0.909 ≥ 0.90, so T4 offers a
+      // suggestion that can never auto-apply.
       final MerchantMatch match =
+          MerchantMatcher.match('QAMART 2000', <MerchantCandidate>[
+            const MerchantCandidate(
+              merchantId: 1,
+              merchantKey: 'QAMART 1000',
+              categoryId: 'groceries',
+              ruleId: 1,
+              ruleSource: 'user',
+            ),
+          ]);
+      expect(match.tier, MatchTier.editDistance);
+      expect(
+        match.canAutoApply,
+        isFalse,
+        reason:
+            'the defect is closed AND the app says what it noticed: a T4 '
+            '"did you mean" that ADR-008 forbids applying at any confidence',
+      );
+      expect(match.needsReview, isTrue);
+      expect(
+        match.confidence,
+        lessThanOrEqualTo(CategorizationConfig.editDistanceConfidenceCeiling),
+      );
+
+      // The other half of the same decision: a rule taught on the bare chain
+      // key must not reach a numbered outlet at T1 any more.
+      final MerchantMatch againstChain =
           MerchantMatcher.match('QAMART 2000', <MerchantCandidate>[
             const MerchantCandidate(
               merchantId: 1,
@@ -230,15 +276,8 @@ void main() {
               ruleSource: 'user',
             ),
           ]);
-      expect(match.tier, MatchTier.userRule);
-      expect(match.confidence, 1.00);
-      expect(
-        match.canAutoApply,
-        isTrue,
-        reason:
-            'D-QA-30-2: auto-applied at T1 — above every tier gate, '
-            'exactly as KHA-98/99 described',
-      );
+      expect(againstChain.tier, isNot(MatchTier.userRule));
+      expect(againstChain.canAutoApply, isFalse);
     });
 
     test('M3 HOLDS — the residue-safety sweep: no OTHER structural token in '

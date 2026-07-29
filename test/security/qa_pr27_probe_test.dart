@@ -319,6 +319,14 @@ void main() {
       // structural word (`PANDA STORE 1234`) or by length (≥ 4 digits, which is
       // a till/terminal id rather than a branch number a human says out loud).
       //
+      // **ADR-008 v1.4 (KHA-106) withdrew the length half**, because it was the
+      // same defect one digit further along: `QAMART 1000` and `QAMART 2000`
+      // both keyed as `QAMART`. Adjacency is now the only corroborator, and it
+      // is read on either side of the run (KHA-107). The three assertions this
+      // probe makes about `QAMART 100/200/300` are UNCHANGED by that — they
+      // were never length-corroborated — so only the two `PANDA` lines at the
+      // end of the test moved.
+      //
       // INVERTED (was: all three `equals('QAMART')`).
       expect(MerchantKey.of('QAMART 100'), equals('QAMART 100'));
       expect(MerchantKey.of('QAMART 200'), equals('QAMART 200'));
@@ -351,9 +359,15 @@ void main() {
       expect((await transactionDao.byIdOrNull(other))!.needsReview, isTrue);
 
       // The corroborated shapes are preserved — this bounds the strip, it does
-      // not remove it. PRD §3.4's motivating case still works.
+      // not remove it. PRD §3.4's motivating case still works, in BOTH token
+      // orders since KHA-107.
       expect(MerchantKey.of('PANDA STORE 1234'), 'PANDA');
-      expect(MerchantKey.of('PANDA 1234'), 'PANDA');
+      expect(MerchantKey.of('PANDA 1234 STORE'), 'PANDA');
+      // INVERTED AGAIN at ADR-008 v1.4 (was `'PANDA'`, by the withdrawn length
+      // signal). A bare run has no corroboration at all now, and the pair
+      // `PANDA 1234` / `PANDA` is flagged rather than merged — the disclosed
+      // cost of KHA-106, and the direction AC-D2.3 names.
+      expect(MerchantKey.of('PANDA 1234'), 'PANDA 1234');
       // ...and the leading-digit protection is untouched.
       expect(MerchantKey.of('7 ELEVEN'), '7 ELEVEN');
     });
@@ -488,7 +502,19 @@ void main() {
         expect(MerchantKey.of('QANDA STORE 1234'), expected);
         expect(MerchantKey.of('  qanda  '), expected);
         expect(MerchantKey.of('فرع QANDA'), expected);
-        expect(MerchantKey.of('QANDA-9021'), expected);
+        // AMENDED AT KHA-107, and this row is the point of the amendment:
+        // `فرع` corroborates from the LEFT of the digits here, which v1.3
+        // could not read (it only looked at the token before the run, and the
+        // run is last). Cross-script corroboration works in both orders now.
+        expect(MerchantKey.of('QANDA 1234 فرع'), expected);
+        expect(MerchantKey.of('فرع QANDA 1234 محل'), expected);
+
+        // AMENDED AT KHA-106 (was `expected`). `QANDA-9021` has no structural
+        // marker anywhere — only a four-digit run, and the length signal that
+        // used to absorb it is withdrawn because it merged `QAMART 1000` with
+        // `QAMART 2000`. This is the disclosed cost, and it points the safe
+        // way: two rows the user can link, not one row that swallowed another.
+        expect(MerchantKey.of('QANDA-9021'), 'QANDA 9021');
 
         // AMENDED AT KHA-98, not weakened. `فرع QANDA الرياض` used to key as
         // `QANDA` too, because `الرياض` was on the noise list. It is a city —
@@ -1341,7 +1367,16 @@ void main() {
   group('AC-F5.2 — the audit trail of an automatic categorization', () {
     test('PROBE W (HOLDS) — the electric-bill case writes a SYSTEM-attributed '
         'entry naming the rule, the before/after and the confidence', () async {
-      final int firstBill = await sms(merchant: 'QA ELECTRIC CO 4471');
+      // **The fixture gained a `TERMINAL` marker at ADR-008 v1.4 (KHA-106).**
+      // It used to be `QA ELECTRIC CO 4471` / `… 9982`, which keyed alike only
+      // because of the withdrawn ≥4-digit length signal — `CO` is a legal-form
+      // word and deliberately NOT a reference marker ("Qandaco LLC 5" is not a
+      // recognised reference shape). This probe is about the *audit trail* of
+      // an automatic categorization, so the fixture is corrected to a shape
+      // that still auto-applies rather than the probe being weakened: a
+      // structural marker beside the terminal id, which is PRD §3.4's observed
+      // form and the only corroboration the pipeline now accepts.
+      final int firstBill = await sms(merchant: 'QA ELECTRIC CO TERMINAL 4471');
       await service.categorizeTransaction(transactionId: firstBill);
       await service.applyUserCategory(
         transactionId: firstBill,
@@ -1349,7 +1384,7 @@ void main() {
       );
 
       final int secondBill = await sms(
-        merchant: 'QA ELECTRIC CO 9982',
+        merchant: 'QA ELECTRIC CO TERMINAL 9982',
         day: 16,
       );
       final CategorizationOutcome outcome = await service.categorizeTransaction(
