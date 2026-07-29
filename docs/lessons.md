@@ -97,3 +97,41 @@ Format per entry:
   must name the commit SHA it was measured on, and a reviewer must re-run the gate on the
   CURRENT head rather than citing an earlier verdict — a stale-but-true-when-written claim is
   indistinguishable from a fabricated one to whoever reads it later.**
+
+- **[2026-07-29] [process] The conditional merge gate is a genuinely good invention — give it a
+  home outside the merge commit.** Shipping PR #20 with two known High defects was the right call
+  and code-reviewer defended it properly: it verified that *no shipped code path can reach them*
+  (the app shell routes only to `HomePlaceholderScreen`) and wrote an explicit condition —
+  "KHA-87/88 are merge-blocking for any PR that routes `NeedsReviewScreen`,
+  `RecentlyDeletedScreen` or `TransactionDetailScreen`, and for any build that reaches a device."
+  That is better than either shipping silently or blocking on an unreachable bug. **But the gate
+  lived only in a merge-commit message**, where nothing enforces it and nobody re-reads it — and
+  it turned out to bisect the very next phase, because P4's AC-C2.2 and AC-C4.1/4.2 cannot be met
+  without routing two of the three named screens. **-> When a reviewer ships a known defect under
+  a condition, the condition must become a `blocks` link in the tracker on the issues it gates, in
+  the same action as the merge. A gate that exists only in prose is a gate that depends on the
+  next person having read the right commit.** (Generalises: "unreachable today" is a claim about
+  *navigation*, not about code — it expires the moment someone adds a route, silently.)
+
+- **[2026-07-29] [qa] Four QA artifact PRs in a row have needed manual rebase/cherry-pick rescue,
+  and the cause is the branch topology, not carelessness.** PR #12 was opened and closed unused;
+  #15 needed its own pass; #19 needed conflict resolution in `docs/defects.md`; **#21 was orphaned
+  outright** — it was retargeted to `main` when PR #20 squash-merged and deleted its base branch,
+  and had to be replaced by #22 with a cherry-pick. Each rescue was ad-hoc orchestrator cleanup.
+  The root cause: QA's artifacts are authored *against the code branch* (the probes must compile
+  against the code under test) but the PR is opened *against `main`*, so a squash-merge of the
+  code PR deletes the ground the QA PR was standing on. **-> Open the QA artifact PR with the
+  CODE BRANCH as its base, and merge it into that branch before the code PR merges.** One base
+  that still exists, one final merge to `main`, no orphan. The "zero production diff" property QA
+  rightly insists on is preserved as a *commit* boundary instead of a *PR* boundary — still fully
+  verifiable by tree hash, which is how QA has been proving it anyway.
+
+- **[2026-07-29] [process] The "issue born in review has no milestone" lesson recurred within 24
+  hours of being written — so the reminder is not the fix.** KHA-87 and KHA-88 were created during
+  PR #20's QA gate with owner, labels, severity and superb reproductions, and **no milestone** —
+  exactly the 2026-07-28 finding about KHA-69/70/74. They were High, `security-sensitive`, and
+  gating the next phase, and they were invisible to the phase plan. A rule that a busy agent must
+  remember mid-gate has now failed twice. **-> Stop treating it as an authoring rule and make it a
+  standing reconciliation step: at every supervision turn, the manager queries Linear for issues
+  with no milestone and files them before doing anything else. Authoring discipline is still
+  requested, but the manager is the backstop and should assume the rule was missed.**
