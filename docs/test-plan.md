@@ -874,6 +874,107 @@ non-event.
 
 ---
 
+## 7e. Seventh pass — P4a-1, PR #30 (`fix/p4a-1-merge-undo-and-merchant-identity`, head `3620388`)
+
+**Scope:** the eleven issues PR #30 closes. This is the **third** adversarial
+round on `MerchantKey`/`MerchantMatcher` and the **third** on the merge/undo
+link, so the pass is run against each issue's **own done-check** (written during
+the PR #20/#24/#27 gates) rather than against the PR's self-description — the
+`docs/lessons.md` rule that a done-check narrower than its ACs hides unshipped
+work cuts both ways.
+
+**Commands run, on `3620388` itself** (evidence: `docs/evidence/pr30/`):
+
+```
+flutter analyze                                  # No issues found! (6.3s)
+dart format --set-exit-if-changed --output=none . # 208 files, 0 changed
+flutter test                                     # 1242 passing / 3 skipped / 1 failing
+flutter test --dart-define=dart.vm.product=true \
+  test/features/security/privacy_overlay_release_mode_test.dart   # All tests passed
+flutter test test/security/qa_pr30_probe_test.dart # 18 passing (16 HOLDS, 2 DEFECT)
+```
+
+Every figure the PR body claims reproduces exactly. The single failure is the
+disclosed environmental one and was **verified to pass** under the dart-define CI
+supplies, rather than accepted on the PR's word.
+
+### 7e.1 Done-check traceability — the eleven issues
+
+| Issue | Sev | Done-check (from the issue, not the PR) | Test / probe | Status |
+|---|---|---|---|---|
+| **KHA-88** | High | `restore()` clears the survivor pointer only when it names the restored row; audit entry against the survivor; the link becomes a set or the doc stops claiming bidirectionality; B2/B3/B4/B6/F6 inverted | `qa_pr20` B2 (inverted), `qa_pr24` J1/J1b, `transaction_merge_test` set-link group, **probes N1/N2/N5** | **PASS** |
+| **KHA-94** | High | The link becomes set-valued **or** the guard asks the DB directly; J1 inverted; pr20 B6/B6b untouched | `qa_pr24` J1 (inverted) + **J1b** (raw-SQL corruption), **probes N1–N5** | **PASS** — both remedies shipped, not one |
+| **KHA-96** | Low | K1's column enumeration promoted to `transaction_merge_test` expecting `isEmpty`; a recorded decision for `provenance`/`provenance_detail`; O-QA-10 doc sentence; O-QA-11 narrowing | `transaction_merge_test` (schema-derived forcing function, `$columns`), provenance-noop test, `transaction_merge.dart` property 1, **probe P3** | **PASS** |
+| **KHA-98** | High | `of('MAKKAH BAKERY') != of('MADINAH BAKERY')`; `PANDA RIYADH`/`JEDDAH` merged **or flagged**, not silently split into unrelated shops; PROBE B inverted in place | `qa_pr27` B (inverted), **probes M3, M6** | **PASS** — and M6 confirms refusal at **every** tier, not only T1 |
+| **KHA-99** | Med | `of('QAMART 100') != of('QAMART 200')` while `PANDA STORE 1234` still → `PANDA`; PROBE C inverted | `qa_pr27` C (inverted), **probe M2** | **PASS as written** — see **D-QA-30-2**: the same defect is open at ≥4 digits |
+| **KHA-100** | Low | `QAFE QAFE` no longer auto-applies **or** the config comment names multiplicity; PROBE D updated | `qa_pr27` D (inverted), **probes M5, M7** | **PASS** — both remedies shipped; M5 confirms T3 was not simply disabled |
+| **KHA-101** | Med | After correcting from the edit form: `needsReview == false`, `reviewReason == null`, a rule exists; a flag from a *different* question still **not** cleared; PROBE U inverted | `qa_pr27` U (inverted), `transaction_edit_test` KHA-101 seam group (4 tests) | **PASS** — the "does not fire on an untouched category" and "no learner bound" cases are real and adversarially framed |
+| **KHA-102** | Med | `ofOrNull('***') == null` and `ofOrNull('-*-') == null`, while `Riyadh Store` still gets a usable key; PROBE G2 inverted | `qa_pr27` G2 (inverted), `merchant_key_test`, **probe M3** | **PASS** — M3 sweeps *every* noise token, not the two the issue names |
+| **KHA-103** | Low | After `SetToUncategorized()`, no row holds a `category_rule_id` for a missing rule and none says `source = 'rule'` with NULL `category_id`; AC-C1.3 reconciles; PROBE X inverted | `qa_pr27` X (inverted), `category_dao_test`, **probes P1, P2** | **PASS** — P1 attacked the `isUserOwnedCategory` widening and could not reach the bad state (**O-QA-30-1**) |
+| **KHA-104** | Low | `upsertRule` with an unknown category throws or writes nothing, **or** the matcher never applies it; the dangling-id read path still renders Uncategorized; PROBE Y inverted | `qa_pr27` Y (inverted), `merchant_dao_test`, **probes Q1, Q2** | **PASS** — Q2 proves the **read** side independently by inserting a dangling rule via raw SQL, bypassing the write guard entirely |
+| **KHA-105** | Low | `applyAutomaticCategory` with no `merchantId` leaves an existing link untouched; PROBE AC inverted | `qa_pr27` AC (inverted), **probe Q3** | **PASS** |
+
+### 7e.2 Adversarial pass — attacks attempted, including the ones that failed
+
+Recorded so the audit evidence shows these were **run**, not assumed. 18 probes
+in `test/security/qa_pr30_probe_test.dart`, all passing.
+
+| Probe | Attack | Outcome |
+|---|---|---|
+| **M1** | Is `of` idempotent, as its doc comment claims? Feed a digit run that only becomes trailing after noise removal | **DEFECT D-QA-30-1** — `of(of(x)) != of(x)`; effect is a split (safe direction) |
+| **M2** | Does the KHA-99 bound hold one digit past the done-check's example? | **DEFECT D-QA-30-2** — `QAMART 1000` == `QAMART 2000`, T1, 1.00, auto-applied |
+| **M3** | Sweep **every** noise token: can any of them remove more than itself? Sweep 10 proper-noun-shaped distinguishing tokens (city, district, mall, person shapes) | **HOLDS** — all 10 keys distinct; every noise token removes only itself; each alone yields no identity |
+| **M4** | Can `referenceMarkerTokens` be widened past the reviewed noise allow-list, smuggling a proper noun into digit corroboration? | **HOLDS** — it is a strict subset. *(Asserted nowhere in the engineer's suite; this probe is the only thing pinning it.)* |
+| **M5** | Beat the multiset fix: 3× repetition, and repetition in the **candidate** rather than the query (the mirror direction) | **HOLDS** — all refused; a genuine permutation still auto-applies, so the fix is not "disable T3" |
+| **M6** | KHA-98's pair differs in key — but can T3 or T4 reunite it? | **HOLDS** — `MatchTier.none`, no "did you mean" leak |
+| **M7** | Is the PR's **self-correction** about its own ADR accurate? | **HOLDS** — `QAFE QAFE` falls past T4; ratio 1−5/9 ≈ 0.44 as stated |
+| **N1** | KHA-94's composition end to end through the public service: merge → merge → undo → re-merge | **HOLDS** — `chainWouldForm`, for the right reason; invariant asserted after every step |
+| **N2** | Three-deep absorb, undo the **middle** one, then undo all — does the guard release, or lock out forever? | **HOLDS** — scalar re-points correctly at each step; refusal is reversible |
+| **N3** | merge → undo → **re-merge the same pair** → chain: does the guard re-arm? | **HOLDS** |
+| **N4** | **Concurrency**: two different rows merged into one survivor simultaneously (pr20's B7 raced the other direction) | **HOLDS** — both land, set holds both, scalar names exactly one, chain intact |
+| **N5** | Ghost back-pointer: does `restore` move `is_deleted` and `merged_into_id` together, or can a restored row haunt / vanish from the set? | **HOLDS** — both move together |
+| **P1** | Separate AC-D3.1's two redundant signals via the merge, to reach `source='rule'` on a protected row and defeat KHA-103 | **HOLDS** — unreachable, two independent reasons (**O-QA-30-1**) |
+| **P2** | KHA-103's two ordinary branches | **HOLDS** |
+| **P3** | O-QA-11 both ways, **and** across an undo — is the review flag loss merely moved to the undo path? | **HOLDS** |
+| **Q1** | KHA-104 **write** side | **HOLDS** — sentinel returned, nothing written, audit chain intact |
+| **Q2** | KHA-104 **read** side, proved independently: dangling rule inserted by **raw SQL**, bypassing `upsertRule` | **HOLDS** — dropped from candidates; shop still identified; row flagged for review, not stamped |
+| **Q3** | KHA-105 | **HOLDS** |
+
+### 7e.3 Claims checked rather than accepted
+
+- **R-16 sequencing** (*"this must land before any device install populates
+  `merchant` rows; the categorizer is already wired into live ingestion with no
+  screen required"*) — **verified true and still true.** `git diff 42db8ff HEAD`
+  over `lib/` shows PR #30 touches **no** provider wiring for ingestion:
+  `ingestion_providers.dart` and `categorization_providers.dart` are not in the
+  diff at all. The wiring itself is real on this head —
+  `ingestion_providers.dart` watches `ingestionCategorizerProvider` and passes it
+  to the pipeline as `categorizer:`, which calls
+  `CategorizationService.categorizeTransaction`. So one ingested SMS on an
+  unlocked schema-v7 install does populate `merchant` with no screen involved.
+- **KHA-101's reachability correction** — **accurate.** `lib/app.dart` routes only
+  `LockGateScreen` and `HomePlaceholderScreen`.
+- **ADR-008 v1.3's `QAFE QAFE` footnote** — **accurate** (probe M7).
+- **ADR-008 v1.3's `PANDA RIYADH`/`PANDA JEDDAH` Jaccard = 1/3** — **accurate**;
+  correctly overrides QA's own earlier 0.5 figure from the pass-6 report.
+- **What the ADR does *not* say** — settled answer 2's "consequences on synthetic
+  input" list never states a 4-digit sibling pair, so **D-QA-30-2 is an
+  undisclosed consequence rather than an accepted cost**.
+
+### 7e.4 Tracking check (the `docs/lessons.md` milestone/`blocks` rules)
+
+- Both new issues filed with the **P4 milestone set at creation**, per the
+  standing reconciliation lesson.
+- D-QA-30-2's conditional gate is a **`blocks` link in Linear**, not prose in a
+  merge commit — the PR #20 lesson about gates that live only in a commit
+  message.
+- **Nothing in PR #30 is deferred without a ticket.** The one downstream item,
+  **H-15** (the "this is a different shop" alias-split affordance), is a human
+  design-gate item already tracked in `docs/architecture.md` §8.1 alongside
+  H-6/H-13/H-14, and the ADR is explicit it must not block this fix landing.
+
+---
+
 ## 8. Untestable-as-written criteria
 
 None found in Epic 0, Epic A, or the Epic B slice built by P3a. Every AC in the
