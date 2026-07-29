@@ -1104,6 +1104,264 @@ PR routes all three, and all fourteen issues are `Done`.
 
 ---
 
+## 7g. Ninth pass — P5a, PR #41 (`feature/p5a-shell-home-transactions`, head `d9fac9e`)
+
+**Scope:** KHA-35 (Home dashboard), KHA-36 (transaction list + bank/instrument
+screens), and the three High defects from the P5 entry gate — KHA-113 (SMS
+permission never requested), KHA-114 (soft delete unreachable), KHA-115 (the
+immortal correction snackbar).
+
+### 7g.0 Calibration
+
+`TIER: personal`. Journeys first, then a small number of high-value probes —
+**nine**, not thirty. The one place depth was *not* trimmed is **NFR-A6**, the
+instrument → bank → period reconciliation chain: it is real money logic, this
+build has repeatedly found bugs behind shallow tests of exactly this invariant,
+and the shipped test's own doc comment overstates its coverage (see 7g.3).
+
+### 7g.1 Commands re-run on `d9fac9e` itself
+
+`docs/lessons.md`: *"any pass/fail claim must name the commit SHA it was measured
+on, and a reviewer must re-run the gate on the CURRENT head."* All four measured
+by QA on `d9fac9e`, not cited from the PR body:
+
+| Gate | Engineer claimed | QA measured on `d9fac9e` | Verdict |
+|---|---|---|---|
+| `dart format --set-exit-if-changed lib test` | clean | **234 files, 0 changed**, exit 0 | reproduced |
+| `flutter analyze` | clean | **No issues found** (6.2s), exit 0 | reproduced |
+| `flutter test --exclude-tags=release_mode_guard` | 1434 pass / 3 skip / 0 fail | **+1434 ~3, All tests passed** | reproduced exactly |
+| Flutter floor `>=3.44.0` (KHA-115 needs `SnackBar.persist`) | satisfied by `stable` | local toolchain **3.44.8**, compiles | satisfied, with **0.0.8 of headroom** — noted in O-QA-41-3 |
+
+### 7g.2 Traceability — the five issues' acceptance criteria
+
+| AC / done-check | Where verified | Status |
+|---|---|---|
+| **AC-A1.2** rationale + a way to grant, never an unexplained empty state | `p5a_onboarding_gate_test` (fresh install → S-02; denied → S-04 carrying "still intact") | PASS |
+| **AC-A1.3** revoked → warns, data intact | `p5a_onboarding_gate_test` (flag set → app + `SmsAccessRevokedBanner`); copy checked in `app_en.arb` | PASS |
+| **AC-A3.1/A3.2** initial import + progress | `foregroundSweepProvider` → `HistoricalImporter.runOrResume`; **QA probe B1/B3** (previously untested — see 7g.4) | PASS |
+| **AC-B1.2** original SMS text viewable | `p5a_transaction_detail_actions_test`; `originalMessageTextProvider` wired at the one construction site | PASS |
+| **AC-B2.1/2.2/2.3** bank + per-instrument totals | `p3_screens_test` (screens) + `p5a_shell_navigation_test` (wiring) + `totals_reconciliation_test` + **QA probes A1–A5** | PASS |
+| **AC-B3.1** rename | `p5a_shell_navigation_test` ("an instrument can be renamed from its detail…") | PASS |
+| **AC-B4.3** manual vs SMS-derived | `p5a_screens_test`, `p5a_greyscale_test` | PASS |
+| **AC-B6.1/6.2/6.4** soft delete after explicit confirmation | `p5a_transaction_detail_actions_test` (offer, confirm, cancel-writes-nothing) | PASS |
+| **AC-B7.3 / NFR-U4** credit vs debit without colour | `p5a_greyscale_test`, with a real negative control (see 7g.5) | PASS |
+| **AC-B8.1/8.2** restore, S-44 can hold something | `p5a_transaction_detail_actions_test` | PASS |
+| **AC-B11.1** internal transfer carries no sign, excluded from spend | `p5a_screens_test`; **QA probe A1** (two-bank case) | PASS |
+| **AC-B12.2 / B13.3 / B14.2 / B14.3** | `p3_screens_test` (screens) + P5a wiring test | PASS |
+| **AC-C4.1 / C4.2** review indicator + count from the main screen | `p5a_screens_test`, `ReviewCountCard` on Home | PASS |
+| **AC-E1.1** total on the first screen, no navigation | `p5a_shell_navigation_test`, `p5a_screens_test` | PASS |
+| **AC-E1.2** reflects an added/corrected transaction | `p5a_shell_navigation_test` (Drift stream, moves with no navigation at all) | PASS |
+| **AC-E1.3** zero/empty state, not blank or error | `p5a_screens_test` (explicit `0.00` **and** caption; loading shows no figure) | PASS |
+| **AC-E1.4** calendar months, resets on the 1st, prior month viewable | `period_range_notifier_test` — 13 tests incl. Riyadh-midnight boundary, half-open window, **both halves**, and no drift on repeated shifts | PASS |
+| **AC-E5.3** filtered-empty state | **absent, correctly** — there is no filter until KHA-38, which owns AC-E5.3 explicitly | N/A (owned) |
+| **NFR-A6** instrument → bank → period reconciliation | `totals_reconciliation_test` + **QA probes A1–A5** | PASS (see 7g.3) |
+| **NFR-R2** no perceptible wait, responsive during background work | every Home section reads a Drift stream; nothing awaits ingestion | PASS by construction |
+| **NFR-S2** masked identifiers | `p5a_shell_navigation_test` asserts last-four only | PASS |
+| **NFR-S3** every screen behind the lock; nothing above the gate | one ternary in `app.dart`; **QA probe C1** on the real `MassrofyApp` (see 7g.6) | PASS |
+| **NFR-U3/U8** Arabic RTL, 2.0 text scale | both locales throughout; dense screens at 2.0 | PASS |
+
+### 7g.3 NFR-A6 given genuine scrutiny — the three claimed layers are real, and one claim is overstated
+
+The PR claims three independent layers. **All three exist and all three are
+sound**: the hand-computed literal `3550.50` was re-derived by QA from the
+fixture comment and is correct; the chain is asserted as exact `Money` equality
+(not `closeTo`), which is right because `Money` wraps `Decimal`; the 200
+generated ledgers use a fixed seed and reconcile.
+
+**But the test's own doc comment claims the generated sweep covers *"an internal
+transfer split across two banks"*, and it does not.** Its generator emits only
+`posPurchase` and `refund`, all in `SAR`. That is the one gap that matters,
+because `LedgerTotals.report`'s own doc names transfer-slicing as *"the most
+plausible way to reintroduce AC-B11.1 as a bug"*.
+
+QA proved the gap by mutation, not by reading:
+
+> Removing `transfers: transfers` from `BankTreeBuilder._nodeFor` — i.e.
+> reverting to a per-instrument detector run, which counts every internal
+> transfer as spend at the sending bank — leaves
+> **`totals_reconciliation_test.dart` passing 5/5**. QA probes **A1** and **A3**
+> both fail on that mutation.
+
+The shipped behaviour is **correct**; this is a coverage gap, not a defect, and
+it is **closed inside this pass** by `test/security/qa_pr41_probe_test.dart`
+(recorded as G-QA-41-1). Probes added:
+
+- **A1** — a proven internal transfer whose two legs sit at *different* banks:
+  excluded from both bank totals and the period total, chain still exact.
+- **A2** — the chain under **currency conversion**, plus the *"N not converted"*
+  counts reconciling. (Additivity holds structurally: `_add` converts each
+  transaction individually and sums the converted values, so sum-of-rounded and
+  rounded-of-sum cannot diverge. Now pinned rather than reasoned.)
+- **A3** — 200 generated ledgers, different seed, with the nine debit types,
+  three credit types, three currencies, fees, undated/out-of-period rows, cash,
+  and 0–2 internal transfer pairs per run.
+- **A4** — a **business oracle**: a realistic 17-transaction month recomputed by
+  a hand-written fold that re-derives "what counts" from the PRD, cross-checked
+  against a hand-written literal (`5,436.55 SAR`), then asserted equal to
+  `LedgerTotals.spend`. The drill-down sums to `5,376.55` — exactly `60.00` less,
+  the cash row that sits under no bank.
+- **A5** — the inverse of A1: a *candidate* pair (no matching reference) **keeps
+  counting** and is flagged. This pins the deliberate over-statement bias so a
+  future "fix" cannot silently under-state spend (risk R-7).
+
+One residual, non-blocking: the period total includes cash (no instrument) and
+the sum of bank totals cannot. `BanksScreen` shows **no grand total**, so the app
+never displays two figures that claim to agree — acceptable at this tier, logged
+as **O-QA-41-1**.
+
+### 7g.4 KHA-113 — the fresh-install journey, including the case the human actually hit
+
+The shipped gate tests are good and cover: fresh install → S-02; Grant →
+`request()` called exactly once; denied → S-04; "Not now" → S-04 with
+`request()` **not** called (Android gives one prompt); permanentlyDenied → deep
+link to Settings; the flag written **on decline as well as grant**, so a relaunch
+shows the app rather than a screen already read; already-granted → no onboarding;
+revoked-after-onboarding → app + banner; Arabic RTL.
+
+**What none of them covered:** nothing anywhere in `test/` referenced
+`foregroundSweepProvider` — the provider that actually turns a granted permission
+into a ledger. So *"I granted it in Android Settings, does the import run?"* was
+untested, which is the same never-exercised-wiring shape KHA-113 itself was.
+QA probes:
+
+- **B1** — permission `granted` out of band, `request()` never called: the sweep
+  runs and **three inbox messages become three transactions**. The human's
+  scenario works.
+- **B2** — the control: `denied` → sweep returns null, nothing written. So B1 is
+  known to be about the permission.
+- **B3** — denied, then granted out of band, then the pair of `invalidate` calls
+  `app.dart`'s resume handler makes: the import starts on the **very next
+  sweep**, with no relaunch and no onboarding replay.
+
+`onboarding_complete` does distinguish "never asked" from "granted once, since
+revoked" (AC-A1.3), as claimed — verified by the shipped test and by reading
+`AppSettingsDao`. One honest edge, logged as **O-QA-41-2**: after an *out-of-band*
+grant the flag is never written, so a later Android auto-revoke shows S-02 rather
+than the AC-A1.3 banner. That leads somewhere sensible (re-grant) and the banner
+copy is written to be true either way (*"**Any** data you already have is still
+intact"*), so it is an observation, not a defect.
+
+### 7g.5 NFR-U4 — the greyscale test is a real negative-control test
+
+`signalsOf` reads **only** `Text.data` and `Icon.codePoint` — no `Color` — and
+the fourth test proves the harness cannot read a colour by feeding it two rows
+that differ *only* by hue and asserting the signal sets are equal. Without that
+control the other three assertions would prove nothing. The PR's argument for not
+using a golden file is correct: a golden proves two renders are identical, not
+that two rows are distinguishable. Amounts are deliberately the same magnitude
+(`45.00` both sides) so the rows cannot pass on the number alone.
+
+Nit, not a defect: the `ColorFiltered`/flattened-palette wrapper does nothing for
+this reading method, since `signalsOf` inspects the widget tree rather than
+pixels. The load-bearing part is the negative control, and it is there.
+
+### 7g.6 KHA-115 and the two undisclosed-but-fixed defects
+
+**KHA-115 — verified, and the diagnosis is correct.** `SnackBar`'s constructor
+really does `persist = persist ?? action != null`, so an actionable bar is
+immortal; `scoped_snack_bar.dart` passes `persist: false` explicitly. Six shipped
+tests cover auto-dismiss, a no-action control, dismissal on push, dismissal on
+pop (a genuinely separate path — a pop does not move `secondaryAnimation`), the
+Undo being **inert** once its route is not current (staged through a
+`DialogRoute`, which a `MaterialPageRoute` cannot transition to, so the bar
+really does survive), a **positive control** proving the Undo *does* fire while
+current, and replacement rather than queueing.
+
+**The `source_hygiene_test` guard is real.** QA grepped `lib/` independently:
+four other `showSnackBar` call sites exist (`categorization_routes.dart:477`,
+`category_management_screen.dart` ×2, `learned_rules_screen.dart` ×2) and **none
+carries an action**, so all default to `persist: false` and dismiss normally. No
+snackbar-with-action slipped past the guard.
+
+**Hero-tag collision — fixed.** `home_screen.dart` uses `heroTag: 'fab.home'`,
+`transaction_list_screen.dart` uses `'fab.transactionList'`; these are the two
+FABs alive together in the `IndexedStack`. A third FAB in
+`category_management_screen.dart` still uses the default tag but lives on its own
+pushed route, so it cannot collide today — a latent trap only if it is ever moved
+into the shell (**O-QA-41-4**).
+
+**NFR-S3 route-stacking — fixed in production, but its regression test does not
+protect it.** `p5a_lock_collapses_stack_test.dart` re-implements the gateway's
+collapse *inside the test file* and drives the copy. Proved by mutation:
+
+> Commenting out `_collapseToLockGate()` in `lib/app.dart` leaves
+> **`p5a_lock_collapses_stack_test.dart` passing 2/2**. QA probe **C1**, which
+> pumps the real `MassrofyApp`, fails on that mutation with exactly the intended
+> message.
+
+Filed as **D-QA-41-1** (low; the shipped code is correct, the test is not
+load-bearing on a security NFR). QA's C1 supplies the real coverage in this pass.
+
+### 7g.7 RUNTIME VERIFICATION — the app was actually run, on a device, as a new user
+
+Full log and screenshots: `docs/evidence/qa-pr41/README.md`. Debug APK built from
+`d9fac9e` (Flutter 3.44.8), installed on the `massrofy_test` AVD (API 35) after
+`pm clear`, with `READ_SMS`/`RECEIVE_SMS`/`POST_NOTIFICATIONS` confirmed
+`granted=false` first.
+
+One deviation, stated rather than implied: `locksettings get-disabled` was `true`
+on this AVD, so a PIN had to be set before ADR-005's gate had any credential to
+authenticate against. Without it **no journey is reachable at all**.
+
+| Journey | Result |
+|---|---|
+| Fresh install → lock gate → **S-02 rationale** | **RUNTIME-VERIFIED** — the screen KHA-113 said had no construction site |
+| *Grant SMS access* → the real OS permission dialog | **RUNTIME-VERIFIED** — `request()` has a caller |
+| Allow → `READ_SMS`/`RECEIVE_SMS` `granted=true` | **RUNTIME-VERIFIED** |
+| Unlock → Home renders, 3 tabs, **AC-E1.3** explicit `0.00` + caption | **RUNTIME-VERIFIED** |
+| More menu → all **six** screens KHA-113 called dead code are reachable | **RUNTIME-VERIFIED** |
+| SMS → ledger → **month total = `−972.40 SAR`** | **RUNTIME-VERIFIED**, business oracle: `312.40 + 660.00`, exact |
+| **AC-C4.1/C4.2** flag icon + words on the row, "2 items need review" on Home | **RUNTIME-VERIFIED** |
+| **S-11** with its Edit/Delete row, masked `•••• 9002`, original-message panel | **RUNTIME-VERIFIED** — KHA-114's core fix |
+| **AC-B6.2** confirm dialog, "Keep it" first | **RUNTIME-VERIFIED** |
+| Delete → row stays, **deleted banner + Restore** | **RUNTIME-VERIFIED** — KHA-114's second, undisclosed fix (`watchById`) |
+| **AC-E1.2** total drops to `−312.40`, review count 2 → 1 | **RUNTIME-VERIFIED**, oracle: `972.40 − 660.00`, exact |
+| **NFR-A6 on device** — Banks shows `Bank Aljazira · −312.40 SAR` = Home's total | **RUNTIME-VERIFIED** |
+| Snackbar auto-dismissed within 9 s | **RUNTIME-VERIFIED** (KHA-115) |
+| **NFR-S3** — pushed Banks route gone after a lock; unlock lands on Home | **RUNTIME-VERIFIED** |
+
+**Two things the walk found that no test did:**
+
+- **KHA-122 (Medium, Epic A, not a PR #41 blocker).** Two rule-pack-matching SMS
+  arrived while the app was open and unlocked with permission granted, and did
+  **not** appear — `0.00 SAR` for ~2 minutes across several rebuilds — until a
+  background/foreground cycle. AC-A1.1 says *"without any user action"*.
+  Root cause composes two documented facts: ADR-018 makes
+  `runBackgroundIngestion()` a ratified no-op, and `foregroundSweepProvider` is
+  only re-armed on `resumed`. And `SmsPermissionService.requestImmediateSweep()`
+  — the one method that would close this — **has no caller in `lib/`**, the same
+  shape as KHA-113 itself. Either the wiring or AC-A1.1's wording needs to move.
+- **KHA-123 (Low).** S-11 reads *"SMS · Unknown bank"* for every transaction
+  because `bankDisplayName` has no production caller — while the Banks screen
+  names the same bank correctly. Fifth omitted-optional-parameter on that one
+  screen; PR #41 fixed four of them.
+
+**Not covered, stated honestly:** POST_NOTIFICATIONS (not needed by P5a), Arabic
+*UI* at runtime (widget-tested in both locales; the Arabic *message bodies* were
+parsed correctly on device), fingerprint auth (none enrolled — every unlock used
+the device credential), and S-05's import progress screen (five messages
+completed too fast to observe; AC-A3.2 stays test-verified only).
+
+### 7g.8 Disclosure and tracking checks
+
+- **Three tabs, not four** — accurately disclosed, not silently dropped.
+  `docs/design.md` line 77/108/366 does specify a four-tab BottomNav
+  (Home/Transactions/Reports/More); `KHA-37` exists, is in the P5 milestone, and
+  owns the Reports hub (S-28, AC-E2/E3/E4). The `More` menu carries an honest
+  line (`moreReportsComingSoon`) rather than a dead tab. One thin spot:
+  KHA-37's `Do`/`Done check` names the reports *content* but never the
+  BottomNav entry itself, so QA added a comment to KHA-37 naming it — per
+  `docs/lessons.md`, *"documented in the PR is not tracking."*
+- **AC-E5.3** — deferred to KHA-38, which names AC-E5.3 explicitly. Correctly owned.
+- **`SpentVsKeptCard` on Home** — design.md files S-32 under the Reports hub; it
+  sits on Home in the meantime and the PR says so. Not a scope leak: removing a
+  shipped call site would be the regression.
+- **Nothing else is deferred in the PR body**, as it claims. QA re-checked by
+  grepping the diff for `TODO`/`later`/`P5b` and found only the two forward
+  references above, both owned.
+
+---
+
 ## 8. Untestable-as-written criteria
 
 None found in Epic 0, Epic A, or the Epic B slice built by P3a. Every AC in the
