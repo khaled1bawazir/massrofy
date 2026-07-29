@@ -9,7 +9,14 @@ version: 0.1.0+1
 
 environment:
   sdk: ^3.10.0
-  flutter: ">=3.35.0"
+  # Raised from ">=3.35.0" by P5a (KHA-115). `SnackBar.persist` — the named
+  # parameter this app must pass explicitly, because its SDK default is
+  # `action != null` and that is what made the correction snackbar immortal —
+  # does not exist on older SDKs, so a build below this line would not compile
+  # rather than silently regressing. See
+  # lib/presentation/widgets/scoped_snack_bar.dart for the full analysis.
+  # CI tracks the `stable` channel, which is comfortably above this floor.
+  flutter: ">=3.44.0"
 
 # --- Dependency notes for anyone new to Flutter/Dart reading this file -------
 # `dependencies:` ship inside the app. `dev_dependencies:` are build/test-time

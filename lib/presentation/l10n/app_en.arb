@@ -67,14 +67,74 @@
     "description": "Screen-reader label for the biometric icon/button (NFR-U2)."
   },
 
-  "homePlaceholderTitle": "Home",
-  "@homePlaceholderTitle": {
-    "description": "Placeholder home screen shown after unlock in this P1 foundation build; replaced by the real dashboard (S-08) in a later phase."
+  "navHome": "Home",
+  "@navHome": {
+    "description": "design.md §5 BottomNav tab 1 (S-08), and the AppBar title of the Home dashboard."
   },
 
-  "homePlaceholderBody": "This is the Massrofy foundation build. SMS ingestion, categorisation, and reporting are built in later phases — this screen only proves the app launches, unlocks, and reads/writes its encrypted store correctly.",
-  "@homePlaceholderBody": {
-    "description": "Explanatory copy for the placeholder home screen."
+  "navTransactions": "Transactions",
+  "@navTransactions": {
+    "description": "design.md §5 BottomNav tab 2 (S-10)."
+  },
+
+  "navMore": "More",
+  "@navMore": {
+    "description": "design.md §5 BottomNav's last tab — the S-40 root that hosts Banks, Categories, Learned rules, Recently deleted."
+  },
+
+  "homeThisMonth": "This month",
+  "@homeThisMonth": {
+    "description": "Overline above the MonthTotalCard figure (AC-E1.1). 'Month' here is a CALENDAR month in Asia/Riyadh, never a card statement cycle (OQ-12)."
+  },
+
+  "homeNoSpendThisMonth": "No transactions recorded yet this month",
+  "@homeNoSpendThisMonth": {
+    "description": "AC-E1.3's caption, shown UNDER an explicit 0.00 figure. The figure alone would read as 'you spent nothing'; this line says 'nothing has been recorded', which is the different and truthful fact."
+  },
+
+  "homeEmptyTitle": "No transactions yet",
+  "@homeEmptyTitle": {
+    "description": "AC-E1.3 empty state headline on Home."
+  },
+
+  "homeEmptyBody": "As soon as your bank sends a transaction message it appears here automatically. You can also add a cash transaction by hand.",
+  "@homeEmptyBody": {
+    "description": "AC-E1.3 empty state body. States that there is nothing to set up (US-B15) and offers the manual path (US-B4), so an empty screen is never a dead end."
+  },
+
+  "homeAddManually": "Add a transaction manually",
+  "@homeAddManually": {
+    "description": "Empty-state and FAB action opening S-20 manual entry (US-B4)."
+  },
+
+  "homeRecentTransactions": "Recent transactions",
+  "@homeRecentTransactions": {
+    "description": "Section title above Home's recent-activity preview."
+  },
+
+  "homeViewAll": "View all",
+  "@homeViewAll": {
+    "description": "Link from a Home section to its full screen."
+  },
+
+  "homeLockNow": "Lock now",
+  "@homeLockNow": {
+    "description": "Manual re-lock action (ADR-005), so the lock path is exercisable without waiting for the OS to background the app."
+  },
+
+  "periodPreviousMonth": "Previous month",
+  "@periodPreviousMonth": {
+    "description": "AC-E1.4 — 'the prior month remains viewable'. Also the screen-reader label for the back chevron in the period selector (NFR-U2)."
+  },
+
+  "periodNextMonth": "Next month",
+  "@periodNextMonth": {
+    "description": "Period selector forward chevron. Disabled on the current month — there is nothing after now."
+  },
+
+  "periodCurrentMonth": "This month",
+  "@periodCurrentMonth": {
+    "description": "Jump-back-to-now affordance, shown only while an older month is being viewed."
   },
 
   "smsRationaleTitle": "Why Massrofy needs SMS access",
@@ -956,5 +1016,44 @@
   "transactionGoneBody": "It was deleted or merged into another transaction. You can find it under Recently deleted.",
   "@transactionGoneBody": {"description": "US-B8 — nothing is destroyed, and the user is told where it went."},
   "completionMessageGone": "That message is no longer in the review queue",
-  "@completionMessageGone": {"description": "CompletionMessageUnavailable — two screens open on one queue, or a background sweep reclassified it. Not a crash."}
+  "@completionMessageGone": {"description": "CompletionMessageUnavailable — two screens open on one queue, or a background sweep reclassified it. Not a crash."},
+
+  "txnListTotalForPeriod": "Total",
+  "@txnListTotalForPeriod": {"description": "S-10's running period total, shown beside the period label. Equals the sum of exactly the rows listed under it (NFR-A6)."},
+  "txnListEmptyTitle": "No transactions yet",
+  "@txnListEmptyTitle": {"description": "S-10 true-empty state — the ledger has never held anything."},
+  "txnListEmptyBody": "Transactions appear here as soon as your bank messages arrive. You can also add one by hand.",
+  "@txnListEmptyBody": {"description": "S-10 true-empty body. Deliberately different copy from the filtered-empty state (AC-E5.3), which arrives with KHA-38."},
+  "txnListEmptyForPeriodTitle": "Nothing in this month",
+  "@txnListEmptyForPeriodTitle": {"description": "S-10 empty-for-the-selected-period state. Distinct from true-empty: there IS data, just not in the month being viewed, and telling the user otherwise would look like data loss."},
+  "txnListEmptyForPeriodBody": "There are no transactions in the month you are viewing. Use the arrows above to look at another month.",
+  "@txnListEmptyForPeriodBody": {"description": "Points at the period selector, which is the control that resolves this state."},
+  "txnListUnreadableNote": "{count, plural, =1{1 transaction could not be read and is not included in the total} other{{count} transactions could not be read and are not included in the total}}",
+  "@txnListUnreadableNote": {
+    "description": "KHA-74 — rows whose stored amount this build cannot decode. Stated rather than silently dropped: a shorter list with no explanation is indistinguishable from lost data.",
+    "placeholders": {"count": {"type": "int"}}
+  },
+
+  "txnDeletedToRecentlyDeleted": "Moved to Recently deleted",
+  "@txnDeletedToRecentlyDeleted": {"description": "AC-B6.1/B8.1 confirmation after a soft delete. Names where it went, because 'deleted' alone reads as destroyed."},
+  "txnRestoredConfirmation": "Transaction restored",
+  "@txnRestoredConfirmation": {"description": "AC-B8.2 confirmation."},
+  "txnEditSavedConfirmation": "Transaction updated",
+  "@txnEditSavedConfirmation": {"description": "AC-B5.1 confirmation after the S-20 edit form saves."},
+  "txnEditNoChanges": "Nothing was changed",
+  "@txnEditNoChanges": {"description": "The user pressed Save without altering anything. A legitimate no-op that writes no audit entry (US-F5 is read by a person), and saying so beats a success message for a change that did not happen."},
+  "txnEditTargetMissing": "That transaction is no longer here",
+  "@txnEditTargetMissing": {"description": "TransactionEditTargetMissing — the row was deleted elsewhere in the app while the edit form was open. Reachable without any bug."},
+
+  "smsLimitedModeContinue": "Continue to Massrofy",
+  "@smsLimitedModeContinue": {"description": "PRD D-9 — the app must remain usable without SMS access. Without this, S-04 is a screen with two buttons that both lead somewhere else and no way into the app itself."},
+
+  "moreSectionData": "Your money",
+  "@moreSectionData": {"description": "Grouping header in the More menu (S-40 root) for the bank/instrument and transaction-entry destinations."},
+  "moreSectionOrganise": "Organising",
+  "@moreSectionOrganise": {"description": "Grouping header in the More menu for categories, learned rules and the review inbox."},
+  "moreSectionApp": "App",
+  "@moreSectionApp": {"description": "Grouping header in the More menu for lock/session actions."},
+  "moreReportsComingSoon": "Reports arrive in the next release",
+  "@moreReportsComingSoon": {"description": "Stated in the More menu rather than shipping a fourth BottomNav tab that opens onto nothing. design.md §5's BottomNav specifies four tabs; the Reports hub (S-28) is KHA-37, and a dead tab would be a worse answer than an honest sentence."}
 }

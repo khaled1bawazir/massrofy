@@ -48,11 +48,47 @@ class AppLocalizationsEn extends AppLocalizations {
   String get lockGateUnlockButtonSemanticLabel => 'Unlock with biometrics';
 
   @override
-  String get homePlaceholderTitle => 'Home';
+  String get navHome => 'Home';
 
   @override
-  String get homePlaceholderBody =>
-      'This is the Massrofy foundation build. SMS ingestion, categorisation, and reporting are built in later phases — this screen only proves the app launches, unlocks, and reads/writes its encrypted store correctly.';
+  String get navTransactions => 'Transactions';
+
+  @override
+  String get navMore => 'More';
+
+  @override
+  String get homeThisMonth => 'This month';
+
+  @override
+  String get homeNoSpendThisMonth => 'No transactions recorded yet this month';
+
+  @override
+  String get homeEmptyTitle => 'No transactions yet';
+
+  @override
+  String get homeEmptyBody =>
+      'As soon as your bank sends a transaction message it appears here automatically. You can also add a cash transaction by hand.';
+
+  @override
+  String get homeAddManually => 'Add a transaction manually';
+
+  @override
+  String get homeRecentTransactions => 'Recent transactions';
+
+  @override
+  String get homeViewAll => 'View all';
+
+  @override
+  String get homeLockNow => 'Lock now';
+
+  @override
+  String get periodPreviousMonth => 'Previous month';
+
+  @override
+  String get periodNextMonth => 'Next month';
+
+  @override
+  String get periodCurrentMonth => 'This month';
 
   @override
   String get smsRationaleTitle => 'Why Massrofy needs SMS access';
@@ -1215,4 +1251,60 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get completionMessageGone =>
       'That message is no longer in the review queue';
+
+  @override
+  String get txnListTotalForPeriod => 'Total';
+
+  @override
+  String get txnListEmptyTitle => 'No transactions yet';
+
+  @override
+  String get txnListEmptyBody =>
+      'Transactions appear here as soon as your bank messages arrive. You can also add one by hand.';
+
+  @override
+  String get txnListEmptyForPeriodTitle => 'Nothing in this month';
+
+  @override
+  String get txnListEmptyForPeriodBody =>
+      'There are no transactions in the month you are viewing. Use the arrows above to look at another month.';
+
+  @override
+  String txnListUnreadableNote(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count transactions could not be read and are not included in the total',
+      one: '1 transaction could not be read and is not included in the total',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get txnDeletedToRecentlyDeleted => 'Moved to Recently deleted';
+
+  @override
+  String get txnRestoredConfirmation => 'Transaction restored';
+
+  @override
+  String get txnEditSavedConfirmation => 'Transaction updated';
+
+  @override
+  String get txnEditTargetMissing => 'That transaction is no longer here';
+
+  @override
+  String get smsLimitedModeContinue => 'Continue to Massrofy';
+
+  @override
+  String get moreSectionData => 'Your money';
+
+  @override
+  String get moreSectionOrganise => 'Organising';
+
+  @override
+  String get moreSectionApp => 'App';
+
+  @override
+  String get moreReportsComingSoon => 'Reports arrive in the next release';
 }

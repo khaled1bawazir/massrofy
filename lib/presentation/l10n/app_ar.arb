@@ -13,8 +13,20 @@
   "lockGateSessionExpiredBanner": "انتهت الجلسة أثناء تصفّح التطبيق في الخلفية. أعد فتح القفل للمتابعة من حيث توقفت.",
   "lockGateContinueUnlock": "افتح القفل للمتابعة",
   "lockGateUnlockButtonSemanticLabel": "افتح القفل ببصمتك",
-  "homePlaceholderTitle": "الرئيسية",
-  "homePlaceholderBody": "هذه نسخة الأساس (Foundation) من مصروفي. رصد الرسائل والتصنيف والتقارير تُبنى في مراحل لاحقة — هذه الشاشة تثبت فقط أن التطبيق يعمل، ويُفتح قفله، ويقرأ ويكتب في مخزنه المشفّر بشكل صحيح.",
+  "navHome": "الرئيسية",
+  "navTransactions": "المعاملات",
+  "navMore": "المزيد",
+  "homeThisMonth": "هذا الشهر",
+  "homeNoSpendThisMonth": "لا توجد معاملات مسجلة بعد هذا الشهر",
+  "homeEmptyTitle": "لا توجد معاملات بعد",
+  "homeEmptyBody": "بمجرد أن يرسل بنكك رسالة معاملة، ستظهر هنا تلقائياً. يمكنك أيضاً إضافة معاملة نقدية يدوياً.",
+  "homeAddManually": "إضافة معاملة يدوياً",
+  "homeRecentTransactions": "أحدث المعاملات",
+  "homeViewAll": "عرض الكل",
+  "homeLockNow": "قفل الآن",
+  "periodPreviousMonth": "الشهر السابق",
+  "periodNextMonth": "الشهر التالي",
+  "periodCurrentMonth": "هذا الشهر",
 
   "smsRationaleTitle": "لماذا يحتاج مصروفي إلى إذن الرسائل",
   "smsRationaleLead": "يرسل بنكك تنبيهات المعاملات عبر الرسائل النصية. يقرأ مصروفي هذه الرسائل فقط، على جهازك، لبناء صورة إنفاقك.",
@@ -343,5 +355,25 @@
   "transactionUnavailable": "تعذّر تحميل هذه المعاملة.",
   "transactionGoneTitle": "لم تعد هذه المعاملة هنا",
   "transactionGoneBody": "حُذفت أو دُمجت في معاملة أخرى. يمكنك إيجادها ضمن المحذوفة مؤخراً.",
-  "completionMessageGone": "لم تعد هذه الرسالة في قائمة المراجعة"
+  "completionMessageGone": "لم تعد هذه الرسالة في قائمة المراجعة",
+
+  "txnListTotalForPeriod": "الإجمالي",
+  "txnListEmptyTitle": "لا توجد معاملات بعد",
+  "txnListEmptyBody": "تظهر المعاملات هنا بمجرد وصول رسائل بنكك. يمكنك أيضاً إضافة معاملة يدوياً.",
+  "txnListEmptyForPeriodTitle": "لا شيء في هذا الشهر",
+  "txnListEmptyForPeriodBody": "لا توجد معاملات في الشهر الذي تعرضه. استخدم الأسهم بالأعلى لعرض شهر آخر.",
+  "txnListUnreadableNote": "{count, plural, =1{تعذّرت قراءة معاملة واحدة وهي غير محتسبة في الإجمالي} =2{تعذّرت قراءة معاملتين وهما غير محتسبتين في الإجمالي} few{تعذّرت قراءة {count} معاملات وهي غير محتسبة في الإجمالي} many{تعذّرت قراءة {count} معاملة وهي غير محتسبة في الإجمالي} other{تعذّرت قراءة {count} معاملة وهي غير محتسبة في الإجمالي}}",
+
+  "txnDeletedToRecentlyDeleted": "نُقلت إلى المحذوفة مؤخراً",
+  "txnRestoredConfirmation": "تمت استعادة المعاملة",
+  "txnEditSavedConfirmation": "تم تحديث المعاملة",
+  "txnEditNoChanges": "لم يتغيّر شيء",
+  "txnEditTargetMissing": "لم تعد هذه المعاملة هنا",
+
+  "smsLimitedModeContinue": "المتابعة إلى مصروفي",
+
+  "moreSectionData": "أموالك",
+  "moreSectionOrganise": "التنظيم",
+  "moreSectionApp": "التطبيق",
+  "moreReportsComingSoon": "التقارير تصل في الإصدار القادم"
 }

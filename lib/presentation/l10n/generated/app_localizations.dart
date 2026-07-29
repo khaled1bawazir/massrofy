@@ -170,17 +170,89 @@ abstract class AppLocalizations {
   /// **'Unlock with biometrics'**
   String get lockGateUnlockButtonSemanticLabel;
 
-  /// Placeholder home screen shown after unlock in this P1 foundation build; replaced by the real dashboard (S-08) in a later phase.
+  /// design.md §5 BottomNav tab 1 (S-08), and the AppBar title of the Home dashboard.
   ///
   /// In en, this message translates to:
   /// **'Home'**
-  String get homePlaceholderTitle;
+  String get navHome;
 
-  /// Explanatory copy for the placeholder home screen.
+  /// design.md §5 BottomNav tab 2 (S-10).
   ///
   /// In en, this message translates to:
-  /// **'This is the Massrofy foundation build. SMS ingestion, categorisation, and reporting are built in later phases — this screen only proves the app launches, unlocks, and reads/writes its encrypted store correctly.'**
-  String get homePlaceholderBody;
+  /// **'Transactions'**
+  String get navTransactions;
+
+  /// design.md §5 BottomNav's last tab — the S-40 root that hosts Banks, Categories, Learned rules, Recently deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'More'**
+  String get navMore;
+
+  /// Overline above the MonthTotalCard figure (AC-E1.1). 'Month' here is a CALENDAR month in Asia/Riyadh, never a card statement cycle (OQ-12).
+  ///
+  /// In en, this message translates to:
+  /// **'This month'**
+  String get homeThisMonth;
+
+  /// AC-E1.3's caption, shown UNDER an explicit 0.00 figure. The figure alone would read as 'you spent nothing'; this line says 'nothing has been recorded', which is the different and truthful fact.
+  ///
+  /// In en, this message translates to:
+  /// **'No transactions recorded yet this month'**
+  String get homeNoSpendThisMonth;
+
+  /// AC-E1.3 empty state headline on Home.
+  ///
+  /// In en, this message translates to:
+  /// **'No transactions yet'**
+  String get homeEmptyTitle;
+
+  /// AC-E1.3 empty state body. States that there is nothing to set up (US-B15) and offers the manual path (US-B4), so an empty screen is never a dead end.
+  ///
+  /// In en, this message translates to:
+  /// **'As soon as your bank sends a transaction message it appears here automatically. You can also add a cash transaction by hand.'**
+  String get homeEmptyBody;
+
+  /// Empty-state and FAB action opening S-20 manual entry (US-B4).
+  ///
+  /// In en, this message translates to:
+  /// **'Add a transaction manually'**
+  String get homeAddManually;
+
+  /// Section title above Home's recent-activity preview.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent transactions'**
+  String get homeRecentTransactions;
+
+  /// Link from a Home section to its full screen.
+  ///
+  /// In en, this message translates to:
+  /// **'View all'**
+  String get homeViewAll;
+
+  /// Manual re-lock action (ADR-005), so the lock path is exercisable without waiting for the OS to background the app.
+  ///
+  /// In en, this message translates to:
+  /// **'Lock now'**
+  String get homeLockNow;
+
+  /// AC-E1.4 — 'the prior month remains viewable'. Also the screen-reader label for the back chevron in the period selector (NFR-U2).
+  ///
+  /// In en, this message translates to:
+  /// **'Previous month'**
+  String get periodPreviousMonth;
+
+  /// Period selector forward chevron. Disabled on the current month — there is nothing after now.
+  ///
+  /// In en, this message translates to:
+  /// **'Next month'**
+  String get periodNextMonth;
+
+  /// Jump-back-to-now affordance, shown only while an older month is being viewed.
+  ///
+  /// In en, this message translates to:
+  /// **'This month'**
+  String get periodCurrentMonth;
 
   /// S-02 headline (docs/mockups/onboarding.html). Shown BEFORE the OS permission dialog — design flag D-9, AC-A1.2.
   ///
@@ -1094,7 +1166,7 @@ abstract class AppLocalizations {
   /// **'Changes saved'**
   String get txnEditSaved;
 
-  /// Shown when Save was pressed with no field altered. Nothing is written and no history entry is created.
+  /// The user pressed Save without altering anything. A legitimate no-op that writes no audit entry (US-F5 is read by a person), and saying so beats a success message for a change that did not happen.
   ///
   /// In en, this message translates to:
   /// **'Nothing was changed'**
@@ -1975,6 +2047,96 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'That message is no longer in the review queue'**
   String get completionMessageGone;
+
+  /// S-10's running period total, shown beside the period label. Equals the sum of exactly the rows listed under it (NFR-A6).
+  ///
+  /// In en, this message translates to:
+  /// **'Total'**
+  String get txnListTotalForPeriod;
+
+  /// S-10 true-empty state — the ledger has never held anything.
+  ///
+  /// In en, this message translates to:
+  /// **'No transactions yet'**
+  String get txnListEmptyTitle;
+
+  /// S-10 true-empty body. Deliberately different copy from the filtered-empty state (AC-E5.3), which arrives with KHA-38.
+  ///
+  /// In en, this message translates to:
+  /// **'Transactions appear here as soon as your bank messages arrive. You can also add one by hand.'**
+  String get txnListEmptyBody;
+
+  /// S-10 empty-for-the-selected-period state. Distinct from true-empty: there IS data, just not in the month being viewed, and telling the user otherwise would look like data loss.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing in this month'**
+  String get txnListEmptyForPeriodTitle;
+
+  /// Points at the period selector, which is the control that resolves this state.
+  ///
+  /// In en, this message translates to:
+  /// **'There are no transactions in the month you are viewing. Use the arrows above to look at another month.'**
+  String get txnListEmptyForPeriodBody;
+
+  /// KHA-74 — rows whose stored amount this build cannot decode. Stated rather than silently dropped: a shorter list with no explanation is indistinguishable from lost data.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 transaction could not be read and is not included in the total} other{{count} transactions could not be read and are not included in the total}}'**
+  String txnListUnreadableNote(int count);
+
+  /// AC-B6.1/B8.1 confirmation after a soft delete. Names where it went, because 'deleted' alone reads as destroyed.
+  ///
+  /// In en, this message translates to:
+  /// **'Moved to Recently deleted'**
+  String get txnDeletedToRecentlyDeleted;
+
+  /// AC-B8.2 confirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'Transaction restored'**
+  String get txnRestoredConfirmation;
+
+  /// AC-B5.1 confirmation after the S-20 edit form saves.
+  ///
+  /// In en, this message translates to:
+  /// **'Transaction updated'**
+  String get txnEditSavedConfirmation;
+
+  /// TransactionEditTargetMissing — the row was deleted elsewhere in the app while the edit form was open. Reachable without any bug.
+  ///
+  /// In en, this message translates to:
+  /// **'That transaction is no longer here'**
+  String get txnEditTargetMissing;
+
+  /// PRD D-9 — the app must remain usable without SMS access. Without this, S-04 is a screen with two buttons that both lead somewhere else and no way into the app itself.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue to Massrofy'**
+  String get smsLimitedModeContinue;
+
+  /// Grouping header in the More menu (S-40 root) for the bank/instrument and transaction-entry destinations.
+  ///
+  /// In en, this message translates to:
+  /// **'Your money'**
+  String get moreSectionData;
+
+  /// Grouping header in the More menu for categories, learned rules and the review inbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Organising'**
+  String get moreSectionOrganise;
+
+  /// Grouping header in the More menu for lock/session actions.
+  ///
+  /// In en, this message translates to:
+  /// **'App'**
+  String get moreSectionApp;
+
+  /// Stated in the More menu rather than shipping a fourth BottomNav tab that opens onto nothing. design.md §5's BottomNav specifies four tabs; the Reports hub (S-28) is KHA-37, and a dead tab would be a worse answer than an honest sentence.
+  ///
+  /// In en, this message translates to:
+  /// **'Reports arrive in the next release'**
+  String get moreReportsComingSoon;
 }
 
 class _AppLocalizationsDelegate

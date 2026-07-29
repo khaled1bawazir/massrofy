@@ -53,6 +53,7 @@ import '../../features/categorization/category_correction.dart';
 import '../../features/categorization/learned_rules.dart';
 import '../../features/ingestion/ingestion_pipeline.dart';
 import '../../features/ingestion/review_queue.dart';
+import '../../features/ledger/ledger_transaction.dart';
 import '../screens/category_management_screen.dart' show CategoryListItem;
 import 'app_providers.dart';
 
@@ -331,17 +332,54 @@ flaggedCategoryAssignmentsProvider =
 CategoryAssignment assignmentFor(
   TransactionRow row,
   CategoryResolver resolver,
-) => CategoryAssignment(
-  category: resolver.resolve(row.categoryId),
-  band: ConfidenceBand.of(
-    source: row.categorySource,
-    confidence: row.categoryConfidence,
-    categoryId: row.categoryId,
-    autoApplyThreshold: CategorizationConfig.autoApplyThreshold,
-  ),
-  confidence: row.categoryConfidence,
+) => _assignment(
+  resolver: resolver,
+  categoryId: row.categoryId,
+  categorySource: row.categorySource,
+  categoryConfidence: row.categoryConfidence,
   needsReview: row.needsReview,
   reviewReason: row.reviewReason,
+);
+
+/// The same banding, for a [LedgerTransaction] rather than a raw
+/// [TransactionRow] (P5a, KHA-36).
+///
+/// The list screens work in domain objects — they need `Money`, the resolved
+/// instrument and the internal-transfer verdict, none of which a raw row
+/// carries — so they cannot call [assignmentFor]. Both delegate to
+/// [_assignment] rather than one re-deriving the band, because "what counts as
+/// confident" is a product decision and two implementations of it is two
+/// chances to tell the user different things about the same transaction.
+CategoryAssignment assignmentForTransaction(
+  LedgerTransaction transaction,
+  CategoryResolver resolver,
+) => _assignment(
+  resolver: resolver,
+  categoryId: transaction.categoryId,
+  categorySource: transaction.categorySource,
+  categoryConfidence: transaction.categoryConfidence,
+  needsReview: transaction.needsReview,
+  reviewReason: transaction.reviewReason,
+);
+
+CategoryAssignment _assignment({
+  required CategoryResolver resolver,
+  required String? categoryId,
+  required String? categorySource,
+  required double? categoryConfidence,
+  required bool needsReview,
+  required String? reviewReason,
+}) => CategoryAssignment(
+  category: resolver.resolve(categoryId),
+  band: ConfidenceBand.of(
+    source: categorySource,
+    confidence: categoryConfidence,
+    categoryId: categoryId,
+    autoApplyThreshold: CategorizationConfig.autoApplyThreshold,
+  ),
+  confidence: categoryConfidence,
+  needsReview: needsReview,
+  reviewReason: reviewReason,
 );
 
 /// **AC-C4.2 — the review count, visible from the main screen.**

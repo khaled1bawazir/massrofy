@@ -2197,6 +2197,31 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
         .watch();
   }
 
+  /// **One transaction, live, INCLUDING while it is soft-deleted** (P5a,
+  /// KHA-114).
+  ///
+  /// The odd one out among these streams, and deliberately so. [watchLive]
+  /// exists because US-B6/B8 require a deleted transaction to be out of every
+  /// *list* and every *total* until restored — but S-11 is neither. It is the
+  /// one screen whose whole job is showing a single transaction as it actually
+  /// is, and `TransactionDetailScreen` has always carried a deleted-state
+  /// banner and a Restore action for exactly that case.
+  ///
+  /// Before this existed, the detail host watched [watchLive], so a row
+  /// vanished from the screen the instant it was deleted and the banner and
+  /// Restore button were unreachable in the running app — the same
+  /// built-but-never-constructed shape KHA-114 was filed about, one level down.
+  ///
+  /// Emits `null` when the row does not exist at all, which S-11 renders as
+  /// *"this transaction is no longer here"*. That is a real case with no bug
+  /// behind it: an "erase everything" (US-F3) can remove the row while the
+  /// screen is open.
+  Stream<TransactionRow?> watchById(int id) {
+    return (select(
+      transactions,
+    )..where((Transactions t) => t.id.equals(id))).watchSingleOrNull();
+  }
+
   Stream<List<TransactionRow>> watchDeleted() {
     return (select(transactions)
           ..where((Transactions t) => t.isDeleted.equals(true))

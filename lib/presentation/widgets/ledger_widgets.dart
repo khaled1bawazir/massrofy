@@ -29,6 +29,7 @@ import '../../core/money/currency_exponents.dart';
 import '../../core/money/exchange_rate.dart';
 import '../../core/money/money.dart';
 import '../../core/text/masking.dart';
+import '../../core/time/clock.dart';
 import '../../features/ledger/instrument_identity.dart';
 import '../../features/ledger/period_totals.dart';
 import '../l10n/generated/app_localizations.dart';
@@ -442,9 +443,47 @@ String instrumentKindLabel(AppLocalizations l10n, String kind) =>
 
 /// A short, locale-independent date/time rendering.
 ///
-/// Full localised formatting arrives with the reporting work in P5; pulling a
-/// formatting dependency in here for one line would be scope this PR has no
-/// business taking. `null` renders as AC-B1.3's explicit unknown at the call
-/// site, not here.
+/// Kept for the dense field lists (S-11's detail rows, the audit trail), where
+/// an unambiguous machine-shaped timestamp is what a person cross-checking a
+/// figure against their bank's SMS actually wants. Lists use
+/// [formatLocalizedDateTime] instead. `null` renders as AC-B1.3's explicit
+/// unknown at the call site, not here.
 String formatShortDateTime(DateTime value) =>
     value.toLocal().toIso8601String().substring(0, 16).replaceFirst('T', ' ');
+
+/// A **localised** date and time, for list rows (P5a).
+///
+/// ## Where this comes from, and why it needs no new dependency
+///
+/// P3a's note here said full localised formatting would arrive "with the
+/// reporting work in P5", assuming a `package:intl` dependency. It does not
+/// need one: `GlobalMaterialLocalizations` — already installed, because the app
+/// declares it in `localizationsDelegates` for Arabic and English — carries
+/// `formatMediumDate` and `formatTimeOfDay`, both fully localised, including
+/// Arabic month names and the Arabic date order.
+///
+/// `alwaysUse24HourFormat` is read from `MediaQuery` rather than hard-coded, so
+/// the row follows the user's own OS clock setting. Someone whose phone shows
+/// 14:20 should not read 2:20 PM in their spending list.
+String formatLocalizedDateTime(BuildContext context, DateTime value) {
+  final MaterialLocalizations materialL10n = MaterialLocalizations.of(context);
+  final DateTime local = value.toLocal();
+  final String date = materialL10n.formatMediumDate(local);
+  final String time = materialL10n.formatTimeOfDay(
+    TimeOfDay.fromDateTime(local),
+    alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context),
+  );
+  return '$date · $time';
+}
+
+/// A localised "July 2026" for the period selector (AC-E1.4).
+///
+/// Takes the period's **start instant** and shifts it into Riyadh wall-clock
+/// time before naming it. That step is not cosmetic: a Riyadh calendar month
+/// starts at 21:00 UTC on the last day of the *previous* month (see
+/// `RiyadhCalendar.monthWindowUtc`), so labelling the raw UTC instant would
+/// title July's figures "June".
+String formatPeriodMonthLabel(BuildContext context, DateTime periodStartUtc) =>
+    MaterialLocalizations.of(
+      context,
+    ).formatMonthYear(RiyadhCalendar.toRiyadhWallClock(periodStartUtc));
