@@ -1,0 +1,25 @@
+#7      Declarer.test.<anonymous closure> (package:test_api/src/backend/declarer.dart:250:11)
+<asynchronous suspension>
+#8      Invoker._waitForOutstandingCallbacks.<anonymous closure> (package:test_api/src/backend/invoker.dart:318:9)
+<asynchronous suspension>
+This warning will only appear on debug builds.
++435 ~3: C:/Users/aasb2/OneDrive/Desktop/Massrofy/.claude/worktrees/agent-a6837072b5e35417d/test/data/db/app_database_encryption_test.dart: ADR-003 — forward migration from an empty install schemaVersion 1 creates all tables and the audit triggers
+WARNING (drift): It looks like you've created the database class AppDatabase multiple times. When these two databases use the same QueryExecutor, race conditions will occur and might corrupt the database. 
+Try to follow the advice at https://drift.simonbinder.eu/faq/#using-the-database or, if you know what you're doing, set driftRuntimeOptions.dontWarnAboutMultipleDatabases = true
+Here is the stacktrace from when the database was opened a second time:
+#0      GeneratedDatabase._handleInstantiated (package:drift/src/runtime/api/db_base.dart:96:30)
+#1      GeneratedDatabase._whenConstructed (package:drift/src/runtime/api/db_base.dart:73:12)
+#2      new GeneratedDatabase (package:drift/src/runtime/api/db_base.dart:64:5)
+#3      new _$AppDatabase (package:massrofy/data/db/app_database.g.dart:9559:36)
+#4      new AppDatabase (package:massrofy/data/db/app_database.dart)
+#5      openPlainTestDatabase (file:///C:/Users/aasb2/OneDrive/Desktop/Massrofy/.claude/worktrees/agent-a6837072b5e35417d/test/support/plain_test_database.dart:28:40)
+#6      main.<anonymous closure>.<anonymous closure> (file:///C:/Users/aasb2/OneDrive/Desktop/Massrofy/.claude/worktrees/agent-a6837072b5e35417d/test/data/db/app_database_encryption_test.dart:279:30)
+#7      Declarer.test.<anonymous closure>.<anonymous closure> (package:test_api/src/backend/declarer.dart:253:25)
+<asynchronous suspension>
+#8      Declarer.test.<anonymous closure> (package:test_api/src/backend/declarer.dart:250:11)
+<asynchronous suspension>
+#9      Invoker._waitForOutstandingCallbacks.<anonymous closure> (package:test_api/src/backend/invoker.dart:318:9)
+<asynchronous suspension>
+This warning will only appear on debug builds.
++1540 ~3: 3 skipped tests.
++1540 ~3: All other tests passed!

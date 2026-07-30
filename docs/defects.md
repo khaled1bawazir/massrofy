@@ -2159,3 +2159,112 @@ QA confirms the disclosure is accurate:**
   a safety consequence (**D-QA-17**). KHA-88 must stay open, and its remaining
   scope is larger than the PR states.
 - **KHA-90 O-QA-6 and O-QA-9** — untouched as instructed; still open.
+
+---
+
+# PR #44 — P5b (KHA-37 reports, KHA-38 search/filter, KHA-122 immediate sweep)
+
+QA pass on `feature/p5b-reports-search-immediate-sweep` @ **`4308d7a`**.
+Evidence: `docs/evidence/qa-pr44/`. Verdict: **`QA: FAIL 44`**.
+
+## What is right, stated first because most of it is
+
+KHA-122's fix is **real, correctly wired, and runtime-verified on a device** —
+the scenario the human actually hit. With the app open, unlocked and idle on
+Home, and `mCurrentFocus` never leaving `MainActivity`, an incoming SMS became a
+transaction within seconds (`05-home.png` -> `06-after-sms-5s.png`). The call
+chain was traced by hand end to end rather than taken on trust, and the
+engineer's correction of the issue's original premise (that
+`requestImmediateSweep()` cannot do this job, because it routes Dart -> Kotlin ->
+WorkManager -> ADR-018's ratified no-op) is correct.
+
+The reconciliation footer holds at runtime against an independently recomputed
+oracle (AC-E3.2), the fourth tab is live with P5a's placeholder assertion
+**inverted rather than deleted**, AC-E4.2 correctly refuses to draw a comparison
+on one month of data, the filtered total is genuinely the filtered subset, and
+both self-review fixes (`bankTreeProvider` for the filter sheet, Riyadh midnight
+in the date picker) are present in the shipped code.
+
+The branch is also a **clean merge candidate against current `main`** (`7f000e4`):
+zero file overlap with KHA-128's `sa-core.json` change, and the merged tree runs
+**1688 passed / 3 skipped / 0 failed**.
+
+## Blocking
+
+| Defect | Severity | Summary |
+|---|---|---|
+| **KHA-137** | **HIGH** | **AC-A5.1 fails on a device.** A byte-identical SMS delivered twice ~43 s apart produced **two** transactions and doubled the month total to `-624.80 SAR` (`07-redelivered.png`). Root cause: `ContentHmac.compute` folds the SMS **delivery timestamp** into the D1 dedup key at millisecond precision, and a carrier retry necessarily arrives at a different instant — so the HMAC differs, `findByContentHmac` misses, and both `UNIQUE` constraints are satisfied by two rows. Confirmed on-device via `content://sms/inbox` (`date` 43,287 ms apart). |
+
+### Why this blocks a PR that did not cause it
+
+The defect itself is **pre-existing** (ADR-017 D1 / P2 ingestion). KHA-122's
+trigger wire neither causes nor worsens it — I verified the resume sweep behaves
+identically. Three things make it merge-relevant anyway:
+
+1. **PR #44 adds a new test that asserts the property holds.**
+   `immediate_sweep_race_test.dart`'s redelivery case builds both records through
+   one helper with a **fixed** `receivedAt`, varying only `providerId` — and
+   `providerId` is not an input to the HMAC at all. Holding `receivedAt` constant
+   is the one thing a real retry cannot do, so the test is unsound for the case
+   it names. A silent gap has been converted into a **false green**, and the PR
+   body publishes it as verified (*"Re-delivered SMS, new provider id, identical
+   content | exactly 1, `suppressedAsExactDuplicate: 1`"*).
+2. **It is the engineer's own designated acceptance evidence.** The PR body says
+   *"QA's retest is the acceptance evidence"* and asks specifically for the
+   redelivery check. That check fails.
+3. **It is money.** The figure on the app's primary screen was wrong by 100 %, in
+   a scenario reproducible in under a minute, with no way for the user to tell
+   which of two identical rows is the phantom.
+
+Nothing here requires reworking KHA-122's mechanism. The narrow fix is to the D1
+key (and/or to route a body+sender collision into AC-A5.2's possible-duplicate
+flag, which AC-A5.3 explicitly permits), plus a regression test whose two records
+have **different `receivedAt` values**.
+
+## Non-blocking
+
+| Defect | Severity | Summary |
+|---|---|---|
+| **KHA-138** | Medium | **KHA-122's only production call site is unguarded.** Commenting out `ref.watch(foregroundSmsSignalProvider)` in `lib/app.dart` — the single line that holds the `EventChannel` subscription open — leaves the **entire 1540-test suite green** (`m2-app-dart-mutation-full-suite.log`). `immediate_sweep_wiring_test.dart`'s header claims otherwise; it arms the providers by hand via `container.listen` and never reads `app.dart`. The *Kotlin* half of that claim is true and well covered by `sms_foreground_bridge_test.dart` — the Dart half is covered by nothing. The negative control in the wiring test **is** genuinely load-bearing for what it does test; the overstated claim is the defect. |
+| **KHA-139** | Medium | **The NFR-A6 corpus gap is not closed.** The pair planted in all 200 runs carries `affectsSpend: false` on the outgoing leg, so `_spendOrVeto` excludes it as `packDeclaredNonSpend` **before** the internal-transfer analysis is consulted. The shipped rule pack sets `"affectsSpend": true` for `transfer_out` on both banks; with that value and no other change, 8 of 11 tests go red. Without a shared reference number the detector can only rate the pair `candidate`, and a candidate is deliberately **still counted as spend** (AC-B11.2) — so `InternalTransferDetector` plays no part in any assertion in the file. Two supporting findings: the stated counterfactual is false (dropping `transfers:` is undetectable, benignly — `BankTreeBuilder` re-derives over the same whole set), and `expect(runsWithPlantedPair, 200)` is `200 == 200`, counting plantings rather than detections. No production defect; a false coverage claim on the build's own named weak spot. |
+| **KHA-140** | Low | The filtered-empty **summary row** reads *"Filtered total — No transactions in this period"* when the period has four transactions and only the filter matched none (`15-filtered-empty.png`). The body state below it is correct and good; this row leaks exactly the confusion the `filteredEmpty` state was built to prevent. Also wraps and collides at default text size. |
+
+## Observations (no ticket, TIER: personal)
+
+- **O-QA-44-1.** `report_providers.dart`'s header states *"Not one provider here
+  opens its own Drift stream over the transactions table. They all `watch`
+  `ledgerViewProvider`"* — but `instrumentBreakdownProvider` opens
+  `session.transactionDao.watchLive()` directly and runs its own
+  `InternalTransferDetector.analyze`. Functionally consistent (same stream, same
+  derivation, base currency is the fixed constant `SAR`), so no figure can drift
+  today; the sentence is simply not true of the file it heads.
+- **O-QA-44-2.** `p5b_reconciliation_widget_test.dart`'s row-sum loop `continue`s
+  when a row key is absent. A hidden row still fails the sum, so the test is not
+  wrong — but the skip means a missing row is reported as an arithmetic mismatch
+  rather than as "the row is gone", which is a worse failure message on the
+  assertion most likely to fire.
+
+---
+
+## PR #44 RE-GATE — `037d810` (2026-07-30)
+
+Second QA gate, after mobile-engineer's fixes. Every item below was re-verified by
+mutation on the current head, not carried over from the `4308d7a` gate. Evidence:
+`docs/evidence/qa-pr44-regate/`.
+
+| Defect | Was | Now | How it was re-verified |
+|---|---|---|---|
+| **KHA-137** | HIGH, blocking | **CLOSED — fix verified** | The digest is now `HMAC(k, "massrofy/content-hmac/v2" ‖ normalisedBody ‖ normalisedSender)` and `smsTimestampUtc` is **removed from the parameter list**, per ADR-017 (A). Re-verified three independent ways: (1) **mutation** — folding `receivedAt` back in turns **4 tests red**; (2) **device, original field data** — the AVD inbox still held the two byte-identical BAJ rows **43,287 ms apart** that produced the bug, and the fixed build ingested them as **one** transaction (`04-unlocked-home.png`); (3) **device, live** — a fresh SMS redelivered **46,597 ms** later left the total **unchanged at −1111.90 SAR** (`06-after-redelivery.png`). Item (D)'s `sms_provider_id` pre-check confirmed merged in from KHA-133 (`5e93ea6` ← `086ba77`) and wired at `ingestion_pipeline.dart:606`; removing it turns **3** tests red. |
+| **KHA-138** | Medium | **CLOSED — fix verified** | A source-shape guard was added in `immediate_sweep_wiring_test.dart`. It strips comments before matching — load-bearing, because `app.dart`'s KHA-122 comment block names the provider four times, so a raw `contains` would pass on a file whose code had been deleted and paragraph left — and scopes the assertion to the `if (unlocked)` branch by brace matching. Re-verified by mutation: the original M2 goes red with the intended message (the extracted branch dump confirms it reads real code), and a **hoisted duplicate** watch produces exactly `Expected: <1>, Actual: <2>`. |
+| **KHA-139** | Medium | **CLOSED — fix verified** | Both the hand fixture and all 200 corpus runs now carry `affectsSpend: true` on the outgoing leg plus a **shared `referenceNumber`**, matching what `sa-core.json` actually ships, so the exclusion is the *analysis's* doing rather than a pack flag's. `runsWithPlantedPair` counts **detections** (`stateFor(outLeg) == internal`), not plantings. Re-verified by mutation: restoring the old inert fixture leaves every reconciliation assertion green while the new guard fails `Expected: <200> / Actual: <0>` — i.e. the old version really was inert and the new one really is not. A `candidate`-pair case (AC-B11.2) was added beyond the ask. |
+| **KHA-140** | Low | **still open, still non-blocking** | Out of this fix round's scope; unchanged. |
+
+### New this round
+
+| Defect | Severity | Summary |
+|---|---|---|
+| **KHA-151** | Medium | **A bidi/invisible control character in a bank's SMS sender id silently discards every message from that bank.** `RulePackMessageParser._resolveBank` canonicalises with `String.trim()`, which strips Unicode *whitespace* but not *format* characters, while every shipped `senderPattern` is anchored. Verified with `bidi_sender_probe.dart`: U+200F, U+200E, U+202A/U+202C and U+200B all `DISCARD` (U+FEFF *is* trimmed, so the behaviour is inconsistent as well as wrong). Per NFR-P4 nothing is retained, so the user sees `0.00 SAR` and an empty review queue with no diagnostic — **KHA-128's exact failure mode through a different door**. Raised by mobile-engineer and correctly referred to QA rather than folded into KHA-137. **Not blocking PR #44**: such a sender never reaches the content hash, so it can neither mask nor be masked by the dedup change. The one-line fix also makes `_resolveBank` and `ContentHmac` agree about what "the same sender" is. |
+
+### Observations re-checked
+
+- **O-QA-44-1** and **O-QA-44-2** are unchanged on `037d810` and remain no-ticket.
