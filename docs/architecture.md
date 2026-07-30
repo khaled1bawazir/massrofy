@@ -2,7 +2,7 @@ STATUS: APPROVED
 
 # Massrofy — Architecture Decision Record
 
-**Version:** 1.8
+**Version:** 1.9
 **Date:** 2026-07-30 (v1.5: 2026-07-30; v1.4: 2026-07-29; v1.3: 2026-07-29; v1.2: 2026-07-29; v1.1: 2026-07-28; v1.0: 2026-07-27)
 **Author:** solution-architect agent (phase 3 — architecture, human gate 2)
 **Sources of truth:** `docs/PRD.md` v0.3 (STATUS: Approved), `docs/build-plan.md` v1.0
@@ -80,12 +80,22 @@ Every pattern in this document is established here, not inherited.
 > **Nothing here blocks the in-flight six-bank rule dispatch, and the explicit recommendation is
 > not to disturb it.**
 
+> **v1.9 ships `DRAFT` inside ADR-006 and fixes a live defect on the human's own device**
+> (**KHA-157**): the incremental sweep's watermark is **never seeded**, so on a fresh install the
+> first sweep reads `_id > 0` — *the entire SMS inbox, unbounded by date* — and floods the review
+> queue with years of pre-history. AC-A3.1's "current calendar month only" was only ever enforced
+> on the historical-import path. The fix is a **one-time high-water-mark seed** taken before the
+> first incremental read. **No schema change.** One thing needs the human: whether to ship the
+> bounded, user-triggered cleanup of the already-flooded queue described in item (E), or to leave
+> those rows and dismiss them by hand.
+
 ---
 
 ## Changelog
 
 | Version | Date | Change |
 |---|---|---|
+| **1.9** | 2026-07-30 | **ADR-006 extended — KHA-157 decided, approved.** The incremental watermark is **never seeded**. `lastProcessedSmsProviderId` defaults to `0`, `HistoricalImporter` deliberately never advances it (`advanceWatermark: false`, and correctly so), and **nothing else writes it either** — the only writer in `lib/` is `IngestWatermarkDao.advanceTo`, called from one place, `processAll`. So on a fresh install the first `runIncremental` calls `readSince(cursor: 0)`, and `SmsChannel.readSince` selects on `_ID > ?` with **no date bound at all** — the entire inbox, every year of it. Live on the human's device: 424 items in Needs Review. **AC-A3.1's "current calendar month only" was only ever enforced on the import path** (`readRange`, which *is* date-bounded), never on the incremental one, and the incremental one runs **first** in `foregroundSweepProvider`. Decision: **a one-time inbox high-water-mark seed**, taken inside `runIncremental` before its first read, with `lastProcessedSmsDate IS NULL` as the never-seeded discriminator. Rejected: **date-bounding `readSince`** (silently loses messages across every month rollover — NFR-A7), and **letting the importer advance the incremental watermark** (the exact conflation `historical_importer.dart` documents, and too late regardless, since the sweep runs before the import). **No schema change; DB stays where P5b leaves it.** **No watermark migration for affected installs** — the flood has already advanced the watermark past the whole inbox, so it is accidentally already correct, and `advanceTo`'s monotonic `WHERE` would refuse to move it back anyway. What remains is the **rows**, and auto-deleting user-visible financial rows on an app update is rejected; item (E) offers a user-triggered, date-bounded discard instead. **No interaction with KHA-133** — `RescanCoordinator` never calls `readSince`, reads only `importFromDate`, and moves neither cursor. |
 | **1.8** | 2026-07-30 | **ADR-007 extended — canonical SMS field taxonomy proposed, re-derived against SAMA Circular 42023876, approved.** Rules are currently written per bank from a blank page: 15+ message shapes across 7 banks in one day of device testing, each its own one-off regex. This records a **fixed slot vocabulary** — Tier 0 rule-declared (`intent`, `messageType`, `sign`, `affectsSpend`), Tier 1 universal (`amount`, `currency`, `instrumentRef`, `occurredAt`), Tier 2 conditional (counterparty in its three roles, `referenceNumber`, fee/FX, `settlementRef`, biller fields, balance-after), Tier 3 explicitly **not** slotted (branch, loyalty points, credit limit, IBAN). The evidence that the slot set is not arbitrary: a transaction SMS is a lossy rendering of an ISO 20022 `camt.054` notification, and three independent open-source parsers across India, Thailand and MENA converge on the same list. **No schema change and no rule change** — `MessageRule`/`FieldExtraction` already express every slot, and the six shipping banks already conform, so this is methodology plus one safety net. **The one real defect it exposes:** `rule_pack_loader.dart` `_parseExtract` validates `transform`, `maskPolicy`, `kind` and `timezone` but **never the field name**, and `RulePackMessageParser._extract` reads a hardcoded name list — so a typo'd `extract` key loads cleanly, is never read, and yields nothing. A **silent no-op**, which is exactly what `field_transforms.dart` makes fatal for a typo'd *transform* name. Not a live bug today (all packs use the correct names); closed by validating both `extract` keys and `requiredFields` against the vocabulary at load time. **Recommendation: apply forward, do not retrofit** the in-flight six-bank set — pattern churn is the risky operation (R-4, KHA-128) and there is nothing to retrofit at the field level. One zero-work carve-out for the reviewer of that dispatch, and one open question on `remainingBalance` serving two different quantities. |
 | **1.7** | 2026-07-30 | **ADR-017 amended — KHA-137 decided, approved.** D1's content hash **drops `receivedAt` entirely**: `contentHmac = HMAC-SHA256(k, scheme ‖ normalisedBody ‖ normalisedSender)`. Folding the delivery instant in at millisecond precision meant a carrier redelivery — which by definition arrives at a *different* instant — hashed differently, D1 missed, and a second transaction was written; QA reproduced this on a device, doubling a real total. The AC-A5.1 test missed it because it varied the provider id and held `receivedAt` fixed, i.e. it varied the one thing a redelivery does not control. **AC-A5.3 is not weakened**, verified in code rather than assumed: every transaction rule in `sa-core.json` requires an in-body `occurredAt` captured to the minute, so two genuinely separate purchases differ in the body itself; and AC-A5.2's flag path is `DuplicatePolicy.decide`'s D2/D3 tiers over parsed *fields*, never the content hash. Coarse timestamp buckets and a "same-hash-within-window" variant are both **rejected**, and for the same arithmetic: identical bodies imply the same in-body minute, so the genuine pair is co-located in time and lands in any bucket/window together — the timestamp discriminates nothing it is asked to discriminate, while every boundary silently reproduces KHA-137. One **irreducible residual** is recorded: two real purchases, same card, merchant, amount **and minute** are byte-identical and the second is suppressed; recovery is US-B4 manual entry. **Forward-only, no backfill, no schema change (DB stays 7)** — but every stored digest becomes stale, which makes ADR-006 KHA-133 item **(F)** (the `sms_provider_id` pre-check in `_withDedupGuard`) live rather than latent, so it **must ship in the same PR** under (G).1's own rule. |
 | **1.6** | 2026-07-30 | **ADR-006 extended — KHA-133 decided, approved.** A rule-pack fix is currently **forward-only**: the `NotFinancialSender` branch advances the watermark for a discarded message, `runIncremental` only reads `_id >` the watermark, and `importState == completed` is terminal — so KHA-128's corrected sender patterns cannot recover a single message already swept. Decision: **a user-triggered, bank-scoped re-scan, which is AC-A6.10's existing "check again" capability pointed at banks that were configured with wrong patterns rather than at a newly linked sender.** KHA-133 is therefore **not a new mechanism and rides with US-A6**. Both alternatives are rejected: an **automatic re-scan on pack change** re-walks the month on every APK install and silently back-dates transactions, and **recording the swept pack version in the watermark** buys a worse version of that at the price of a schema migration — unnecessary, because `advanceWatermark: false` plus D1 already make a bounded re-scan idempotent and cursor-neutral. **No schema change; DB stays where P5b leaves it.** Dedup safety is confirmed by code, not assumed: a `NotFinancialSender` discard leaves **no row at all**, so the re-scan's write is a *first* write with nothing to double-count, while already-stored messages are suppressed on `content_hmac`. **One real hole found:** `contentHmac` is computed over text sanitised with the pack's per-bank `redact[]`, so it is a function of the pack — change a `redact[]` and the hmac pre-check misses, the insert hits the `sms_provider_id` `UNIQUE` constraint, and a benign duplicate is reported as `failedWithError`, stalling the watermark. Latent today (all `redact` arrays are `[]`); closed by pre-checking `sms_provider_id` in `_withDedupGuard`. Privacy is settled **explicitly**: re-reading is not re-retaining, on the same ground ADR-007 v1.5 already used, and a bank-scoped re-scan reads *strictly less* than the sweep the app runs every 15 minutes. New **H-17**. Two prohibitions bind the in-flight KHA-128 PR (no `redact[]` changes, no `importState` reset) but add no work to it. |
@@ -458,6 +468,12 @@ upheld unchanged; what v1.0 never provided is a way to **re-scan history after t
 which makes every rule-pack fix forward-only. Read that subsection before touching
 `_processOne`'s `NotFinancialSender` branch, `HistoricalImporter.runOrResume`, `_withDedupGuard`,
 or any `redact[]` array in a rule pack.
+**Extended again by the KHA-157 decision (v1.9, 2026-07-30)** — the second dated subsection at the
+end of this ADR, **`DRAFT`**. Step 3 of Layer 1 below says the pipeline reads rows with
+`date > lastProcessedSmsDate OR _id > lastProcessedSmsProviderId`. **The shipped code reads only
+the `_id` half, and that watermark is never seeded**, so on a fresh install the "incremental" read
+is the whole inbox. Read that subsection before touching `runIncremental`, `SmsSource`, or
+`SmsChannel.readSince`.
 
 **Context.** `android.provider.Telephony.SMS_RECEIVED` is on Android's implicit-broadcast
 exemption list, so a manifest-registered receiver is delivered even when the app process is
@@ -688,6 +704,139 @@ to offer the re-check at the end of ADR-007's existing imported-pack activation 
 where the user is already standing and no state is needed. Re-open trigger: if a second pack
 correction ships after US-A6 and the user does not notice it, add the stored version and the
 prompt. See **H-17**.
+
+#### KHA-157 decision — **the incremental watermark is seeded once, from the inbox's high-water mark, before the first sweep ever reads.** Decided 2026-07-30.
+
+> **STATUS: APPROVED (2026-07-30).** Scoped to this subsection, per the house style established by
+> v1.1–v1.8: the document's own `APPROVED` line stays as it is, because flipping the whole
+> architecture to `DRAFT` would block `/build` on every unrelated in-flight phase for one decision.
+> The rest of ADR-006 is unchanged and remains in force. **Item (E)'s open question is resolved:
+> ship the user-triggered, date-bounded discard.** 424 rows is too many to dismiss by hand, the
+> mechanism is safe by construction (still-pending items only, audit-logged, cannot re-flood per
+> (E)'s own argument), and leaving it undone converts a fixed ingestion bug into a standing UI
+> chore for the human. Implement (A)–(G) together, in one PR.
+
+**What is broken, and it is live.** On the human's real device, 424 items flooded Needs Review.
+Three facts compose:
+
+1. `lastProcessedSmsProviderId` is `.withDefault(const Constant(0))` — a fresh install starts at 0.
+2. `SmsChannel.readSince` selects on `"${Telephony.Sms._ID} > ?"` and **nothing else**. There is no
+   date bound on this path. (`readRange`, the *import* path, does have one: `DATE >= ? AND _ID > ?`.
+   That path is correct and is not being changed.) `IngestCursor.lastProcessedDate` is carried
+   across the boundary and then **never used** by `AndroidSmsSource` — ADR-006 Layer 1 step 3
+   promises `date > lastProcessedSmsDate OR _id > lastProcessedSmsProviderId`; only the second
+   disjunct was ever implemented.
+3. **Nothing seeds the watermark away from 0.** Verified rather than assumed: the only writer of
+   `last_processed_sms_provider_id` anywhere in `lib/` is `IngestWatermarkDao.advanceTo`, and its
+   only caller is `IngestionPipeline.processAll` under `advanceWatermark: true`.
+   `HistoricalImporter._walk` passes `advanceWatermark: false` **deliberately and correctly** — the
+   two cursors track different things and conflating them would skip messages that arrive
+   mid-import.
+
+So whichever incremental trigger fires first on a fresh install — and all four funnel into
+`runIncremental` — reads `_id > 0`: every SMS the device has ever received, fed through parse,
+classify, dedup and write-or-review. Messages from years before these banks had rules, or before a
+format existed, land in the review queue. **AC-A3.1's "from the start of the current calendar
+month" was only ever enforced on the import path.** The incremental path silently promised nothing,
+and in `foregroundSweepProvider` it runs *first*, before the importer that does honour the bound.
+
+This is also the one privacy-adjacent line in the defect: the app processes and retains sanitised
+text far outside the window AC-A3.1 documents. The fix **reduces** what is read and retained to
+what the ACs already say.
+
+**Why the test suite passed.** The incremental fakes are constructed with in-window messages and a
+watermark at 0, so "0 means the beginning of everything" is the fixture's normal, invisible state.
+The fixture cannot express the bug — the same lesson KHA-137 recorded one version ago.
+
+**The decision.** A **one-time high-water-mark seed**: the newest `_id`/`date` present in the inbox
+at the moment the app first has an incremental sweep to run. Before that point there is no
+"incremental"; after it, `runIncremental` only ever sees genuinely new messages. The current month
+remains the historical importer's job, unchanged, on its own independently date-bounded read.
+
+**Options rejected.**
+
+| Option | Assessment |
+|---|---|
+| **Date-bound `readSince` too** (`DATE >= startOfCurrentMonth AND _ID > ?`) | **Rejected — it introduces silent loss at every month rollover.** A freshly computed bound means a message that arrived on the 31st and was not swept (device off, app locked — ADR-018 makes that the *normal* case) is below the bound on the 1st and is never read again. It trades a visible flood for an invisible NFR-A7 violation, which is the wrong direction to be wrong in. A *frozen* bound would avoid that but is just the seed, expressed less precisely. |
+| **Let `HistoricalImporter` advance the incremental watermark on completion** | **Rejected twice over.** It is the exact conflation `historical_importer.dart`'s own doc comment forbids, and it is too late regardless: `foregroundSweepProvider` calls `runIncremental()` *before* `runOrResume()`, and Layers 1 and 2 may never run the importer at all. The flood happens before the seed would. |
+| **Seed from the SMS-permission grant callback** | **Rejected as the sole mechanism.** Permission can be granted from the OS Settings screen, where no app callback fires, and can be auto-revoked and re-granted (Android 11+). A hook that misses cases becomes a second code path that is wrong on the rare path — precisely what ADR-006's "all four triggers, one method" property exists to prevent. |
+| **A new `watermarkSeeded` column** | **Rejected — a schema migration to record a fact an existing column already carries.** See (B). |
+
+**Normative — what the implementation must do.**
+
+**(A) A content-free high-water-mark read.** `SmsSource` gains
+`Future<InboxHighWaterMark?> highWaterMark()` — the newest inbox row's `_id` and `date`, **ids and
+a timestamp only, never a body and never a sender**. `SmsChannel` implements it as a one-row query.
+It returns **`null` when the inbox cannot be read** (missing permission / `SecurityException`),
+which must be distinguishable from a readable but empty inbox. That distinction is load-bearing:
+seeding while permission is denied would record `0`, mark the watermark seeded, and reproduce this
+bug the moment permission is granted. An empty-but-readable inbox seeds `providerId = 0`,
+`date = clock.nowUtc()`.
+
+**(B) The discriminator is `lastProcessedSmsDate IS NULL`, and no column is added.** `advanceTo`
+writes both fields together and the date is non-nullable in that statement, so a null date means
+"never seeded and never advanced" — and one write makes it non-null forever, with no path back.
+**This is deliberately not the `idle`-means-`completed` conflation** that
+`IngestWatermarkDao.completeImport` documents: there, one value meant two different things; here,
+one write moves the row out of the initial state permanently. If any future writer ever sets the
+provider id without the date, this guarantee dies — so `advanceTo` and the seed are the only
+permitted writers of either field.
+
+**(C) The seed happens inside `runIncremental`, before its first read.** Not in a provider, not in
+a permission callback, not in the importer. All four triggers already funnel through this one
+method, so the guard cannot be bypassed by adding a fifth. Shape:
+
+```
+row = watermarkDao.current()
+if (row.lastProcessedSmsDate == null) {
+  hwm = smsSource.highWaterMark()
+  if (hwm == null) return IngestionRunResult();   // unreadable: seed nothing, sweep nothing
+  watermarkDao.seedTo(hwm)                         // reuses advanceTo's monotonic UPDATE
+  return IngestionRunResult();                     // nothing is newer than what we just read
+}
+```
+
+Read the high-water mark **first, then write it** — never re-read after the write. A message
+arriving inside that window has an `_id` *above* the value being written, so it is picked up by the
+next sweep. The opposite ordering would skip it.
+
+**(D) The importer is untouched.** `advanceWatermark: false` stays, `readRange` stays date-bounded,
+`importFromDate` stays frozen. The seed and the import bound answer different questions ("where does
+the future start" vs "how far back do we look") and must remain independent, which is the same
+reasoning ADR-006 already applies to the two cursors.
+
+**(E) Already-affected installs: no watermark migration, and no automatic deletion.** The flood has
+already advanced the watermark past the entire inbox, so on the human's device it is accidentally
+already at the high-water mark; the (C) guard sees a non-null date and does nothing. There is
+nothing to correct, and `advanceTo`'s monotonic `WHERE` would refuse a backwards correction anyway.
+What remains is the **rows**. **Auto-deleting them on upgrade is rejected** — a silent bulk deletion
+of user-visible financial rows during an app update is a worse failure than the flood, and it
+cannot tell an item the user has already acted on from one they have not. Ship instead a
+**user-triggered, date-bounded discard** in the review queue: *"N items received before
+&lt;import window start&gt; — discard them"*, acting only on **still-pending** review items, deleting the
+corresponding `raw_message` rows too (that text was never authorised by AC-A3.1), and recorded as a
+user action in the audit trail (ADR-010). Re-flooding afterwards is impossible: the watermark is
+above them and KHA-133's re-scan window is `min(importFromDate, startOfCurrentMonthUtc(now))`, which
+cannot reach them. **This is the one item that needs the human's call** — the alternative is
+dismissing 424 rows by hand.
+
+**(F) KHA-133 is unaffected, verified in code.** `RescanCoordinator` never calls `readSince` (the
+only two callers in `lib/` are `AndroidSmsSource` and `runIncremental`), reads the watermark only
+for `importFromDate`, and passes `advanceWatermark: false`. The seed moves neither its window nor
+either cursor.
+
+**(G) A test that can fail.** The regression fixture must contain messages dated **months before**
+the current window, with a fresh watermark, and assert that the first `runIncremental` examines
+**zero** of them; plus one asserting that a message arriving *after* the seed is still ingested,
+which is the property the seed must not break.
+
+**Residual, stated plainly.** `_id` is reset when the user's SMS database is restored from a backup
+— the hazard `ingest_watermark_table.dart` already names. A high seed makes it bigger: post-restore
+messages can land below the watermark and be silently skipped. Not fixed here; the recovery is
+KHA-133's re-check, which is date-bounded and does not depend on `_id`. Re-open trigger: if a
+restore is ever observed on a real device, `lastProcessedSmsDate` stops being merely a
+discriminator and must become the second half of the disjunct ADR-006 Layer 1 step 3 already
+promises.
 
 ---
 
@@ -2986,6 +3135,11 @@ AC-A3.1)
 > **No column is added for re-scan.** A re-scan is transient: it runs with
 > `advanceWatermark: false` and writes none of these fields. Recording *which rule pack the
 > watermark was last swept under* was considered and rejected — see that subsection, Q3 option (2).
+> **Correction, v1.9 (`DRAFT`):** `lastProcessedSmsDate` is **nullable, and its nullness is
+> load-bearing** — a null date means the incremental watermark has never been seeded, which is the
+> state that made the first sweep read the entire inbox (ADR-006's KHA-157 subsection). It is
+> written only by `advanceTo` and by the one-time seed, always together with the provider id.
+> **No column is added for seeding either.**
 
 **`AppSettings`** (single row)
 `baseCurrency` (default `SAR`) · `locale` · `lockGraceSeconds` · `autoApplyThreshold` ·
