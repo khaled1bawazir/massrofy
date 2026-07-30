@@ -930,9 +930,9 @@ task or violate the rule: the rule author may *read* real samples the user delib
 must then commit a **synthetic** fixture that mimics the shape. Real message text never enters the
 repository.
 
-#### Canonical SMS field taxonomy — the fixed slot vocabulary rules are written against. Proposed 2026-07-30. Re-derived against SAMA Circular 42023876, 2026-07-30.
+#### Canonical SMS field taxonomy — the fixed slot vocabulary rules are written against. Proposed 2026-07-30. Re-derived against SAMA Circular 42023876, 2026-07-30. Approved 2026-07-30.
 
-**STATUS: DRAFT — awaiting human approval.** Everything above in ADR-007 stays `APPROVED` and is
+**STATUS: APPROVED.** Everything above in ADR-007 stays `APPROVED` and is
 unchanged by this subsection. It adds **no schema change, no rule change, and nothing that blocks the
 in-flight six-bank rule dispatch** — it is a vocabulary, a checklist, and one loader-validation
 recommendation. Read the recommendation at the end before anyone retrofits anything.
@@ -1329,7 +1329,7 @@ financing remaining-principal — which is the strongest evidence yet for keepin
 a single slot, now with a tighter, SAMA-anchored meaning: *populate it for financing/installment
 messages only; a bank that separately prints a balance-after on a plain debit notification is
 printing something SAMA doesn't require, treat it as Tier 3 unless a future need justifies a slot.*
-This is a recommendation, not yet marked approved — say so if you want it split anyway.
+**Approved 2026-07-30** — `remainingBalance` stays single, scoped to financing/installment only.
 
 **2. Obtain the two SAMA tables verbatim — done, 2026-07-30.** Both retrieved and reproduced in full
 above via a direct fetch of `/en/table-no-1` and `/en/table-no-2`. No remaining
