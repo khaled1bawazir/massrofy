@@ -2,8 +2,8 @@ STATUS: Approved
 TIER: personal
 # Massrofy — Personal Spending Tracker from Bank SMS
 
-**Version:** 0.4 (Addendum A — user-declared bank senders; see the addendum status line below)
-**Date:** 2026-07-27 (v0.3), 2026-07-30 (Addendum A)
+**Version:** 0.5 (Addendum B — user-taught message formats; see the addendum status lines below)
+**Date:** 2026-07-27 (v0.3), 2026-07-30 (Addendum A), 2026-07-30 (Addendum B)
 **Author:** product-owner agent (v0.1), revised directly per human decisions (v0.2)
 **Phase:** 1 — Requirements
 
@@ -26,6 +26,79 @@ TIER: personal
 > messages can't be auto-parsed **is stated explicitly per bank**, not left to the Needs Review
 > queue alone — see OQ-22 resolution below, which also adds a manual **AC-A6.10** (re-check a
 > linked bank on demand, not just once at link time).
+
+> **ADDENDUM B STATUS: DRAFT — awaiting human approval (2026-07-30).**
+> Everything else in this document — including Addendum A — stays as it is. Addendum B adds
+> **Epic J**, two capabilities (**C18**, **C19**), six stories (**US-J1**–**US-J6**, of which
+> **three are v1 and three are explicitly deferred**), three out-of-scope rows (**X18a**, **X20**,
+> **X21**), two non-functional requirements (**NFR-M3a**, **NFR-A1a**) and five open questions
+> (**OQ-24**–**OQ-28**). Every item is tagged **`[Addendum B — DRAFT]`**. Nothing here is
+> authorised for build. It does **not** reopen gate 1 for the rest of the document, and it must
+> **not** interrupt the in-flight rule-writing for the human's seven real banks (KHA-128 and its
+> follow-ups), which remains the higher priority.
+>
+> **Why this exists.** Getting seven banks working on 2026-07-30 required an engineer to read the
+> human's real message previews off their phone, describe the structure by hand, write regex, and
+> ship a new APK. The human's request: *"we will have to give the user the cap to do this too…
+> adding SMSs structure and banks names too… if it is something require a new build each time then
+> we should allow the user to do it himself."* Addendum A solved this one layer up (*which senders
+> are banks*). Addendum B is the next layer down: *what does this message say, and where.*
+>
+> **The tension, and how it is resolved.** **X18 (approved) forbids exposing pattern/regex
+> authoring to the user, and X18 stands unamended.** Its reasoning is correct and Addendum B does
+> not override it: a wrong extraction pattern silently corrupts a real amount, and user-supplied
+> expressions are the executable-input surface ADR-007 deliberately has none of. What Addendum B
+> establishes is that **the human's complaint and X18 are not actually in conflict**, because the
+> complaint has two halves and only one of them needs pattern authoring:
+>
+> 1. *"A new build every time"* — **this half is already false, and v1 makes it visibly false.**
+>    ADR-007 already supports **imported rule packs** installed by the user through the file
+>    picker, with a reviewed diff and no APK reinstall. Today that capability exists and the user
+>    has never been shown it. Closing that loop (US-J3) plus a one-tap way to hand a redacted
+>    sample to whoever writes the rule (US-J2) removes the app release from the cycle entirely.
+>    What remains is a round trip to a rule author — slower per format, but every regex that ever
+>    touches a real amount stays reviewed and fixture-tested.
+> 2. *"The app can't even tell what type of message this is"* — **this half needs no patterns at
+>    all**, and it is the part the user is genuinely authoritative on. The user knows a refund is a
+>    refund. US-J1 lets them say so, which fixes the sign/affects-spend correctness of every
+>    hand-completed transaction. (Separate from, and complementary to, **KHA-146**, which is a bug:
+>    fields the parser *did* extract are being thrown away before the completion form. Fix that bug
+>    and add US-J1 and the completion flow becomes a short confirmation rather than full retyping.)
+>
+> **On deriving a rule from labeled examples (the deferred half, US-J4–J6).** Option (a) —
+> auto-derive a rule from one labeled example and trust it — is **rejected outright**. Option (b)
+> — export the example so an engineer writes a reviewed rule from it — is **v1**. Option (c) — a
+> candidate rule that must be confirmed on repeated messages before it is trusted — is the
+> **recommended eventual mechanism, deferred**, because it is real work carrying real risk and the
+> human's immediate need is served without it. The reasoning that must survive into that later
+> phase, stated now so it is not re-litigated from optimism:
+>
+> - **A whole-message positional regex derived from one example is not safely derivable.** Anything
+>   the user did not label stays literal, so a varying field they did not think to label (a running
+>   balance, a reference number) makes the rule match exactly one message forever. That failure is
+>   *safe* (no match → review queue) but useless. The dangerous failure is the opposite: an
+>   over-general anchor. "The first number in the message" extracts the card suffix as the amount
+>   on the very next message, and says nothing.
+> - **A narrow structural anchor is more derivable than a regex, but only with two hard rules.**
+>   "The amount is the number adjacent to `SAR`/`ريال`" survives different merchant lengths, amounts
+>   and dates, which a positional regex does not. It is only safe if **(i)** an anchor occurring
+>   more than once in the source example is refused rather than guessed at, and **(ii)** a rule
+>   producing more than one candidate value for a field on a later message extracts **nothing** and
+>   sends that message to review. Ambiguity must fail closed. Both are ACs below.
+> - **The genuinely underivable part is semantics, not position.** Whether a message is a purchase
+>   or a refund decides whether an amount is *added to* or *subtracted from* a total — an error of
+>   twice the amount. Bank formats for the two differ by a single word, and `sa-core.json`'s own
+>   rule-ordering notes show an engineer had to reason explicitly about it. **No amount of field
+>   highlighting expresses that.** So sign and affects-spend are never derived: they come from the
+>   user's declared type (US-J1), which is why US-J1 is the foundation of the deferred phase as
+>   well as being valuable on its own.
+> - **A self-taught rule is held to a stricter bar than merchant categorization (ADR-008).** A
+>   wrong category is annoying; a wrong amount is a wrong number in a real total. So a learned
+>   format never auto-applies until confirmed on repeated messages, an extraction correction
+>   demotes it, a second correction disables it, a bundled/imported pack rule always outranks it,
+>   and every transaction it produces names it in provenance (**NFR-A1a**) — which is also the
+>   answer to the objection that killed the on-device-classifier option in ADR-007: *weights have
+>   no `ruleId`.* A learned format does.
 
 ---
 
@@ -102,6 +175,8 @@ The founder/sole user of the app.
 | C15 | Capture non-spending money movement from SMS too — income/salary credits, ATM withdrawals, and transfers between the user's own accounts — so the app shows total spent vs. total kept, not just card spend. Transfers between the user's own accounts must never be counted as spending. |
 | C16 | Cloud backup/sync of the (small) local dataset, so data survives a lost/replaced device |
 | C17 | **`[Addendum A — APPROVED]`** Let the user declare that SMS from a sender the app does not recognize are from one of their banks (naming that bank if it is new), so a bank the app was never configured for — or one that changed its sender ID — starts being tracked without waiting for a new app version |
+| C18 | **`[Addendum B — DRAFT]`** Let the user state what *kind* of transaction an unreadable message describes (purchase, refund, transfer between own accounts, deposit, withdrawal, fee, bill payment), so a hand-completed transaction lands with the right sign and the right effect on totals without the user having to reason about which way it goes |
+| C19 | **`[Addendum B — DRAFT]`** Let the user hand a redacted sample of a message the app cannot read to whoever writes parsing rules, in one reviewed tap, and install the resulting rule pack themselves — so a new bank or a changed message format reaches them **without a new app release** |
 
 ### 3.2 Out of scope (v1) — explicitly
 
@@ -125,6 +200,9 @@ These are deliberately excluded. Some may return in a later version; none should
 | X17 | Hard, non-recoverable delete of a single transaction from the UI | Deletes are soft/hidden by default so a mistaken delete is recoverable; only "erase everything" (US-F3) is a true hard delete (was OQ-8) |
 | X18 **`[Addendum A — APPROVED]`** | A rule-authoring UI — letting the user write or edit sender/message patterns, message templates, or field-extraction mappings | C17 deliberately stops at *sender recognition*. Once a sender is recognized, the already-built unparsed queue (US-A4) plus manual completion (AC-A4.2) turn its messages into transactions with no pattern-writing at all. Authoring parsing rules is a specialist task, it is where a wrong guess silently corrupts amounts, and user-supplied patterns would be an executable-input surface the rule-pack design deliberately has none of. Keeping **rule content** an engineering data task (KHA-128) is the right split |
 | X19 **`[Addendum A — APPROVED]`** | A persisted "not my bank / ignore this sender" list | The unrecognized-sender list is shown only on demand, so there is nothing nagging the user that needs suppressing — and persisting it would mean storing metadata about senders the user has just confirmed are *not* financial, which is exactly what NFR-P4 exists to prevent. Revisit only if the list proves noisy in real use |
+| X18a **`[Addendum B — DRAFT]`** | Any UI that shows the user a regular expression, pattern, template, expression language, or field-extraction mapping **to write, paste, or edit** — in v1 or in any deferred phase | *Boundary clarification, not a relaxation — **X18 stands unamended.*** What X18 does **not** forbid, and what Addendum B relies on, is the user (a) **stating a fact about their own message** ("this is a refund" — C18/US-J1), (b) **handing a redacted copy of their own message to a rule author** (C19/US-J2), and (c) in a deferred phase, **pointing at where a value sits inside their own message** (US-J4). In all three the user supplies *data about a message*, never an expression; the app or a reviewed rule author converts it. If any design ever puts a pattern in front of the user for editing, it has left this addendum's scope and needs its own approval |
+| X20 **`[Addendum B — DRAFT]`** | On-device derivation of extraction rules from user-labeled examples — **US-J4, US-J5, US-J6**. **DEFERRED, not permanently excluded** | Specified below (stories and ACs) so the safety constraints are settled while the reasoning is fresh, and so a later `/design` round has something concrete to architect against. Deferred because: the immediate scaling pain is discharged by C19 (no app release needed), the immediate correctness pain is discharged by C18 plus the KHA-146 bug fix, and five of the seven configured banks currently have **no message samples at all** — so the binding constraint today is *samples*, not *tooling*. Building the harder, riskier half first would be the wrong order. Re-open trigger: **OQ-28** |
+| X21 **`[Addendum B — DRAFT]`** | Any shared, crowd-sourced, community, or public repository of rule packs or message samples | NFR-C5 forbids exposing bank SMS content to third parties, and CON-1 means there is no account system to attribute or moderate contributions. A one-to-one hand-off to a known rule author (US-J2) is a different act from publishing to a repository, and only the former is in scope. Revisit only as a deliberate, separately approved decision — see **OQ-25** |
 
 > **Moved from out-of-scope to in-scope (v1)** following human review: budgets/alerts (was X5, now C13), cloud backup/sync (was X10, now C16), statement PDF/CSV reconciliation (was X11, now C14).
 
@@ -228,6 +306,25 @@ Stories are grouped by capability area, kept small, and each is independently te
 - **US-I1** — As the Owner, I want my data backed up to the cloud so that I don't lose it if I lose or replace my device.
 - **US-I2** — As the Owner, I want backed-up data encrypted so that a cloud account compromise doesn't expose my financial history in the clear.
 - **US-I3** — As the Owner, I want to restore my data on a new device from the backup so that switching devices doesn't mean starting over.
+
+### Epic J — Teaching the app a message format `[Addendum B — DRAFT]`
+
+*Scope guard for the whole epic, and it is the point of the design: the user states facts about
+their own messages and points at their own text. **The user never writes, pastes, or edits a
+pattern, regex, template, or field mapping** (X18, X18a) — in v1 or in any deferred phase.*
+
+**In v1 (three stories):**
+
+- **US-J1** — As the Owner, I want to tell the app what kind of transaction a message describes when it completes one by hand, so that a refund reduces my spending instead of increasing it and a transfer to myself isn't counted as spending at all — without me having to work out which way the sign goes.
+- **US-J2** — As the Owner, I want to hand a redacted copy of a message my app can't read to whoever writes the parsing rules, in one tap and after seeing exactly what I'm sending, so that getting my bank supported doesn't depend on someone scrolling through my phone with me.
+- **US-J3** — As the Owner, I want to install an updated parsing rule pack myself and immediately see what it can now read, so that a new bank or a changed message format reaches me **without waiting for a new version of the app**.
+  > *This is the story that actually answers the human's "does this require a new build each time?"* — and the answer is **no, and it already didn't**. ADR-007 has supported user-imported rule packs (file picker, human-readable diff, explicit confirmation, no APK reinstall) since v1.0 of the architecture. What has never existed is a user-facing loop that makes it usable: no way to see what the new pack changed for *your* data, and no prompt to re-check your banks afterwards. US-J3 is mostly wiring an existing capability to the AC-A6.10 "check again" mechanism, which is why it is cheap and why it belongs in v1.
+
+**Deferred to a later phase (three stories) — specified now, not authorised now (X20):**
+
+- **US-J4** — As the Owner, I want to point at the parts of one of my own unreadable messages and say "this is the amount, this is the merchant, this is the date", so that the app can learn the shape of that message without me writing anything technical.
+- **US-J5** — As the Owner, I want a format I've just taught the app to ask me to confirm it on the next few messages before it starts filling things in on its own, so that a format I taught it wrong is caught on the second message rather than silently corrupting three months of totals.
+- **US-J6** — As the Owner, I want to see every format I've taught the app in plain language, and turn one off or delete it, so that a format that turns out to be wrong is one tap to stop rather than something I have to keep correcting transaction by transaction.
 
 ---
 
@@ -487,6 +584,63 @@ Written as Given/When/Then so QA can automate them directly. Each criterion is s
 - AC-I2.1 — **Given** data is backed up to the cloud, **when** it is stored, **then** it is encrypted such that the cloud provider/account holder alone cannot read financial content in the clear.
 - AC-I3.1 — **Given** a new device and an existing backup, **when** the user signs in and restores, **then** all transactions, cards, categories, learned rules, and budgets are recovered.
 
+### Epic J — Teaching the app a message format `[Addendum B — DRAFT]`
+
+**US-J1 — Declare the transaction type of a message the app couldn't read**
+
+- AC-J1.1 — **Given** an item in the Needs Review queue, **when** the user opens "Complete the details", **then** a Type selector is present offering the transaction types the app supports (purchase, refund/reversal, transfer to my own account, transfer to someone else, deposit/income, ATM withdrawal, fee/charge, bill payment, loan/finance installment), labelled in both Arabic and English (NFR-U8).
+- AC-J1.2 — **Given** the user selects a type, **when** the transaction is saved, **then** its sign (debit/credit) and whether it affects spend follow from the selected type automatically — the user is never asked to choose a sign, tick "is this a credit", or otherwise reason about arithmetic direction.
+- AC-J1.3 — **Given** the user selects "refund/reversal", **when** the transaction is saved, **then** it **reduces** the period's spend total rather than increasing it (same guarantee as AC-B7.1) and is displayed as visually distinct from a debit (AC-B7.3).
+- AC-J1.4 — **Given** the user selects "transfer to my own account", **when** the transaction is saved, **then** it is tagged as an internal transfer and excluded from all spend totals and category breakdowns (same guarantee as AC-B11.1).
+- AC-J1.5 — **Given** the parser had already determined a type before the message failed on some other field, **when** the completion form opens, **then** the Type selector is pre-selected with what the parser found and the user may override it. **Given** the parser matched no rule at all, **then** the selector opens unselected and saving is blocked until a type is chosen (AC-B4.2 shape). *(The pre-fill half depends on **KHA-146** being fixed; the two are complementary, not duplicates.)*
+- AC-J1.6 — **Given** the user declares a type, **when** the transaction is saved, **then** the declaration is recorded in the audit trail as a **user** action, distinguishable from a parser-derived type (NFR-A2, AC-F5.2).
+- AC-J1.7 — **Given** the user has declared a type on one message, **when** a later message from the same sender is processed, **then** **nothing is auto-applied from that declaration** — a v1 type declaration teaches the app nothing about future messages. *(Stated explicitly, as an AC rather than a note, because implementing it as learning is the obvious shortcut and it is out of scope until US-J4/J5 are approved. Learning from declarations without the US-J5 confirmation loop would be exactly the silent-wrong-number risk this addendum exists to avoid.)*
+
+**US-J2 — Hand a redacted sample to a rule author**
+
+- AC-J2.1 — **Given** a message in the Needs Review queue, **when** the user chooses "help support this format", **then** the app produces a shareable file containing, for that message only: its redaction-applied text (ADR-013 redaction already applied — no PAN, PIN, CVV, or OTP), its sender string, its linked bank if any, and the user-declared type if one was set. **Nothing else, and nothing from any other message.**
+- AC-J2.2 — **Given** the file has been prepared, **when** it is presented, **then** the exact content the user is about to share is displayed in full for them to read, and they can edit or cancel before anything leaves the app.
+- AC-J2.3 — **Given** the user proceeds, **when** the file is produced, **then** they are warned in plain language that it still contains real values from a real message (amount, merchant, date, sender) and that **they** choose who receives it — the same posture and honesty as AC-F2.3, not a claim of anonymity.
+- AC-J2.4 — **Given** the export, **when** it is written, **then** it is written to a user-chosen location through the platform file picker and **the app performs no network transmission of any kind** (ADR-001 — the release build declares no network permission). Sharing it onward is an act the user performs in another app of their choosing.
+- AC-J2.5 — **Given** the user selects several messages of the same format, **when** they export, **then** each appears as a separate, individually-reviewable entry in the file, and any message the user did not explicitly select is never included. There is no "export everything unparsed" action.
+- AC-J2.6 — **Given** an exported sample reaches a rule author, **when** a parsing rule is written from it, **then** the real message text is never committed to any repository, test corpus, or tooling — only a **synthetic** fixture mimicking its structure (NFR-M3, NFR-M3a). The export flow states this boundary to the user.
+
+**US-J3 — Install a rule pack and see what changed**
+
+- AC-J3.1 — **Given** the user has a rule-pack file, **when** they import it, **then** the app shows a human-readable summary of what it changes (banks added/changed, message formats added/removed) and requires explicit confirmation before it takes effect (ADR-007).
+- AC-J3.2 — **Given** an imported pack has just been activated, **when** the user confirms, **then** the app offers to re-check their banks immediately using the existing AC-A6.10 "check again" mechanism, and reports the outcome in concrete numbers — *"N messages re-checked, N transactions added, N still need review"* — rather than leaving the user to guess whether it helped.
+- AC-J3.3 — **Given** a transaction produced by an imported pack, **when** the user inspects its provenance, **then** it records the pack id, pack version and rule id that produced it, and the pack is marked as imported/unverified (NFR-A1, ADR-007).
+- AC-J3.4 — **Given** an imported pack would parse an already-recorded transaction differently, **when** it is activated, **then** existing transactions are **not** rewritten and user edits are preserved (AC-B5.3).
+- AC-J3.5 — **Given** a rule-pack file that is malformed, schema-invalid, or rejected by the engine, **when** the user imports it, **then** it is refused with a plain explanation of why, and the previously active packs stay in effect unchanged.
+- AC-J3.6 — **Given** any imported pack, **when** it is active, **then** a bundled pack rule and an imported pack rule are the only things that may produce a transaction automatically in v1 — no rule derived on-device from user labeling exists in v1 (X20).
+
+**US-J4 — Point at the fields in your own message `[DEFERRED — X20]`**
+
+*These ACs are specified now so the safety constraints are settled and a later `/design` round has
+something concrete to work from. They are **not authorised for build** and QA must not automate
+them until X20 is re-opened and the phase is separately approved.*
+
+- AC-J4.1 — **Given** an unreadable message, **when** the user teaches its format, **then** they do so **only** by selecting spans of the message text already displayed to them and assigning each span a field (amount, currency, merchant, date-time, card/account reference). They never type, paste, see, or edit a pattern, expression, or regex (X18, X18a).
+- AC-J4.2 — **Given** a labeled span whose surrounding anchor text occurs **more than once** in that same message, **when** the app attempts to derive a rule, **then** it does **not** guess — it either asks the user for a more distinctive selection or declines to learn that field, and says which field it could not learn.
+- AC-J4.3 — **Given** a derived rule applied to any later message, **when** it produces **more than one** candidate value for a field, **then** it extracts **nothing** for that field and the message goes to Needs Review. **Ambiguity always fails closed; it is never resolved by picking the first, the largest, or the most likely.**
+- AC-J4.4 — **Given** a derived rule, **when** it is evaluated, **then** it applies only to messages from the **same sender** *and* carrying the **same declared-type keyword** as the example it was learned from. A rule learned from a purchase may never fire on that bank's refund message.
+- AC-J4.5 — **Given** a derived rule, **when** it produces a transaction, **then** the sign and affects-spend come from the user's declared type (US-J1) and are **never** derived from the message text. *(This is the crux: field labeling expresses where a number is, never what it means.)*
+- AC-J4.6 — **Given** a message that a bundled or imported pack rule can parse, **when** it is processed, **then** the pack rule always takes precedence over any user-taught format for that message.
+- AC-J4.7 — **Given** the user has labeled a message, **when** they export it via US-J2, **then** the export may substitute placeholders for the labeled spans, producing a genuinely structural description with no real values in it. *(A forward benefit: US-J4 makes US-J2's export strictly safer than it can be in v1.)*
+
+**US-J5 — Confirm before trusting `[DEFERRED — X20]`**
+
+- AC-J5.1 — **Given** a newly taught format, **when** any message matches it, **then** the result is a **pre-filled Needs Review item, never a transaction**, until the format has been confirmed on **K** distinct subsequent messages (value of K — see **OQ-26**).
+- AC-J5.2 — **Given** a pre-filled review item from an unconfirmed format, **when** the user accepts every extracted value unchanged, **then** that counts as one confirmation. **Changing any extracted field is a rejection, not a confirmation**, and resets the count.
+- AC-J5.3 — **Given** a promoted (auto-applying) format, **when** the user corrects any **extracted** field on a transaction it produced, **then** the format is demoted to unconfirmed. On a **second** such correction it is disabled and the user is told plainly which format was disabled and why. *(A category correction is not an extraction correction and does not count — that is the ADR-008 learning loop, a different mechanism.)*
+- AC-J5.4 — **Given** any transaction produced by a user-taught format, **when** the user views it, **then** it is visibly marked as read by a format they taught the app, and its provenance names that format by a stable id (NFR-A1a).
+- AC-J5.5 — **Given** user-taught formats exist, **when** the app runs, **then** they are treated as local configuration: never transmitted, never shared by default, and never applied to any user's data but this one's (CON-1, X21). They are included in export (US-F2) and backup (US-I1) like any other setting.
+
+**US-J6 — Manage what the app has learned `[DEFERRED — X20]`**
+
+- AC-J6.1 — **Given** taught formats exist, **when** the user opens the formats list, **then** each is described in **plain language** ("Bank X purchases — the amount is the number after `SAR`"), never as a regex or pattern, and each can be disabled or deleted (X18a).
+- AC-J6.2 — **Given** the user deletes or disables a taught format, **when** they confirm, **then** transactions already created by it are retained unchanged with their values and provenance intact (same guarantee as AC-A6.8), and only future messages are affected.
+
 ---
 
 ## 6. Constraints
@@ -583,6 +737,8 @@ Even as a personal app, this system holds a complete record of one individual's 
 | NFR-M1 | SMS parsing rules must be updatable without a full application redesign, since bank message formats change without notice. |
 | NFR-M2 | The parsing and categorization logic must be testable against a corpus of sample SMS with expected outputs, so QA can automate regression testing (requires real samples — see OQ-2). |
 | NFR-M3 | Test data must consist of realistic-but-synthetic SMS; the user's genuine bank SMS must not be committed to any repository or shared with any tooling. |
+| NFR-M3a **`[Addendum B — DRAFT]`** | **The sample-export boundary (US-J2), stated so an engineer neither refuses the task nor violates NFR-M3.** A rule author *may read* a redacted real message the user has deliberately and explicitly shared — that is the only way a rule for a new format can be written at all. What that author commits is a **synthetic** fixture that mimics the message's structure; the real text must never enter a repository, a test corpus, an issue description, a commit message, or any tooling. This is the same boundary `docs/architecture.md` ADR-007's KHA-127 subsection already states for engineer-obtained samples, made explicit here because Addendum B turns it into a routine, user-initiated flow rather than a one-off. The export flow must state this boundary to the user (AC-J2.6). |
+| NFR-A1a **`[Addendum B — DRAFT]`** | **No extraction mechanism may exist in this product that cannot name what produced a number.** NFR-A1 already requires SMS-derived vs. manual provenance, and ADR-007 already requires a `ruleId` per parsed transaction. Extending it: a transaction produced by a user-taught format (US-J4/J5, deferred) must record a **stable identifier for that format**, resolvable to a plain-language description (AC-J6.1) and to the moment the user taught it. This is deliberately the same bar that ADR-007 used to reject an on-device classifier for v1 (*"weights have no `ruleId`"*) — a user-taught format is only acceptable **because** it can meet that bar, and any future mechanism that cannot must be rejected on the same ground. |
 
 ---
 
@@ -626,6 +782,16 @@ All items originally raised as Open Questions were answered by the human. Resolu
 | **OQ-22** | Explicit per-bank "couldn't be read" state, or Needs Review queue alone? | **Explicit per-bank state.** Human's reasoning: the queue alone lets a user silently assume manual entry is normal forever; a bank saying plainly "N messages, none could be read automatically" tells them this specific bank needs a parser update. Also added **AC-A6.10**: the user can trigger a manual re-check on a linked bank at any time (e.g. after an app update improves its parsing), not only once automatically at link time. |
 | **OQ-23** | Ship order vs KHA-128? | **KHA-128 first, then US-A6** — confirmed, matches the product-owner recommendation. |
 
+### Open questions raised by Addendum B (2026-07-30) — **UNRESOLVED, need a human decision**
+
+| ID | Question | Why it can't be answered here |
+|---|---|---|
+| **OQ-24** | **The central one.** Is the v1 answer acceptable — *no new app release per format, but still a round trip to a rule author* — or does the human want field tagging (US-J4/J5) in v1 despite the risk that a self-taught format silently extracts a wrong amount? | This is a risk-appetite call about **money correctness**, and it is the human's to make, not the product-owner's. The recommendation is stated (v1 as scoped; defer US-J4–J6 per X20) with the reasoning in the Addendum B block — but if the human's real constraint is "I do not want to depend on an engineer at all, ever, even for a slower loop", that changes the answer and the reasoning is wrong about what the actual pain is. |
+| **OQ-25** | Who is a sample exported by US-J2 allowed to go to? A single known rule author, privately (assumed by X21 and the current ACs)? Or should the design anticipate a shared/community pack repository later? | Genuinely undecided and it materially changes the design. A shared repository means redacted real message content leaves a one-to-one channel, which touches NFR-C5 and would need its own privacy treatment. Assuming either answer here would be inventing a fact. |
+| **OQ-26** | For the deferred phase: **K** — how many confirmations before a user-taught format is trusted to auto-apply (AC-J5.1)? And is K counted per format, or per bank? | No basis to pick a number. It trades the user's patience against the blast radius of a wrongly-taught format, and the human is the only person who knows how many messages per month a format even sees. Same shape as OQ-14 (the categorization confidence threshold), which was also deliberately left to the human/build phase rather than guessed. |
+| **OQ-27** | Can the user declare a type (US-J1) for a message whose sender is **not yet linked to any bank**? | The recommendation is **no** — link the sender first via US-A6, then complete the message — because a transaction with no bank has nowhere to live in the US-B12 bank/account/card hierarchy. But this may be an annoying extra step in practice and the human has now used the real flow; they know better than this document does. |
+| **OQ-28** | What evidence would justify re-opening X20 and building US-J4–J6? | Needs a threshold the human sets from lived use, e.g. *"if I am still hand-completing more than N messages a month once all seven banks have rules"*, or *"if a bank changes its format and the round trip takes more than N days"*. Without a stated trigger, a deferral quietly becomes a permanent no. |
+
 ---
 
 ## 9. Traceability Summary
@@ -643,6 +809,7 @@ For downstream phases: every acceptance criterion is prefixed `AC-<story-id>.<n>
 | G — Budgets & alerts | US-G1..G4 | 4 | Resolved (new) |
 | H — Statement reconciliation | US-H1..H3 | 3 | Resolved (new) |
 | I — Backup & sync | US-I1..I3 | 3 | Resolved (new) |
+| **J — Teaching a message format** | US-J1..J6 | 33 | **`[Addendum B — DRAFT]`** — **not authorised for build.** v1: US-J1 (7 ACs), US-J2 (6), US-J3 (6) = 19. Deferred under X20: US-J4 (7), US-J5 (5), US-J6 (2) = 14. OQ-24..28 open. Building any of it is gated on the human approving Addendum B **and** on the in-flight rule work for the seven real banks (KHA-128 and follow-ups) settling first |
 
 **No remaining blockers before phase 2 (planning).** Real SMS samples from two banks are in hand (§3.4); more are welcome over time but nothing is gated on them now. This PRD is unblocked pending your `APPROVED` status change.
 

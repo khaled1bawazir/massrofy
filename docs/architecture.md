@@ -2,7 +2,7 @@ STATUS: APPROVED
 
 # Massrofy — Architecture Decision Record
 
-**Version:** 1.6
+**Version:** 1.8
 **Date:** 2026-07-30 (v1.5: 2026-07-30; v1.4: 2026-07-29; v1.3: 2026-07-29; v1.2: 2026-07-29; v1.1: 2026-07-28; v1.0: 2026-07-27)
 **Author:** solution-architect agent (phase 3 — architecture, human gate 2)
 **Sources of truth:** `docs/PRD.md` v0.3 (STATUS: Approved), `docs/build-plan.md` v1.0
@@ -67,12 +67,26 @@ Every pattern in this document is established here, not inherited.
 > design one — see H-17.** The two constraints the decision places on the in-flight KHA-128 PR are
 > prohibitions that add no work, and are safe to honour before approval.
 
+> **v1.8 is a methodology amendment, and the cheapest one in this document.** It ships `DRAFT`
+> inside ADR-007 and **changes no schema, no rule and no code**. It answers a question the human
+> asked directly: *what fields does a bank transaction SMS always contain?* — so that rules stop
+> being invented per bank and start being written against a checklist. The honest summary is that
+> **the existing schema was already right**: `MessageRule`/`FieldExtraction` express every slot the
+> taxonomy names, and the shipping banks already conform — which is itself evidence that ADR-007's
+> data-driven design was the correct call. The subsection's value is therefore (a) a checklist for
+> whoever adds bank number eight, (b) a fixed label palette that makes the format-teaching
+> capability being scoped in parallel *buildable* rather than open-ended, and (c) one silent-no-op
+> defect in `rule_pack_loader.dart` that only became visible once the vocabulary was written down.
+> **Nothing here blocks the in-flight six-bank rule dispatch, and the explicit recommendation is
+> not to disturb it.**
+
 ---
 
 ## Changelog
 
 | Version | Date | Change |
 |---|---|---|
+| **1.8** | 2026-07-30 | **ADR-007 extended — canonical SMS field taxonomy proposed (subsection is DRAFT, awaiting the human).** Rules are currently written per bank from a blank page: 15+ message shapes across 7 banks in one day of device testing, each its own one-off regex. This records a **fixed slot vocabulary** — Tier 0 rule-declared (`intent`, `messageType`, `sign`, `affectsSpend`), Tier 1 universal (`amount`, `currency`, `instrumentRef`, `occurredAt`), Tier 2 conditional (counterparty in its three roles, `referenceNumber`, fee/FX, `settlementRef`, biller fields, balance-after), Tier 3 explicitly **not** slotted (branch, loyalty points, credit limit, IBAN). The evidence that the slot set is not arbitrary: a transaction SMS is a lossy rendering of an ISO 20022 `camt.054` notification, and three independent open-source parsers across India, Thailand and MENA converge on the same list. **No schema change and no rule change** — `MessageRule`/`FieldExtraction` already express every slot, and the six shipping banks already conform, so this is methodology plus one safety net. **The one real defect it exposes:** `rule_pack_loader.dart` `_parseExtract` validates `transform`, `maskPolicy`, `kind` and `timezone` but **never the field name**, and `RulePackMessageParser._extract` reads a hardcoded name list — so a typo'd `extract` key loads cleanly, is never read, and yields nothing. A **silent no-op**, which is exactly what `field_transforms.dart` makes fatal for a typo'd *transform* name. Not a live bug today (all packs use the correct names); closed by validating both `extract` keys and `requiredFields` against the vocabulary at load time. **Recommendation: apply forward, do not retrofit** the in-flight six-bank set — pattern churn is the risky operation (R-4, KHA-128) and there is nothing to retrofit at the field level. One zero-work carve-out for the reviewer of that dispatch, and one open question on `remainingBalance` serving two different quantities. |
 | **1.7** | 2026-07-30 | **ADR-017 amended — KHA-137 decided (subsection is DRAFT, awaiting the human).** D1's content hash **drops `receivedAt` entirely**: `contentHmac = HMAC-SHA256(k, scheme ‖ normalisedBody ‖ normalisedSender)`. Folding the delivery instant in at millisecond precision meant a carrier redelivery — which by definition arrives at a *different* instant — hashed differently, D1 missed, and a second transaction was written; QA reproduced this on a device, doubling a real total. The AC-A5.1 test missed it because it varied the provider id and held `receivedAt` fixed, i.e. it varied the one thing a redelivery does not control. **AC-A5.3 is not weakened**, verified in code rather than assumed: every transaction rule in `sa-core.json` requires an in-body `occurredAt` captured to the minute, so two genuinely separate purchases differ in the body itself; and AC-A5.2's flag path is `DuplicatePolicy.decide`'s D2/D3 tiers over parsed *fields*, never the content hash. Coarse timestamp buckets and a "same-hash-within-window" variant are both **rejected**, and for the same arithmetic: identical bodies imply the same in-body minute, so the genuine pair is co-located in time and lands in any bucket/window together — the timestamp discriminates nothing it is asked to discriminate, while every boundary silently reproduces KHA-137. One **irreducible residual** is recorded: two real purchases, same card, merchant, amount **and minute** are byte-identical and the second is suppressed; recovery is US-B4 manual entry. **Forward-only, no backfill, no schema change (DB stays 7)** — but every stored digest becomes stale, which makes ADR-006 KHA-133 item **(F)** (the `sms_provider_id` pre-check in `_withDedupGuard`) live rather than latent, so it **must ship in the same PR** under (G).1's own rule. |
 | **1.6** | 2026-07-30 | **ADR-006 extended — KHA-133 decided (subsection is DRAFT, awaiting the human).** A rule-pack fix is currently **forward-only**: the `NotFinancialSender` branch advances the watermark for a discarded message, `runIncremental` only reads `_id >` the watermark, and `importState == completed` is terminal — so KHA-128's corrected sender patterns cannot recover a single message already swept. Decision: **a user-triggered, bank-scoped re-scan, which is AC-A6.10's existing "check again" capability pointed at banks that were configured with wrong patterns rather than at a newly linked sender.** KHA-133 is therefore **not a new mechanism and rides with US-A6**. Both alternatives are rejected: an **automatic re-scan on pack change** re-walks the month on every APK install and silently back-dates transactions, and **recording the swept pack version in the watermark** buys a worse version of that at the price of a schema migration — unnecessary, because `advanceWatermark: false` plus D1 already make a bounded re-scan idempotent and cursor-neutral. **No schema change; DB stays where P5b leaves it.** Dedup safety is confirmed by code, not assumed: a `NotFinancialSender` discard leaves **no row at all**, so the re-scan's write is a *first* write with nothing to double-count, while already-stored messages are suppressed on `content_hmac`. **One real hole found:** `contentHmac` is computed over text sanitised with the pack's per-bank `redact[]`, so it is a function of the pack — change a `redact[]` and the hmac pre-check misses, the insert hits the `sms_provider_id` `UNIQUE` constraint, and a benign duplicate is reported as `failedWithError`, stalling the watermark. Latent today (all `redact` arrays are `[]`); closed by pre-checking `sms_provider_id` in `_withDedupGuard`. Privacy is settled **explicitly**: re-reading is not re-retaining, on the same ground ADR-007 v1.5 already used, and a bank-scoped re-scan reads *strictly less* than the sweep the app runs every 15 minutes. New **H-17**. Two prohibitions bind the in-flight KHA-128 PR (no `redact[]` changes, no `importState` reset) but add no work to it. |
 | **1.5** | 2026-07-30 | **ADR-007 amended — KHA-127/KHA-128 decided.** The **hard sender gate stays**, and **NFR-P4's "retain nothing" is upheld unamended** — because nothing was ever lost: the message stays in the Android SMS provider, which the app holds `READ_SMS` on and can re-read at will. The defect was **non-observability of a derived fact**, and a derived fact is fixed by deriving it, not by persisting it. Three options were weighed. **Option 1 (loosen gate 1 on body-shape heuristics → needs-review) is REJECTED as a gate**, because routing on a body guess means persisting the *content* of messages from senders never confirmed to be banks — precisely the harm NFR-P4/NFR-P4a exist to prevent — and because it infers what the user can simply be asked. **Option 2 (on-device classifier) is REJECTED for v1**, decisively on grounds of *evidence*, not effort: NFR-M3 forbids training on the user's real SMS, NFR-S6/R-10 mean we could never measure its precision in the field, and a weight blob has no `ruleId` to record (NFR-A1) and no reviewable diff (NFR-M2). **Option 3 (user sender-linking, PRD Addendum A) is the actual fix**, and it is upgraded from "complementary" to primary. Option 1's heuristic **survives, relocated**: as an in-memory, per-sender-aggregated, **advisory ranking signal on the sender-recognition screen only** — never a gate, never persisted — where a false positive costs one row of screen position instead of a database row. Two additions the options list missed and which carry most of the value: **(i) sender-name suggestion from the pack's own `aliases`/`displayName`** — the string needed to recognise `Jazira Bank` was *already shipped* in `sa-core.json` (`aliases: ["ALJAZIRA","BAJ","الجزيرة"]`) and the gate never consulted it; **(ii) a proactive unrecognised-sender health signal**, because Addendum A only links the screen from *empty* states and the silent-sender-ID-change case has a non-empty home screen. NFR-P4 gains one clarification, not a relaxation: **a content-free, sender-free aggregate count is not retention of a message** and may be surfaced and logged (ADR-015). |
@@ -915,6 +929,179 @@ export**. Note the NFR-M3 boundary carefully, because an engineer will otherwise
 task or violate the rule: the rule author may *read* real samples the user deliberately shared, and
 must then commit a **synthetic** fixture that mimics the shape. Real message text never enters the
 repository.
+
+#### Canonical SMS field taxonomy — the fixed slot vocabulary rules are written against. Proposed 2026-07-30.
+
+**STATUS: DRAFT — awaiting human approval.** Everything above in ADR-007 stays `APPROVED` and is
+unchanged by this subsection. It adds **no schema change, no rule change, and nothing that blocks the
+in-flight six-bank rule dispatch** — it is a vocabulary, a checklist, and one loader-validation
+recommendation. Read the recommendation at the end before anyone retrofits anything.
+
+**Why now.** One day of real-device testing produced 15+ distinct message shapes across 7 Saudi banks
+— purchases, transfers in and out, OTPs, POS vs ecommerce, Arabic and English variants of the same
+bank — each written as its own regex from a blank page. That does not scale, and it blocks the
+format-teaching capability being scoped in parallel: you cannot ask a user to *label* parts of a
+message unless there is a small, fixed, well-understood set of labels to label with.
+
+##### The claim, and the evidence for it
+
+A bank transaction SMS is not free-form prose. It is a **lossy, human-readable rendering of a
+bank-to-customer debit/credit notification** — the thing ISO 20022 models formally as `camt.054`.
+That is why the slot set is not arbitrary, and it is why independent parsers built for completely
+different markets converge on nearly the same list:
+
+| Source | Slots it settled on |
+|---|---|
+| ISO 20022 `camt.054` (the formal notification model) | amount + currency, `CdtDbtInd` (debit/credit), booking/value date, entry reference and end-to-end id, debtor and creditor (counterparty) plus their agents (counterparty bank), account, balance, `BkTxCd` (bank transaction code — event + channel), remittance information |
+| `transaction-sms-parser` (JS, Indian market) | `account{type: CARD\|WALLET\|ACCOUNT, number, name}`, `balance{available, outstanding}`, `transaction{type: debit\|credit, amount, referenceNo, merchant}` |
+| `pennywiseai-tracker` (Kotlin, 85+ banks across 14 countries, Arabic + English, includes Saudi) | `amount, type, merchant, reference, accountLast4, balance, creditLimit, currency, fromAccount, toAccount, isFromCard, bankName, timestamp` |
+| `transaction-parser-th` (Thai market) | provider, type, date, time, from/to account, amount, balance |
+
+Four independent derivations, three markets, one shape. That is strong enough to **fix** the
+vocabulary rather than keep rediscovering it per bank.
+
+##### Tier 0 — declared by the rule, never extracted
+
+These are not spans in the text. They are properties of the *template*, decided once by whoever
+writes the rule — which is why they are auditable and why no regex should try to infer them.
+
+`intent` · `messageType` · `sign` (= `CdtDbtInd`) · `affectsSpend`
+
+**`messageType` carries the channel dimension, and should keep carrying it.** POS vs ecommerce vs ATM
+vs wallet is the one "field" that is frequently *not* present as a span at all — it is implied by
+which template the bank chose. Encoding it as `pos_purchase` / `online_purchase` / `withdrawal`
+rather than as an extracted `channel` slot is correct and stays. Recommended vocabulary, shaped
+`<event>` optionally suffixed `_<channel>`:
+
+`pos_purchase` · `online_purchase` · `withdrawal` · `refund` · `transfer_out` · `transfer_in` ·
+`salary_income` · `bill_payment` · `card_repayment` · `installment` · `fee` · `account_debit` ·
+`account_credit`, plus the `intent: ignore` set `otp` · `marketing` · `balance_info`.
+
+This stays **recommended, not enforced.** §5.2's forward-compatibility rule — an unrecognised
+`messageType` routes to the review queue and is never discarded — is load-bearing and must not be
+traded for a closed enum. A list a human checks against beats an enum that rejects a newer pack.
+
+##### Tier 1 — universal slots
+
+Present in essentially every transaction-shaped message, in every bank and both languages.
+
+| Slot | Note |
+|---|---|
+| *(bank identity)* | **Not a slot.** Resolved from the sender, never from the body (ADR-007 step 2, AC-B12.3). Listed only so nobody adds a `bankName` extract. |
+| `amount` | The movement's value. |
+| `currency` | Satellite of `amount`. Frequently absent as a span and supplied by `literal: "SAR"` — that is exactly what `literal` is for. |
+| `instrumentRef` (+ `…Network`, `…Type`) | Which card or account. `kind` is rule-declared, never guessed from digit count (AC-B13.1/2). |
+| `occurredAt` | Universal as a *concept*, not as a span — `received_at_fallback` covers its absence. |
+
+##### Tier 2 — conditional slots, determined by `messageType`
+
+| Slot | Appears on |
+|---|---|
+| `merchant` | purchases, refunds, bill payments (biller as merchant), ATM (location as merchant) |
+| `counterpartyName` | transfers in/out, salary |
+| `counterpartyBankName` | interbank transfers. This is the **other** bank; confusing it with the sending bank is the easiest wrong answer in the whole taxonomy |
+| `referenceNumber` | transfers, some bill payments. Where present it is the reliable dedup key (ADR-017 D2) |
+| `remainingBalance` (+ `…Currency`) | installments, and any bank that prints a balance-after |
+| `feeAmount` (+ `…Currency`) | FX purchases, some transfers |
+| `convertedAmount` (+ `…Currency`), `exchangeRate` | foreign-currency purchases |
+| `settlementRef` (+ `…Network`, `…Type`) | card repayment — the **second** instrument (AC-B14.1) |
+| `billerCode`, `invoiceNumber` | bill payments (SADAD-shaped) |
+
+**One rule turns this list into working guidance:** *if `affectsSpend` is true, `merchant` must be
+populated*, aliasing another role's span where necessary. The categorisation loop (ADR-008,
+US-D1/D2) keys on `merchantRawText`; a spend-affecting transaction with no merchant gives the
+learning loop nothing to attach to and is permanently uncategorisable. This is why `sa-core.json`
+maps an ATM location into `merchant`, and maps a biller name into both `merchant` and `billerCode`.
+Those read like smells and are not — they are this rule, correctly applied.
+
+##### Tier 3 — observed in real messages and deliberately **not** given slots
+
+Branch name · ATM city as its own field · loyalty/points balance · credit limit and available credit ·
+IBAN · the bank's service phone number · promotional tails · "available" vs "outstanding" balance as
+two distinct figures.
+
+Each is either bank-specific, or (IBAN, full credit limit) something NFR-S2/NFR-P4 would rather we
+did not hold at all. **Adding a slot is a schema decision and the default answer is no.** The bar: a
+field earns a slot when it changes a number the user sees or resolves an identity — not when it
+merely appears.
+
+##### Does the existing schema support this? Yes — the gap is validation, not structure
+
+`MessageRule` / `FieldExtraction` already express every slot above, and the six shipping banks
+already use exactly this vocabulary. `instrumentRefNetwork` / `instrumentRefType` even work through
+a `${field}Network` convention that generalises to `settlementRef` for free. **No restructuring is
+warranted, and `sa-core.json`'s organisation does not change.**
+
+The taxonomy does expose one real defect, and it is a defect this codebase has already ruled
+unacceptable once, in the neighbouring case:
+
+> `rule_pack_loader.dart` `_parseExtract` validates `transform`, `maskPolicy`, `kind` and `timezone`
+> — but **never the field name**. `RulePackMessageParser._extract` reads a hardcoded list of names.
+> So `extract: { "merchantName": {...} }` loads cleanly, is never read, and yields nothing. A typo'd
+> field name is a **silent no-op** — precisely what `field_transforms.dart` makes fatal for a typo'd
+> *transform* name, for precisely the same reason.
+
+`requiredFields` shares the gap: it is `_optionalStringList` with no vocabulary check, so a name
+outside `ParsedFields.presentFieldNames` can never be satisfied. That one fails *safe* (permanent
+review queue) rather than open, and today every rule uses only `["amount","occurredAt"]` — so
+neither is a live bug. Both become cheap to close once the vocabulary is written down, which is what
+this subsection does.
+
+**The fix, when it is scheduled:** hold the vocabulary as a constant beside
+`ParsedFields.presentFieldNames` — the satellite names (`convertedCurrency`, `feeCurrency`,
+`remainingBalanceCurrency`, `<instrument>Network`, `<instrument>Type`) belong in it too — and reject
+unknown names in both `extract` keys and `requiredFields` at **load time**. It can only reject packs
+that are already broken.
+
+##### What this means for the format-teaching capability (scoped by product-owner in parallel)
+
+Not duplicating their PRD work. Three observations from the architecture side:
+
+1. **A fixed label palette is what makes the feature buildable at all.** With Tier 1 + Tier 2 the
+   palette is ~14 chips, each carrying a *type* — money · currency · datetime · masked-identifier ·
+   reference · free text. Typed labels let the app reject a bad selection **at teach time** ("that
+   span doesn't look like an amount") instead of at parse time, months later, inside someone's
+   totals. Free-form labels make that check impossible: there is nothing to check against.
+2. **It keeps PRD X18 intact rather than reopening it.** The user labels spans of *their own*
+   message; the app synthesises the `FieldExtraction`. The user still never writes or sees a regex —
+   and synthesis is only possible because the target field set is closed and typed.
+3. **Two constraints, offered early because they are cheap now and expensive later.** (a) A taught
+   rule must land in the **same `MessageRule` shape**, so provenance (NFR-A1), `requiredFields`,
+   `redact` and priority all still apply — with a distinct `source` alongside `bundled` / `imported`,
+   so a taught rule is visible in the audit trail and disableable without touching bundled packs.
+   (b) **Tier 0 is not labelable.** `sign`, `affectsSpend` and `messageType` are not spans in the
+   text, so they are a short wizard ("did money leave or arrive?"), not a highlight. Getting
+   `affectsSpend` wrong on a card repayment double-counts every repayment — the one question worth
+   asking out loud.
+
+   The safety story the taxonomy makes available for free: re-run the taught rule against the message
+   the user just labelled and show them the rendered transaction. If it reproduces what they
+   confirmed, activate it; if not, do not.
+
+##### Recommendation: apply forward, do not retrofit
+
+**Do not retrofit the six-bank rule set** (`bank-aljazira` / `d360` / `nera` / `stc-bank` / `sab` /
+`al-rajhi`). Reasoning:
+
+- There is nothing to retrofit at the field level — the shipping rules already conform. The taxonomy
+  was derived partly *from* them.
+- The only substantive change is engine-side loader validation, which is orthogonal to rule content
+  and lands separately, after the pack is device-verified.
+- Pattern churn is the genuinely risky operation here. R-4 and KHA-128 are the live evidence that a
+  wrong pattern loses a financial message silently. Re-touching six banks' regexes days before device
+  testing, to gain documentation conformance we already have, is a bad trade.
+
+**One carve-out, and it is zero work:** whoever reviews the in-flight dispatch should check the diff's
+`extract` keys and `requiredFields` entries against the vocabulary above. A *new* name outside it is
+cheap to correct before anything is persisted from it and expensive after — and nothing currently
+catches it.
+
+**Open question for the human (the only one here).** `remainingBalance` serves two different
+real-world quantities: a loan's remaining principal (PRD §3.4) and an account's balance-after. They
+are not the same thing. Keeping one informational, never-arithmetic slot is the simpler and safer
+option and is what I recommend at `TIER: personal` — but it means the app can never truthfully label
+that figure without also reading `messageType`. Say so if you want them split before more banks are
+written.
 
 ---
 
