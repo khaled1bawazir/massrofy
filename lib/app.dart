@@ -155,6 +155,12 @@ class _AppLockGatewayState extends ConsumerState<_AppLockGateway>
         // — this is currently the layer doing the real work on any wake where
         // the app was locked, and the watermark guarantees it picks up
         // everything since the last successful run.
+        //
+        // **Kept exactly as it was by KHA-122.** The new broadcast-driven
+        // trigger (see the `unlocked` branch in `build`) covers the
+        // app-stays-open case; this covers everything that arrived while the app
+        // was away, when no engine was listening for a signal at all. They are
+        // not redundant, and the dedup path makes the overlap safe.
         ref.invalidate(foregroundSweepProvider);
         // **AC-E1.4** — *"when the user opens the app on the 1st, the
         // current-month total resets to the new month."* A resume is the only
@@ -229,6 +235,29 @@ class _AppLockGatewayState extends ConsumerState<_AppLockGateway>
       // review queue, not through this future — architecture §7.5's
       // "reactive, no polling".
       ref.watch(foregroundSweepProvider);
+
+      // **KHA-122 / AC-A1.1 — the third trigger, and the one that was missing.**
+      //
+      // Until this line there were exactly two: this `watch` (fires on unlock)
+      // and `didChangeAppLifecycleState`'s `invalidate` (fires on resume). An
+      // app left open and idle on Home hits neither, so an SMS arriving during
+      // a live session was not ingested until the user backgrounded and
+      // reopened — while the screen said `0.00 SAR` and "All caught up". QA
+      // found that on a device during the P5a walk.
+      //
+      // `foregroundSmsSignalProvider` invalidates `foregroundSweepProvider`
+      // itself, so this is a **keep-alive**, not a read: the value is
+      // deliberately unused. Watching is what holds the `EventChannel`
+      // subscription open, and putting it inside the `unlocked` branch is what
+      // ties the subscription's lifetime to the only state in which acting on
+      // it is legal (ADR-005 — the UI isolate holds the key; ADR-018 D1 — no
+      // background isolate does).
+      //
+      // The rebuild cost of an emission is one call to this `build`: the
+      // returned `const OnboardingGate()` is a canonicalised constant, so
+      // Flutter sees the identical widget instance and skips the subtree
+      // entirely.
+      ref.watch(foregroundSmsSignalProvider);
     }
 
     // **NFR-S3, and the one place it is enforced.** Every P5a screen is

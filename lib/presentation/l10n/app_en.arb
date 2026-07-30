@@ -1054,6 +1054,169 @@
   "@moreSectionOrganise": {"description": "Grouping header in the More menu for categories, learned rules and the review inbox."},
   "moreSectionApp": "App",
   "@moreSectionApp": {"description": "Grouping header in the More menu for lock/session actions."},
-  "moreReportsComingSoon": "Reports arrive in the next release",
-  "@moreReportsComingSoon": {"description": "Stated in the More menu rather than shipping a fourth BottomNav tab that opens onto nothing. design.md §5's BottomNav specifies four tabs; the Reports hub (S-28) is KHA-37, and a dead tab would be a worse answer than an honest sentence."}
+  "commonApply": "Apply",
+  "@commonApply": {"description": "P5b shared button label — commits the S-27 filter sheet."},
+  "commonClose": "Close",
+  "@commonClose": {"description": "P5b shared button label."},
+
+  "navReports": "Reports",
+  "@navReports": {"description": "The fourth BottomNav tab (design.md §1/§5), shipped by KHA-37. P5a deliberately shipped three tabs and said so in the More menu rather than opening a tab onto nothing; that placeholder line is removed with this."},
+
+  "reportsHubTitle": "Reports",
+  "@reportsHubTitle": {"description": "S-28 — the Reports hub."},
+  "reportsHubSubtitle": "Every figure here is the sum of transactions you can open and check.",
+  "@reportsHubSubtitle": {"description": "NFR-A6 stated to the user, not only to engineers: the hub's promise is traceability, and saying so is what makes the drill-down affordances read as an invitation rather than decoration."},
+  "reportsByCategory": "By category",
+  "@reportsByCategory": {"description": "S-28 card / S-29 title — US-E2."},
+  "reportsByCategorySummary": "Top category: {name} — {amount}",
+  "@reportsByCategorySummary": {
+    "description": "S-28's pre-shown top line, so the hub is informative on its own.",
+    "placeholders": {"name": {"type": "String"}, "amount": {"type": "String"}}
+  },
+  "reportsByCard": "By card and account",
+  "@reportsByCard": {"description": "S-28 card / S-30 title — US-E3. Named for both kinds because AC-B13.3 keeps account activity and card activity distinguishable, and a screen called only 'By card' would look like it had lost the accounts."},
+  "reportsByCardSummary": "Most used: {name} — {amount}",
+  "@reportsByCardSummary": {
+    "description": "S-28's pre-shown top line for the instrument breakdown.",
+    "placeholders": {"name": {"type": "String"}, "amount": {"type": "String"}}
+  },
+  "reportsMonthOverMonth": "Month over month",
+  "@reportsMonthOverMonth": {"description": "S-28 card / S-31 title — US-E4."},
+  "reportsSpentVsKept": "Spent vs kept",
+  "@reportsSpentVsKept": {"description": "S-28 card / S-32 title — AC-B10.3. Moved here from Home in P5b, which is where design.md always filed it."},
+  "reportsNothingYetTitle": "Nothing to report yet",
+  "@reportsNothingYetTitle": {"description": "S-28 empty state. A hub of four cards each reading 'no data' is worse than one honest sentence."},
+  "reportsNothingYetBody": "Once a bank message arrives, or you add a transaction by hand, the breakdowns appear here.",
+  "@reportsNothingYetBody": {"description": "Names both ways data gets in (US-B15 auto, US-B4 manual), so the state has something to do rather than only something to read."},
+  "reportsUnavailable": "These figures could not be loaded.",
+  "@reportsUnavailable": {"description": "design.md §3.4 Error state. Never rendered as a zero: a reassuring 0.00 the user believes is worse than an error they can act on."},
+
+  "categoryBreakdownShareOfPeriod": "{percent}% of the period",
+  "@categoryBreakdownShareOfPeriod": {
+    "description": "AC-E2.1's share. A whole number: a share printed to two decimals invites the user to reconcile a rounding artefact rather than the money.",
+    "placeholders": {"percent": {"type": "int"}}
+  },
+  "categoryBreakdownShareUnknown": "share not available",
+  "@categoryBreakdownShareUnknown": {"description": "AC-E2.1's share cannot be computed when the period total is absent or zero (division by zero) — said rather than printed as '0%', which would claim this category is a vanishing part of a real total."},
+  "categoryBreakdownTotalLine": "Total",
+  "@categoryBreakdownTotalLine": {"description": "AC-C1.3 made visible: the footer that the category rows above must sum to, Uncategorized included."},
+  "categoryBreakdownReconciliationFailed": "These category figures do not add up to the period total. Please report this.",
+  "@categoryBreakdownReconciliationFailed": {"description": "AC-C1.3 is guaranteed by construction (CategoryBreakdown.of partitions once and sums each part with the same function), so this line should be unreachable. It is rendered anyway because a reconciliation break the user cannot see is exactly the failure NFR-A6 exists to prevent — silence would be the bug, not the arithmetic."},
+  "categoryBreakdownOpenTransactions": "{count, plural, =1{Show the 1 transaction} other{Show all {count} transactions}}",
+  "@categoryBreakdownOpenTransactions": {
+    "description": "AC-E2.2 — selecting a category lists its underlying transactions. Phrased with the count so the drill-down states what it will show before the user leaves the screen.",
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "categoryBreakdownEmptyCategoryNote": "No transactions in this category this period",
+  "@categoryBreakdownEmptyCategoryNote": {"description": "A money-movement category (income, transfers, withdrawals) normally carries transactions but no SPEND figure, per US-B10/B11. Saying so stops a count-with-no-figure row reading as a discrepancy."},
+  "categoryBreakdownMovementOnlyNote": "{count, plural, =1{1 transaction, not counted as spending} other{{count} transactions, not counted as spending}}",
+  "@categoryBreakdownMovementOnlyNote": {
+    "description": "US-B10/B11 — income, internal transfers and cash withdrawals are captured and listed but excluded from spend. Without this line a category showing '3 transactions' beside no figure looks like lost money.",
+    "placeholders": {"count": {"type": "int"}}
+  },
+
+  "instrumentBreakdownUnassigned": "Cash and unmatched",
+  "@instrumentBreakdownUnassigned": {"description": "AC-E3.2's closing row. Cash (US-B4/OQ-19) has no card and no account, and an SMS may name too few digits to key on — so without this row the per-card footer would be smaller than the period total shown everywhere else, and the only conclusion available to the user would be that the app had lost some of their spending."},
+  "instrumentBreakdownTotalLine": "Total",
+  "@instrumentBreakdownTotalLine": {"description": "AC-E3.2 — equals the period total shown on Home and S-10."},
+  "instrumentBreakdownReconciliationFailed": "These card figures do not add up to the period total. Please report this.",
+  "@instrumentBreakdownReconciliationFailed": {"description": "AC-E3.2's guard, rendered for the same reason as the category one: a reconciliation break must never be silent (NFR-A6)."},
+  "instrumentBreakdownNoActivity": "Not used this period",
+  "@instrumentBreakdownNoActivity": {"description": "The approved mockup (S-30) shows a card at 0.00 on purpose: a card the user holds and did not use is information, and hiding it would leave them unsure whether the app forgot the card or they forgot the spending."},
+  "instrumentBreakdownBankLabel": "{instrument} · {bank}",
+  "@instrumentBreakdownBankLabel": {
+    "description": "Two banks can each issue a card ending 4821, so the row names the bank too — exactly where the user is reconciling against a statement.",
+    "placeholders": {"instrument": {"type": "String"}, "bank": {"type": "String"}}
+  },
+
+  "monthComparisonThisPeriod": "{month} (this period)",
+  "@monthComparisonThisPeriod": {
+    "description": "AC-E4.1's current-period card.",
+    "placeholders": {"month": {"type": "String"}}
+  },
+  "monthComparisonPriorPeriod": "{month} (previous)",
+  "@monthComparisonPriorPeriod": {
+    "description": "AC-E4.1's prior-period card.",
+    "placeholders": {"month": {"type": "String"}}
+  },
+  "monthComparisonUp": "{amount} more than {month}",
+  "@monthComparisonUp": {
+    "description": "AC-E4.1's difference, as a sentence rather than a bare signed number: '+239.50' beside two totals is ambiguous about which direction it belongs to.",
+    "placeholders": {"amount": {"type": "String"}, "month": {"type": "String"}}
+  },
+  "monthComparisonDown": "{amount} less than {month}",
+  "@monthComparisonDown": {
+    "description": "AC-E4.1's difference in the other direction. Deliberately not coloured as good news alone — brand.md §2.3 keeps the ordinary case neutral.",
+    "placeholders": {"amount": {"type": "String"}, "month": {"type": "String"}}
+  },
+  "monthComparisonSame": "The same as {month}",
+  "@monthComparisonSame": {
+    "description": "An exactly-equal period is rare but real, and 'up 0.00' would read as a rounding artefact.",
+    "placeholders": {"month": {"type": "String"}}
+  },
+  "monthComparisonInsufficientTitle": "Not enough history yet",
+  "@monthComparisonInsufficientTitle": {"description": "AC-E4.2 — with fewer than two months of data there is no honest comparison to draw. The arithmetic would still work (this month vs nothing = up 100%), and every number in it would be correct while the conclusion was nonsense."},
+  "monthComparisonInsufficientBody": "Check back after your second month of use to see a comparison you can rely on.",
+  "@monthComparisonInsufficientBody": {"description": "AC-E4.2 — states when the feature becomes available instead of leaving the screen looking broken."},
+  "monthComparisonIncomplete": "One of these periods contains transactions the app could not convert, so the difference is not shown.",
+  "@monthComparisonIncomplete": {"description": "ADR-009 case 4 applied to a delta. Treating an unconvertible period as zero would report 'you spent 3,000 less' to someone whose previous month was entirely in a currency no message quoted a rate for."},
+
+  "searchTransactionsHint": "Search a merchant name",
+  "@searchTransactionsHint": {"description": "AC-E5.1. 'Merchant name' rather than 'search' because that is the only field searched — promising more than that would make an empty result read as a bug."},
+  "searchClear": "Clear search",
+  "@searchClear": {"description": "NFR-U2 — the clear affordance needs a name a screen reader can announce, not just an X glyph."},
+  "filterTitle": "Filter",
+  "@filterTitle": {"description": "S-27 — the filter sheet."},
+  "filterOpen": "Filter transactions",
+  "@filterOpen": {"description": "NFR-U2 tooltip for the filter icon in S-10's app bar."},
+  "filterActiveCount": "{count, plural, =1{1 filter} other{{count} filters}}",
+  "@filterActiveCount": {
+    "description": "The filter button's badge. A date range counts once even with both ends set, and so does an amount range — the user set one control.",
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "filterClearAll": "Clear filters",
+  "@filterClearAll": {"description": "AC-E5.3's way out, and design.md Flow E's 'always visible when active'."},
+  "filterSectionDates": "Date range",
+  "@filterSectionDates": {"description": "AC-E5.2 facet."},
+  "filterSectionCategories": "Categories",
+  "@filterSectionCategories": {"description": "AC-E5.2 facet. Includes Uncategorized as a first-class choice — 'show me what the app could not label' is one of the most useful filters here."},
+  "filterSectionInstruments": "Cards and accounts",
+  "@filterSectionInstruments": {"description": "AC-E5.2 facet."},
+  "filterSectionAmount": "Amount range",
+  "@filterSectionAmount": {"description": "AC-E5.2 facet."},
+  "filterAmountMin": "From",
+  "@filterAmountMin": {"description": "Lower bound of the amount range."},
+  "filterAmountMax": "To",
+  "@filterAmountMax": {"description": "Upper bound of the amount range."},
+  "filterAmountCurrencyNote": "Compared in {currency}, using the rate each transaction recorded.",
+  "@filterAmountCurrencyNote": {
+    "description": "NFR-A5 — an amount range typed into a form is in ONE currency while a ledger can hold several, so the screen states which one and where the rate came from rather than silently comparing 20.00 against 20.00 USD.",
+    "placeholders": {"currency": {"type": "String"}}
+  },
+  "filterAmountInvalid": "Enter an amount like 45.00",
+  "@filterAmountInvalid": {"description": "Names the expected shape rather than saying 'invalid input' — brand voice principle 4."},
+  "filterAmountRangeInverted": "The lower bound is above the upper bound",
+  "@filterAmountRangeInverted": {"description": "Caught at entry rather than silently returning nothing, which would look identical to 'you have no transactions in that range'."},
+  "filterDateFrom": "From",
+  "@filterDateFrom": {"description": "Start of the date-range facet."},
+  "filterDateTo": "To",
+  "@filterDateTo": {"description": "End of the date-range facet. Inclusive to the user; stored as a half-open bound so a transaction cannot fall in two ranges."},
+  "filterDateAny": "Any date",
+  "@filterDateAny": {"description": "The unset state of the date facet, stated rather than left blank."},
+  "filterNotComparableByAmount": "{count, plural, =1{1 transaction has no {currency} figure and is not shown} other{{count} transactions have no {currency} figure and are not shown}}",
+  "@filterNotComparableByAmount": {
+    "description": "ADR-009 case 4 applied to the amount filter: a foreign purchase whose message quoted no rate cannot be compared to a bound at all. Excluded and COUNTED, never dropped silently — a filter that quietly omits a purchase is the same defect as a total that does.",
+    "placeholders": {"count": {"type": "int"}, "currency": {"type": "String"}}
+  },
+  "txnListFilteredEmptyTitle": "No transactions match",
+  "@txnListFilteredEmptyTitle": {"description": "AC-E5.3 — deliberately different copy from the true-empty and empty-for-period states. Telling a user with two years of history that they have no transactions looks exactly like data loss."},
+  "txnListFilteredEmptyBody": "Nothing in this month matches what you searched for. Clearing the filter brings the full list back.",
+  "@txnListFilteredEmptyBody": {"description": "AC-E5.3 — points at the control that resolves the state, and does so in words rather than relying on the user spotting the button."},
+  "txnListFilteredTotal": "Filtered total",
+  "@txnListFilteredTotal": {"description": "AC-E5.2 — the displayed total must reflect the filtered subset, so it is LABELLED as filtered. An unlabelled figure that silently changed meaning when a filter was applied would be worse than no filter at all."},
+  "txnListResultCount": "{count, plural, =0{No transactions} =1{1 transaction} other{{count} transactions}}",
+  "@txnListResultCount": {
+    "description": "NFR-A6's traceability in its cheapest form: a total with a count beside it can be checked.",
+    "placeholders": {"count": {"type": "int"}}
+  }
 }

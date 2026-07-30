@@ -38,6 +38,7 @@ import '../../features/ingestion/content_hmac.dart';
 import '../../features/ingestion/historical_importer.dart';
 import '../../features/ingestion/ingestion_pipeline.dart';
 import '../../features/ingestion/review_queue.dart';
+import '../../features/ingestion/sms_broadcast_signal.dart';
 import '../../features/ingestion/sms_permission_service.dart';
 import '../../features/ingestion/sms_source.dart';
 import '../../features/ledger/ledger_entity_resolver.dart';
@@ -62,6 +63,12 @@ final Provider<SmsPermissionService> smsPermissionServiceProvider =
 final Provider<SmsSource> smsSourceProvider = Provider<SmsSource>(
   (Ref ref) => AndroidSmsSource(),
 );
+
+/// **KHA-122** — the Kotlin → Dart *"an SMS just arrived"* signal.
+///
+/// Overridden in tests, like every other platform boundary in this file.
+final Provider<SmsBroadcastSignal> smsBroadcastSignalProvider =
+    Provider<SmsBroadcastSignal>((Ref ref) => AndroidSmsBroadcastSignal());
 
 /// The user's current SMS permission state (AC-A1.2, AC-A1.3).
 ///
@@ -227,6 +234,77 @@ final FutureProvider<IngestionRunResult?> foregroundSweepProvider =
 
       return result;
     });
+
+/// **KHA-122 / AC-A1.1 — the trigger that makes the foreground sweep prompt.**
+///
+/// > *"…a corresponding transaction appears in the transaction list within
+/// > single-digit seconds and without any user action — **including when the app
+/// > simply stays open and is never backgrounded and resumed.**"*
+///
+/// Subscribes to the Kotlin broadcast signal and invalidates
+/// [foregroundSweepProvider] on every marker. `app.dart` keeps this provider
+/// alive while the app is unlocked; nothing reads its value.
+///
+/// ## Why the invalidation happens *here* rather than in a widget listener
+///
+/// A `ref.listen` in `app.dart` would have to decide "is this a new signal?" by
+/// comparing the emitted value with the previous one, and that comparison is
+/// wrong in one real case: when this provider is rebuilt (a resume invalidates
+/// `smsPermissionStatusProvider`, which this watches), its sequence restarts, so
+/// a fresh signal can emit a value equal to the last one it emitted before the
+/// rebuild and be read as "nothing changed". Dropping an SMS trigger is the
+/// exact failure the issue is about. Doing the invalidation at the point the
+/// event actually arrives has no such comparison to get wrong.
+///
+/// ## The two gates, and why each is the honest answer rather than a guard
+///
+///  - **No unlocked session → no subscription.** ADR-005 makes the lock
+///    cryptographic; while locked there is no database to write to, so there is
+///    nothing a prompt sweep could do. That case is governed by AC-A1.4 /
+///    NFR-R1's "visible at next unlock" clause and is deliberately unchanged.
+///  - **No SMS permission → no subscription.** `foregroundSweepProvider`
+///    already returns early without permission (AC-A1.3's revoked banner is the
+///    user-visible half); subscribing would only schedule work that returns
+///    immediately.
+///
+/// ## What it cannot do, by construction
+///
+/// It cannot ingest, parse, dedup or advance the watermark, because it does none
+/// of those things — it invalidates the one provider that does, so the immediate
+/// sweep and the resume sweep are *literally the same code*. That is what makes
+/// product-owner's condition on KHA-122 (*"the immediate sweep must go through
+/// the same dedup and watermark path as the resume sweep"*) structural rather
+/// than a promise. `test/features/ingestion/immediate_sweep_race_test.dart`
+/// pins the overlap case: exactly one transaction, whichever order they land in.
+final StreamProvider<int> foregroundSmsSignalProvider = StreamProvider<int>((
+  Ref ref,
+) async* {
+  final UnlockedDatabaseSession? session = await ref.watch(
+    unlockedDatabaseSessionProvider.future,
+  );
+  if (session == null) {
+    return;
+  }
+  final SmsPermissionStatus permission = await ref.watch(
+    smsPermissionStatusProvider.future,
+  );
+  if (!permission.allowsIngestion) {
+    return;
+  }
+
+  int received = 0;
+  await for (final void _ in ref.watch(smsBroadcastSignalProvider).incoming) {
+    received += 1;
+    // The whole point of the file. Re-runs `runIncremental()` — same
+    // watermark, same ADR-017 D1 dedup, same single writer.
+    ref.invalidate(foregroundSweepProvider);
+    // Emitted so the count is observable from a test and from a future
+    // diagnostics panel. Deliberately a count and never the message: this
+    // stream is one channel hop away from an SMS body and must stay
+    // content-free (NFR-S4).
+    yield received;
+  }
+});
 
 /// **S-05 — the historical import's live progress** (KHA-113, AC-A3.2).
 ///

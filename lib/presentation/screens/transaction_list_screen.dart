@@ -11,24 +11,40 @@
 /// (AC-C4.1) — belongs to [TransactionListItem], which every other list in the
 /// app also uses. This screen owns the *set* of rows, not their appearance.
 ///
-/// Search (S-26) and filtering (S-27) are **KHA-38 in P5b** and are absent
-/// here rather than stubbed. That is why the empty states below cover
-/// "nothing ever" and "nothing this month" but not AC-E5.3's filtered-empty:
-/// there is no filter yet, and inventing a third empty state for a control
-/// that does not exist would be copy nobody can reach.
+/// ## Search and filter arrived here in P5b — KHA-38, US-E5
 ///
-/// ## NFR-A6 — the total and the list cannot disagree
+/// P5a's version of this comment said search (S-26) and filtering (S-27) were
+/// *"absent here rather than stubbed"*, and that AC-E5.3's filtered-empty state
+/// was therefore unreachable copy. Both are now built, so this screen has
+/// **three** distinct empty states and the difference between them is the point:
+///
+/// | State | Key | Means |
+/// |---|---|---|
+/// | true-empty | `txnList.empty` | the ledger has never held anything |
+/// | empty-for-period | `txnList.emptyForPeriod` | there is data, just not in this month |
+/// | **filtered-empty** | `txnList.filteredEmpty` | a filter matched nothing (AC-E5.3) |
+///
+/// Telling a user with two years of history that they have no transactions looks
+/// exactly like data loss, which is why these are three states and not one.
+///
+/// ## NFR-A6 / AC-E5.2 — the total and the list cannot disagree, filtered or not
 ///
 /// The running total is computed by `LedgerTotals.spend` over **exactly** the
-/// list this screen renders, using the same [PeriodRange.contains] predicate
-/// that decided which rows to render. There is no second query. A user who
-/// distrusts the figure can add the rows up and will get it — which is what
-/// NFR-A6's *"no derived figure that cannot be traced back to its constituent
-/// transactions"* means in practice.
+/// list this screen renders — the caller filters once and hands over both the
+/// rows and the figure derived from them. There is no second query and no second
+/// predicate. That is what makes AC-E5.2's *"the displayed total reflects the
+/// filtered subset, not the whole period"* true by construction rather than by
+/// two code paths agreeing.
 ///
-/// The one honest exception is stated on screen: rows this build cannot decode
-/// (KHA-74) are counted in [unreadableCount] and named, because a shorter list
-/// with no explanation is indistinguishable from lost data.
+/// The figure is also **relabelled** when a filter is active ("Filtered total"),
+/// because a number that silently changed meaning under an unchanged label would
+/// be worse than no filter at all — a user glancing at it would read a subset as
+/// their month.
+///
+/// Two honest exceptions are stated on screen rather than left as silent gaps:
+/// rows this build cannot decode (KHA-74, [unreadableCount]) and rows an amount
+/// bound could not compare because they have no base-currency figure
+/// ([notComparableByAmountCount], ADR-009 case 4).
 ///
 /// ## A pure widget, on purpose
 ///
@@ -39,13 +55,17 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../features/categorization/categories.dart';
 import '../../features/categorization/learned_rules.dart';
+import '../../features/ledger/base_currency.dart';
 import '../../features/ledger/internal_transfer.dart';
 import '../../features/ledger/ledger_transaction.dart';
 import '../../features/ledger/period_totals.dart';
+import '../../features/ledger/transaction_filter.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../theme/app_colors.dart';
 import '../widgets/category_widgets.dart';
+import '../widgets/filter_widgets.dart';
 import '../widgets/ledger_widgets.dart';
 import '../widgets/period_widgets.dart';
 import '../widgets/transaction_list_item.dart';
@@ -80,6 +100,32 @@ class TransactionListScreen extends StatelessWidget {
   /// KHA-74 — rows in this period whose stored amount could not be read.
   final int unreadableCount;
 
+  /// **KHA-38 / AC-E5.2** — the filter currently applied. [TransactionFilter.none]
+  /// renders the screen exactly as P5a did.
+  final TransactionFilter filter;
+
+  /// ADR-009 case 4 — rows an **amount** bound could not compare, because the app
+  /// has no base-currency figure for them. Stated rather than silently dropped: a
+  /// filter that quietly omits a purchase is the same defect as a total that does.
+  final int notComparableByAmountCount;
+
+  /// The currency the amount bounds are in, named in the disclosure line above.
+  final String baseCurrencyCode;
+
+  /// Null hides the search field and the filter button entirely — used by the
+  /// scoped list an instrument or a bank pushes, where the set of rows is the
+  /// screen's whole subject and filtering it again would be confusing.
+  final ValueChanged<String>? onQueryChanged;
+  final VoidCallback? onOpenFilterSheet;
+  final ValueChanged<TransactionFilter>? onFilterChanged;
+  final VoidCallback? onClearFilter;
+
+  /// Resolves category ids for the active-filter chips.
+  final CategoryResolver? filterCategoryResolver;
+
+  /// Labels for the instrument chips, keyed by instrument id.
+  final Map<int, String> filterInstrumentLabels;
+
   final bool isLoading;
   final bool hasError;
 
@@ -107,6 +153,15 @@ class TransactionListScreen extends StatelessWidget {
     this.categoryAssignments = const <int, CategoryAssignment>{},
     this.ledgerHasAnyTransactions = false,
     this.unreadableCount = 0,
+    this.filter = TransactionFilter.none,
+    this.notComparableByAmountCount = 0,
+    this.baseCurrencyCode = BaseCurrency.defaultCode,
+    this.onQueryChanged,
+    this.onOpenFilterSheet,
+    this.onFilterChanged,
+    this.onClearFilter,
+    this.filterCategoryResolver,
+    this.filterInstrumentLabels = const <int, String>{},
     this.isLoading = false,
     this.hasError = false,
     this.onOpenTransaction,
@@ -116,13 +171,39 @@ class TransactionListScreen extends StatelessWidget {
     super.key,
   });
 
+  /// True when the search field and filter button are offered at all.
+  bool get _searchEnabled => onQueryChanged != null;
+
   @override
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
 
     return Scaffold(
       backgroundColor: AppColors.surface,
-      appBar: AppBar(title: Text(title ?? l10n.navTransactions)),
+      appBar: AppBar(
+        title: Text(title ?? l10n.navTransactions),
+        actions: <Widget>[
+          if (_searchEnabled && onOpenFilterSheet != null)
+            // The badge is part of the *icon*, not only a colour change: a filter
+            // silently narrowing the list is the most confusing state this screen
+            // can be in, so the count is on screen and the chips below name each
+            // facet (NFR-U4).
+            IconButton(
+              key: const Key('txnList.openFilter'),
+              tooltip: l10n.filterOpen,
+              onPressed: onOpenFilterSheet,
+              icon: Badge(
+                isLabelVisible: filter.activeFacetCount > 0,
+                label: Text('${filter.activeFacetCount}'),
+                child: Icon(
+                  filter.isActive
+                      ? Icons.filter_alt
+                      : Icons.filter_alt_outlined,
+                ),
+              ),
+            ),
+        ],
+      ),
       floatingActionButton: onAddManually == null
           ? null
           : FloatingActionButton(
@@ -148,10 +229,36 @@ class TransactionListScreen extends StatelessWidget {
               onCurrentMonth: onCurrentMonth,
             ),
           ),
+          // **S-26** — AC-E5.1's live merchant search.
+          if (_searchEnabled)
+            Padding(
+              padding: const EdgeInsetsDirectional.fromSTEB(12, 4, 12, 8),
+              child: TransactionSearchField(
+                query: filter.query,
+                onChanged: onQueryChanged!,
+              ),
+            ),
+          // **S-27's removable chips**, and AC-E5.3's always-visible way out.
+          if (_searchEnabled &&
+              filter.isActive &&
+              onFilterChanged != null &&
+              onClearFilter != null &&
+              filterCategoryResolver != null)
+            ActiveFilterChips(
+              filter: filter,
+              resolver: filterCategoryResolver!,
+              instrumentLabels: filterInstrumentLabels,
+              onChanged: onFilterChanged!,
+              onClearAll: onClearFilter!,
+            ),
           _RunningTotal(
             totals: totals,
             isLoading: isLoading,
             hasError: hasError,
+            // AC-E5.2 — the figure is relabelled when it describes a subset. An
+            // unchanged label over a changed meaning is the failure mode here.
+            isFiltered: filter.isActive,
+            resultCount: transactions.length,
           ),
           if (unreadableCount > 0)
             Padding(
@@ -162,6 +269,22 @@ class TransactionListScreen extends StatelessWidget {
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: AppColors.warningText),
+              ),
+            ),
+          // ADR-009 case 4 under an amount bound. Counted and named, never
+          // dropped silently.
+          if (notComparableByAmountCount > 0)
+            Padding(
+              padding: const EdgeInsetsDirectional.fromSTEB(16, 0, 16, 8),
+              child: Text(
+                key: const Key('txnList.notComparableByAmount'),
+                l10n.filterNotComparableByAmount(
+                  notComparableByAmountCount,
+                  baseCurrencyCode,
+                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: AppColors.ink500),
               ),
             ),
           Expanded(child: _body(context, l10n)),
@@ -184,6 +307,38 @@ class TransactionListScreen extends StatelessWidget {
       return CategorySectionError(message: l10n.transactionUnavailable);
     }
     if (transactions.isEmpty) {
+      // **AC-E5.3 — the filtered-empty state, checked FIRST.**
+      //
+      // Order matters. A filter that matches nothing in a month that does hold
+      // transactions would otherwise render "Nothing in this month", which is
+      // false, unactionable, and reads as though the app had lost the month. The
+      // filtered case is the more specific claim, so it wins.
+      if (filter.isActive) {
+        return Column(
+          key: const Key('txnList.filteredEmpty'),
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            CategoryEmptyState(
+              icon: Icons.search_off_outlined,
+              headline: l10n.txnListFilteredEmptyTitle,
+              body: l10n.txnListFilteredEmptyBody,
+            ),
+            // AC-E5.3's *"way to clear the filter"*, offered inside the state
+            // itself rather than only as a chip further up the screen — the chips
+            // scroll away and this is the moment the user needs the action.
+            if (onClearFilter != null)
+              Padding(
+                padding: const EdgeInsetsDirectional.only(top: 4),
+                child: FilledButton.icon(
+                  key: const Key('txnList.filteredEmpty.clear'),
+                  onPressed: onClearFilter,
+                  icon: const Icon(Icons.filter_alt_off_outlined),
+                  label: Text(l10n.filterClearAll),
+                ),
+              ),
+          ],
+        );
+      }
       return CategoryEmptyState(
         key: ledgerHasAnyTransactions
             ? const Key('txnList.emptyForPeriod')
@@ -232,10 +387,24 @@ class _RunningTotal extends StatelessWidget {
   final bool isLoading;
   final bool hasError;
 
+  /// **AC-E5.2.** Swaps the label to "Filtered total" and shows the row count.
+  ///
+  /// The relabelling is the requirement, not decoration: the AC asks for the
+  /// displayed total to reflect the filtered subset, and a figure that changed
+  /// meaning under an unchanged label would be read as the month's spending by
+  /// anyone glancing at it.
+  final bool isFiltered;
+
+  /// How many rows are behind the figure — NFR-A6's traceability in its cheapest
+  /// form. Shown only when filtered, where "which rows?" is the live question.
+  final int resultCount;
+
   const _RunningTotal({
     required this.totals,
     required this.isLoading,
     required this.hasError,
+    this.isFiltered = false,
+    this.resultCount = 0,
   });
 
   @override
@@ -249,8 +418,21 @@ class _RunningTotal extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.end,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
+          if (isFiltered) ...<Widget>[
+            Expanded(
+              child: Text(
+                key: const Key('txnList.resultCount'),
+                l10n.txnListResultCount(resultCount),
+                style: text.bodySmall?.copyWith(color: AppColors.ink500),
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
           Text(
-            l10n.txnListTotalForPeriod,
+            key: isFiltered
+                ? const Key('txnList.total.filteredLabel')
+                : const Key('txnList.total.periodLabel'),
+            isFiltered ? l10n.txnListFilteredTotal : l10n.txnListTotalForPeriod,
             style: text.bodySmall?.copyWith(color: AppColors.ink500),
           ),
           const SizedBox(width: 8),

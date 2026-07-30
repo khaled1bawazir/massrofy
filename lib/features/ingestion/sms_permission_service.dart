@@ -67,8 +67,38 @@ abstract interface class SmsPermissionService {
   /// ADR-006's Layer-2 periodic sweep.
   Future<void> registerBackgroundEntrypoint(int callbackHandle);
 
-  /// Asks for an immediate sweep — used on app foreground, which ADR-006
-  /// lists alongside the broadcast and the periodic job as a Layer-2 trigger.
+  /// Enqueues an expedited **background** sweep (ADR-006 Layer 2's
+  /// WorkManager trigger).
+  ///
+  /// ## This is NOT the fix for KHA-122, and calling it would not be one
+  ///
+  /// KHA-122 named this method as the mechanism for AC-A1.1's app-open-and-idle
+  /// case, on the reasonable evidence that it was declared, implemented over the
+  /// channel, and had zero callers. Following the call through settles it:
+  ///
+  /// ```
+  /// "requestImmediateSweep" -> IngestScheduler.enqueueExpeditedSweep(context)   // SmsChannel.kt
+  ///                        -> IngestWorker -> runBackgroundIngestion()
+  ///                        -> ADR-018 decision 1: an unconditional no-op
+  /// ```
+  ///
+  /// A background isolate cannot unwrap the DB Master Key (ADR-005), so the job
+  /// it schedules ingests nothing by design. Wiring this from Dart would spend a
+  /// wake (against NFR-R7) and produce no transaction — and, worse, would look
+  /// like the defect had been addressed.
+  ///
+  /// The direction is the real obstacle: closing AC-A1.1 needs **Kotlin → Dart**
+  /// (tell the isolate that holds the key that there is something to sweep), and
+  /// this is Dart → Kotlin. That signal is `SmsForegroundBridge` /
+  /// `sms_broadcast_signal.dart`.
+  ///
+  /// It is kept rather than deleted because the *Kotlin* handler is real and
+  /// used — `SmsReceiver` and `BootReceiver` both enqueue through
+  /// `IngestScheduler` — so this is the Dart-side door onto a mechanism that
+  /// exists, and it becomes useful the moment ADR-018 decision 1 is ever
+  /// revisited. Until then it has no production caller **on purpose**, and this
+  /// comment is the record of why, so the next reader does not re-derive
+  /// KHA-122's wrong turn.
   Future<void> requestImmediateSweep();
 }
 
