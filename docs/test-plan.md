@@ -1591,9 +1591,11 @@ all passing**. Written to attack what the engineer's own 23 tests do not reach:
   pack alone recovers nothing" — holds. QA re-ran it in isolation and independently
   reproduced the recovered amounts.
 
-**Findings — none merge-blocking.** Two Low observations, `O-QA-42` and
-`O-QA-43` in `docs/defects.md`. Neither affects dedup, cursor or money
-correctness.
+**Findings — none merge-blocking.** Two Low observations in `docs/defects.md`,
+both filed in Linear with a milestone set at creation (the 2026-07-29 lesson):
+**O-QA-42 → KHA-141** (the `RawMessageDao.insert` doc contradicts item (F)'s
+premise) and **O-QA-43 → KHA-142** (a failed audit append discards a successful
+run's result). Neither affects dedup, cursor or money correctness.
 
 **Overall (pass 11, PR #46): no defect found that blocks merge.** The property
 this PR most needed to get right — that a re-scan cannot double-count — held

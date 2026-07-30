@@ -1683,7 +1683,7 @@ Neither blocks the merge. Neither touches dedup, cursor movement or money
 correctness — the three properties this PR had to get right, all of which held
 under attack (see `docs/test-plan.md` §7i).
 
-### O-QA-42 — `RawMessageDao.insert`'s doc comment states the exact opposite of the premise item (F) was built on, in the same file, ~150 lines above the fix
+### O-QA-42 → **KHA-141** — `RawMessageDao.insert`'s doc comment states the exact opposite of the premise item (F) was built on, in the same file, ~150 lines above the fix
 
 **Severity: Low** (documentation, but load-bearing documentation).
 
@@ -1720,7 +1720,7 @@ from `and never over the redacted display text` onward, or replace it with a
 pointer to `findBySmsProviderId`. Owner: mobile-engineer. No test change needed —
 P1 already pins the real behaviour.
 
-### O-QA-43 — a failure in the audit append discards a result for writes that already committed, which is the one direction item (E) says must not happen
+### O-QA-43 → **KHA-142** — a failure in the audit append discards a result for writes that already committed, which is the one direction item (E) says must not happen
 
 **Severity: Low** (narrow trigger, no data loss, no double-count).
 
