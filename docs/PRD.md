@@ -280,6 +280,7 @@ Written as Given/When/Then so QA can automate them directly. Each criterion is s
 - AC-A6.8 — **Given** a linked sender, **when** the user removes the link, **then** future messages from that sender stop being ingested, and transactions already created from it are retained unchanged with their provenance intact (they are real records of real money, not artefacts of the link).
 - AC-A6.9 — **Given** unrecognized senders the user chooses **not** to link, **when** they leave the screen, **then** nothing about those senders or their messages has been persisted anywhere — the list is derived on demand and NFR-P4's discard behaviour is unchanged (NFR-P4a).
 - AC-A6.10 — **Given** a linked bank whose messages currently can't be auto-parsed (AC-A6.5), **when** the user views that bank's entry (e.g. after the app has been updated with new parsing rules), **then** they can trigger "check again" on demand, which re-scans that sender's messages the same way AC-A6.4 does at link time, without needing to unlink and re-link. The bank's entry also states plainly when nothing from it could be auto-parsed yet (per OQ-22's resolution below), rather than relying on the user to infer this from an empty-looking Needs Review queue.
+- AC-A6.11 — **Given** a well-established install (Home is not in an empty state, the review queue is not empty), **when** a sender the app previously recognized stops matching (e.g. the bank silently changes its sender ID) or a genuinely new bank starts messaging the user, **then** the app does not rely on an empty-state link alone (AC-A6.1) to surface it — the count of currently-unrecognized senders is also shown as a standing row in the Settings → Diagnostics parser-health panel (ADR-015), so the "month-eight silent drift" case is discoverable the same way the "day-one everything is empty" case is. *(Gap identified by solution-architect's 2026-07-30 assessment: Addendum A as originally scoped only surfaced this via empty states, which are true only near first run.)*
 
 ### Epic B — Transaction record and cards
 
@@ -633,7 +634,7 @@ For downstream phases: every acceptance criterion is prefixed `AC-<story-id>.<n>
 
 | Epic | Stories | ACs | Status |
 |---|---|---|---|
-| A — SMS ingestion | US-A1..A6 | 29 | Resolved; **US-A6 is `[Addendum A — APPROVED]`** — 10 ACs (AC-A6.1–10), build order per OQ-23: after KHA-128 |
+| A — SMS ingestion | US-A1..A6 | 30 | Resolved; **US-A6 is `[Addendum A — APPROVED]`** — 11 ACs (AC-A6.1–11), build order per OQ-23: after KHA-128 |
 | B — Banks, accounts, cards & transactions | US-B1..B16 | 48 | Resolved; **US-B16 is `[Addendum A — APPROVED]`** — 2 ACs |
 | C — Categorization | US-C1..C5 | 15 | Resolved; default category list to be proposed in phase 3 |
 | D — Learning loop | US-D1..D5 | 14 | Resolved; confidence threshold is a phase-3/4 design decision |
