@@ -7,20 +7,27 @@
 ///
 /// ---
 ///
-/// ## Three tabs, not four, and that is a deliberate disclosure
+/// ## Four tabs, as design.md §1 always specified — KHA-37 closes the gap
 ///
 /// design.md §5 specifies a four-tab `BottomNav`: **Home · Transactions ·
-/// Reports · More**. The Reports hub (S-28) is **KHA-37 in P5b** and does not
-/// exist yet. Shipping a fourth tab that opens onto a placeholder would be the
-/// exact failure `transaction_detail_screen.dart` names about action buttons —
-/// *"rendering buttons now, wired to nothing, would be worse than their
-/// absence"* — with the aggravating factor that a nav tab is permanent
-/// furniture the user taps by accident.
+/// Reports · More**. P5a shipped **three**, and said so out loud rather than
+/// shipping a dead tab:
 ///
-/// So this ships **Home · Transactions · More**, in that order, with a one-line
-/// honest note in the More menu. Reports slots in at index 2 when KHA-37 lands:
-/// a single entry added to [_destinations], because the tab bar is built from
-/// that list rather than hard-coded.
+/// > ~~"The Reports hub (S-28) is KHA-37 in P5b and does not exist yet. Shipping
+/// > a fourth tab that opens onto a placeholder would be the exact failure
+/// > `transaction_detail_screen.dart` names about action buttons — 'rendering
+/// > buttons now, wired to nothing, would be worse than their absence' — with the
+/// > aggravating factor that a nav tab is permanent furniture the user taps by
+/// > accident. So this ships Home · Transactions · More, with a one-line honest
+/// > note in the More menu."~~
+///
+/// That disclosure is discharged. `ReportsHubHost` exists, is reachable, and the
+/// tab slots in at **index 2** exactly as the note predicted — one entry added to
+/// the list below, because the bar is built from that list rather than hard-coded.
+/// The More menu's *"Reports arrive in the next release"* line is removed in the
+/// same change: a placeholder that outlives the thing it stood in for is worse
+/// than never having written it, and `p5b_shell_navigation_test.dart` asserts it
+/// is gone rather than trusting anyone to remember.
 ///
 /// ## Why an `IndexedStack` and not a swapped child
 ///
@@ -29,7 +36,9 @@
 /// the transactions tab would re-open Drift streams and re-render the month
 /// total — a visible flicker on the app's headline figure, and the opposite of
 /// NFR-R2's "no perceptible wait". The cost is that all tabs are built at
-/// startup; with three tabs over shared providers that is cheap.
+/// startup; with four tabs over shared providers that is still cheap, because the
+/// reports and the list read the *same* `ledgerViewProvider` emission rather than
+/// opening a stream each.
 library;
 
 import 'package:flutter/material.dart';
@@ -42,6 +51,7 @@ import 'categorization_routes.dart';
 import 'home_screen.dart';
 import 'ingestion_routes.dart';
 import 'ledger_routes.dart';
+import 'reports_routes.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -73,6 +83,16 @@ class _AppShellState extends State<AppShell> {
         // The same host the "View all" route pushes, so there is one
         // implementation of "what the transaction list shows".
         page: const TransactionListHost(),
+      ),
+      // **KHA-37** — design.md §1's third tab, at index 2 as the P5a note said it
+      // would be. `ReportsHubHost` is a real destination: S-28 with four working
+      // drill-downs, not a placeholder.
+      _Destination(
+        id: 'reports',
+        label: l10n.navReports,
+        icon: Icons.insights_outlined,
+        selectedIcon: Icons.insights,
+        page: const ReportsHubHost(),
       ),
       _Destination(
         id: 'more',
@@ -214,18 +234,10 @@ class MoreMenuScreen extends ConsumerWidget {
             label: l10n.homeLockNow,
             onTap: () => ref.read(appLockControllerProvider.notifier).lock(),
           ),
-          const SizedBox(height: 16),
-          // Stated rather than shipped as a dead fourth tab — see this file's
-          // header. Honest absence beats a destination that opens onto nothing.
-          Padding(
-            padding: const EdgeInsetsDirectional.symmetric(horizontal: 4),
-            child: Text(
-              l10n.moreReportsComingSoon,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: AppColors.ink500),
-            ),
-          ),
+          // P5a's *"Reports arrive in the next release"* line stood here. KHA-37
+          // shipped them as the third tab, so the line is gone — a placeholder
+          // that outlives the thing it stood in for is worse than never having
+          // written it.
         ],
       ),
     );

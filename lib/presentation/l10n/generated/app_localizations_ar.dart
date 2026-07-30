@@ -1330,7 +1330,259 @@ class AppLocalizationsAr extends AppLocalizations {
   String get moreSectionApp => 'التطبيق';
 
   @override
-  String get moreReportsComingSoon => 'التقارير تصل في الإصدار القادم';
+  String get commonApply => 'تطبيق';
+
+  @override
+  String get commonClose => 'إغلاق';
+
+  @override
+  String get navReports => 'التقارير';
+
+  @override
+  String get reportsHubTitle => 'التقارير';
+
+  @override
+  String get reportsHubSubtitle =>
+      'كل رقم هنا هو مجموع معاملات يمكنك فتحها والتحقق منها.';
+
+  @override
+  String get reportsByCategory => 'حسب الفئة';
+
+  @override
+  String reportsByCategorySummary(String name, String amount) {
+    return 'أعلى فئة: $name — $amount';
+  }
+
+  @override
+  String get reportsByCard => 'حسب البطاقة والحساب';
+
+  @override
+  String reportsByCardSummary(String name, String amount) {
+    return 'الأكثر استخداماً: $name — $amount';
+  }
+
+  @override
+  String get reportsMonthOverMonth => 'مقارنة شهرية';
+
+  @override
+  String get reportsSpentVsKept => 'الإنفاق مقابل المتبقي';
+
+  @override
+  String get reportsNothingYetTitle => 'لا توجد تقارير بعد';
+
+  @override
+  String get reportsNothingYetBody =>
+      'بمجرد وصول رسالة من بنكك، أو إضافتك معاملة يدوياً، تظهر التحليلات هنا.';
+
+  @override
+  String get reportsUnavailable => 'تعذّر تحميل هذه الأرقام.';
+
+  @override
+  String categoryBreakdownShareOfPeriod(int percent) {
+    return '$percent٪ من الفترة';
+  }
+
+  @override
+  String get categoryBreakdownShareUnknown => 'النسبة غير متوفرة';
+
+  @override
+  String get categoryBreakdownTotalLine => 'الإجمالي';
+
+  @override
+  String get categoryBreakdownReconciliationFailed =>
+      'أرقام الفئات هذه لا تساوي إجمالي الفترة. الرجاء الإبلاغ عن ذلك.';
+
+  @override
+  String categoryBreakdownOpenTransactions(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'عرض المعاملات $count',
+      many: 'عرض المعاملات $count',
+      few: 'عرض المعاملات $count',
+      two: 'عرض المعاملتين',
+      one: 'عرض المعاملة الواحدة',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get categoryBreakdownEmptyCategoryNote =>
+      'لا توجد معاملات في هذه الفئة خلال الفترة';
+
+  @override
+  String categoryBreakdownMovementOnlyNote(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count معاملة، غير محتسبة كإنفاق',
+      many: '$count معاملة، غير محتسبة كإنفاق',
+      few: '$count معاملات، غير محتسبة كإنفاق',
+      two: 'معاملتان، غير محتسبتين كإنفاق',
+      one: 'معاملة واحدة، غير محتسبة كإنفاق',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get instrumentBreakdownUnassigned => 'نقداً وغير مطابق';
+
+  @override
+  String get instrumentBreakdownTotalLine => 'الإجمالي';
+
+  @override
+  String get instrumentBreakdownReconciliationFailed =>
+      'أرقام البطاقات هذه لا تساوي إجمالي الفترة. الرجاء الإبلاغ عن ذلك.';
+
+  @override
+  String get instrumentBreakdownNoActivity => 'لم تُستخدم خلال الفترة';
+
+  @override
+  String instrumentBreakdownBankLabel(String instrument, String bank) {
+    return '$instrument · $bank';
+  }
+
+  @override
+  String monthComparisonThisPeriod(String month) {
+    return '$month (هذه الفترة)';
+  }
+
+  @override
+  String monthComparisonPriorPeriod(String month) {
+    return '$month (السابقة)';
+  }
+
+  @override
+  String monthComparisonUp(String amount, String month) {
+    return '$amount أكثر من $month';
+  }
+
+  @override
+  String monthComparisonDown(String amount, String month) {
+    return '$amount أقل من $month';
+  }
+
+  @override
+  String monthComparisonSame(String month) {
+    return 'مثل $month تماماً';
+  }
+
+  @override
+  String get monthComparisonInsufficientTitle => 'لا يوجد سجل كافٍ بعد';
+
+  @override
+  String get monthComparisonInsufficientBody =>
+      'تحقق مرة أخرى بعد شهرك الثاني من الاستخدام لعرض مقارنة موثوقة.';
+
+  @override
+  String get monthComparisonIncomplete =>
+      'إحدى هذه الفترات تحتوي معاملات لم يتمكن التطبيق من تحويلها، لذا لا يُعرض الفرق.';
+
+  @override
+  String get searchTransactionsHint => 'ابحث عن اسم متجر';
+
+  @override
+  String get searchClear => 'مسح البحث';
+
+  @override
+  String get filterTitle => 'تصفية';
+
+  @override
+  String get filterOpen => 'تصفية المعاملات';
+
+  @override
+  String filterActiveCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count مُرشِّح',
+      many: '$count مُرشِّحاً',
+      few: '$count مُرشِّحات',
+      two: 'مُرشِّحان',
+      one: 'مُرشِّح واحد',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get filterClearAll => 'مسح المُرشِّحات';
+
+  @override
+  String get filterSectionDates => 'نطاق التاريخ';
+
+  @override
+  String get filterSectionCategories => 'الفئات';
+
+  @override
+  String get filterSectionInstruments => 'البطاقات والحسابات';
+
+  @override
+  String get filterSectionAmount => 'نطاق المبلغ';
+
+  @override
+  String get filterAmountMin => 'من';
+
+  @override
+  String get filterAmountMax => 'إلى';
+
+  @override
+  String filterAmountCurrencyNote(String currency) {
+    return 'تُقارن بـ $currency، حسب السعر الذي سجّلته كل معاملة.';
+  }
+
+  @override
+  String get filterAmountInvalid => 'أدخل مبلغاً مثل 45.00';
+
+  @override
+  String get filterAmountRangeInverted => 'الحد الأدنى أكبر من الحد الأعلى';
+
+  @override
+  String get filterDateFrom => 'من';
+
+  @override
+  String get filterDateTo => 'إلى';
+
+  @override
+  String get filterDateAny => 'أي تاريخ';
+
+  @override
+  String filterNotComparableByAmount(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count معاملة بلا قيمة بـ $currency ولا تُعرض',
+      many: '$count معاملة بلا قيمة بـ $currency ولا تُعرض',
+      few: '$count معاملات بلا قيمة بـ $currency ولا تُعرض',
+      two: 'معاملتان بلا قيمة بـ $currency ولا تُعرضان',
+      one: 'معاملة واحدة بلا قيمة بـ $currency ولا تُعرض',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get txnListFilteredEmptyTitle => 'لا توجد معاملات مطابقة';
+
+  @override
+  String get txnListFilteredEmptyBody =>
+      'لا شيء في هذا الشهر يطابق ما بحثت عنه. مسح المُرشِّح يعيد القائمة الكاملة.';
+
+  @override
+  String get txnListFilteredTotal => 'الإجمالي المُصفّى';
+
+  @override
+  String txnListResultCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count معاملة',
+      many: '$count معاملة',
+      few: '$count معاملات',
+      two: 'معاملتان',
+      one: 'معاملة واحدة',
+      zero: 'لا توجد معاملات',
+    );
+    return '$_temp0';
+  }
 
   @override
   String get recheckBanksTitle => 'افحص بنوكي مرة أخرى';

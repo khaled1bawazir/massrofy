@@ -130,12 +130,23 @@ abstract final class BankTreeBuilder {
   /// an inconsistent slice, and inventing a "Other" bank would put real money
   /// under a fictional entity. The foreign key makes it unreachable from the
   /// database.
+  /// [transfers] carries the internal-transfer analysis, exactly as
+  /// [LedgerTotals.report] takes it. When omitted it is derived from
+  /// [transactions] here.
+  ///
+  /// A caller passes it when it needs *another* figure over the same ledger to
+  /// agree with these ones — `InstrumentBreakdown` (AC-E3.1/E3.2) computes the
+  /// grand total and the cash slice itself, and re-deriving the analysis
+  /// separately would give two figures that reconcile only because the detector
+  /// happens to be deterministic. Sharing the value makes the agreement
+  /// structural, which is what AC-E3.2 is asking for.
   static List<BankTreeNode> build({
     required List<LedgerBank> banks,
     required List<LedgerInstrument> instruments,
     required List<LedgerTransaction> transactions,
     required PeriodRange period,
     String baseCurrencyCode = BaseCurrency.defaultCode,
+    InternalTransferAnalysis? transfers,
   }) {
     // **AC-B11.1 depends on this line being here and not one level down.**
     //
@@ -144,9 +155,8 @@ abstract final class BankTreeBuilder {
     // and every internal transfer would be counted as spend. It is analysed
     // once over the whole set and the result is handed to each per-instrument
     // total below — see `LedgerTotals.report`'s note on slicing.
-    final InternalTransferAnalysis transfers = InternalTransferDetector.analyze(
-      transactions,
-    );
+    final InternalTransferAnalysis analysis =
+        transfers ?? InternalTransferDetector.analyze(transactions);
 
     // Transactions grouped by instrument id once, rather than filtering the
     // whole list per instrument — with a few thousand transactions and a
@@ -179,7 +189,7 @@ abstract final class BankTreeBuilder {
           byInstrument: byInstrument,
           period: period,
           baseCurrencyCode: baseCurrencyCode,
-          transfers: transfers,
+          transfers: analysis,
         ),
     ];
   }

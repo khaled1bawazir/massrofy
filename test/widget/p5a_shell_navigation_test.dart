@@ -280,9 +280,18 @@ void main() {
     ]) {
       expect(find.byKey(Key(key)), findsOneWidget, reason: key);
     }
-    // The Reports tab is stated as absent rather than shipped dead — see
-    // `app_shell.dart`'s header.
-    expect(find.text('Reports arrive in the next release'), findsOneWidget);
+    // **Updated by P5b (KHA-37).** This assertion used to read:
+    //
+    //   expect(find.text('Reports arrive in the next release'), findsOneWidget);
+    //
+    // — because P5a shipped three tabs and disclosed the fourth's absence in the
+    // More menu rather than opening a nav tab onto nothing. KHA-37 shipped the
+    // Reports hub as a real tab, so the placeholder is **gone**, and the
+    // assertion is inverted rather than deleted: a stale placeholder that
+    // outlives the thing it stood in for is worse than never having written one,
+    // and only a test can stop it lingering. The positive half (the tab exists
+    // and opens S-28) lives in `p5b_shell_navigation_test.dart`.
+    expect(find.text('Reports arrive in the next release'), findsNothing);
 
     await disposeHost(tester);
   });

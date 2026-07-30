@@ -54,7 +54,6 @@ import '../theme/app_colors.dart';
 import '../widgets/category_widgets.dart';
 import '../widgets/period_widgets.dart';
 import '../widgets/review_count_card.dart';
-import '../widgets/spent_vs_kept_card.dart';
 import '../widgets/transaction_list_item.dart';
 import 'categorization_routes.dart';
 import 'ledger_routes.dart';
@@ -147,18 +146,20 @@ class HomeScreen extends ConsumerWidget {
           const ReviewCountCard(),
           const SizedBox(height: 12),
 
-          // **S-32 Spent vs Kept (AC-B10.3).** design.md files this under the
-          // Reports hub, which is KHA-37 in P5b. It sits here in the meantime
-          // rather than nowhere: it shipped in P3b-1 and the P1 review's rule
-          // — *"a computation with no production call site is library code,
-          // not shipped behaviour"* — applies to removing a call site just as
-          // much as to never adding one. P5b moves it to S-28.
-          if (report != null && !reportAsync.isLoading)
-            Padding(
-              padding: const EdgeInsetsDirectional.only(bottom: 12),
-              child: SpentVsKeptCard(report: report),
-            ),
-
+          // **S-32 Spent vs Kept moved to the Reports hub in P5b (KHA-37).**
+          //
+          // P3b-1 put the card here with a note saying so:
+          //
+          // > ~~"design.md files this under the Reports hub, which is KHA-37 in
+          // > P5b. It sits here in the meantime rather than nowhere: a
+          // > computation with no production call site is library code, not
+          // > shipped behaviour. P5b moves it to S-28."~~
+          //
+          // This is that move — `SpentVsKeptHost` / S-32. Home is back to the
+          // five elements design.md §7 S-08 actually lists (`MonthTotalCard`,
+          // `ReviewCountCard`, budgets, the recent preview, the FAB), and the
+          // card itself is unchanged and still reachable, so nothing became
+          // library code again.
           _SectionHeader(
             title: l10n.homeRecentTransactions,
             actionLabel: l10n.homeViewAll,

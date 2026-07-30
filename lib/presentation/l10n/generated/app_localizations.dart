@@ -2132,11 +2132,347 @@ abstract class AppLocalizations {
   /// **'App'**
   String get moreSectionApp;
 
-  /// Stated in the More menu rather than shipping a fourth BottomNav tab that opens onto nothing. design.md §5's BottomNav specifies four tabs; the Reports hub (S-28) is KHA-37, and a dead tab would be a worse answer than an honest sentence.
+  /// P5b shared button label — commits the S-27 filter sheet.
   ///
   /// In en, this message translates to:
-  /// **'Reports arrive in the next release'**
-  String get moreReportsComingSoon;
+  /// **'Apply'**
+  String get commonApply;
+
+  /// P5b shared button label.
+  ///
+  /// In en, this message translates to:
+  /// **'Close'**
+  String get commonClose;
+
+  /// The fourth BottomNav tab (design.md §1/§5), shipped by KHA-37. P5a deliberately shipped three tabs and said so in the More menu rather than opening a tab onto nothing; that placeholder line is removed with this.
+  ///
+  /// In en, this message translates to:
+  /// **'Reports'**
+  String get navReports;
+
+  /// S-28 — the Reports hub.
+  ///
+  /// In en, this message translates to:
+  /// **'Reports'**
+  String get reportsHubTitle;
+
+  /// NFR-A6 stated to the user, not only to engineers: the hub's promise is traceability, and saying so is what makes the drill-down affordances read as an invitation rather than decoration.
+  ///
+  /// In en, this message translates to:
+  /// **'Every figure here is the sum of transactions you can open and check.'**
+  String get reportsHubSubtitle;
+
+  /// S-28 card / S-29 title — US-E2.
+  ///
+  /// In en, this message translates to:
+  /// **'By category'**
+  String get reportsByCategory;
+
+  /// S-28's pre-shown top line, so the hub is informative on its own.
+  ///
+  /// In en, this message translates to:
+  /// **'Top category: {name} — {amount}'**
+  String reportsByCategorySummary(String name, String amount);
+
+  /// S-28 card / S-30 title — US-E3. Named for both kinds because AC-B13.3 keeps account activity and card activity distinguishable, and a screen called only 'By card' would look like it had lost the accounts.
+  ///
+  /// In en, this message translates to:
+  /// **'By card and account'**
+  String get reportsByCard;
+
+  /// S-28's pre-shown top line for the instrument breakdown.
+  ///
+  /// In en, this message translates to:
+  /// **'Most used: {name} — {amount}'**
+  String reportsByCardSummary(String name, String amount);
+
+  /// S-28 card / S-31 title — US-E4.
+  ///
+  /// In en, this message translates to:
+  /// **'Month over month'**
+  String get reportsMonthOverMonth;
+
+  /// S-28 card / S-32 title — AC-B10.3. Moved here from Home in P5b, which is where design.md always filed it.
+  ///
+  /// In en, this message translates to:
+  /// **'Spent vs kept'**
+  String get reportsSpentVsKept;
+
+  /// S-28 empty state. A hub of four cards each reading 'no data' is worse than one honest sentence.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing to report yet'**
+  String get reportsNothingYetTitle;
+
+  /// Names both ways data gets in (US-B15 auto, US-B4 manual), so the state has something to do rather than only something to read.
+  ///
+  /// In en, this message translates to:
+  /// **'Once a bank message arrives, or you add a transaction by hand, the breakdowns appear here.'**
+  String get reportsNothingYetBody;
+
+  /// design.md §3.4 Error state. Never rendered as a zero: a reassuring 0.00 the user believes is worse than an error they can act on.
+  ///
+  /// In en, this message translates to:
+  /// **'These figures could not be loaded.'**
+  String get reportsUnavailable;
+
+  /// AC-E2.1's share. A whole number: a share printed to two decimals invites the user to reconcile a rounding artefact rather than the money.
+  ///
+  /// In en, this message translates to:
+  /// **'{percent}% of the period'**
+  String categoryBreakdownShareOfPeriod(int percent);
+
+  /// AC-E2.1's share cannot be computed when the period total is absent or zero (division by zero) — said rather than printed as '0%', which would claim this category is a vanishing part of a real total.
+  ///
+  /// In en, this message translates to:
+  /// **'share not available'**
+  String get categoryBreakdownShareUnknown;
+
+  /// AC-C1.3 made visible: the footer that the category rows above must sum to, Uncategorized included.
+  ///
+  /// In en, this message translates to:
+  /// **'Total'**
+  String get categoryBreakdownTotalLine;
+
+  /// AC-C1.3 is guaranteed by construction (CategoryBreakdown.of partitions once and sums each part with the same function), so this line should be unreachable. It is rendered anyway because a reconciliation break the user cannot see is exactly the failure NFR-A6 exists to prevent — silence would be the bug, not the arithmetic.
+  ///
+  /// In en, this message translates to:
+  /// **'These category figures do not add up to the period total. Please report this.'**
+  String get categoryBreakdownReconciliationFailed;
+
+  /// AC-E2.2 — selecting a category lists its underlying transactions. Phrased with the count so the drill-down states what it will show before the user leaves the screen.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Show the 1 transaction} other{Show all {count} transactions}}'**
+  String categoryBreakdownOpenTransactions(int count);
+
+  /// A money-movement category (income, transfers, withdrawals) normally carries transactions but no SPEND figure, per US-B10/B11. Saying so stops a count-with-no-figure row reading as a discrepancy.
+  ///
+  /// In en, this message translates to:
+  /// **'No transactions in this category this period'**
+  String get categoryBreakdownEmptyCategoryNote;
+
+  /// US-B10/B11 — income, internal transfers and cash withdrawals are captured and listed but excluded from spend. Without this line a category showing '3 transactions' beside no figure looks like lost money.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 transaction, not counted as spending} other{{count} transactions, not counted as spending}}'**
+  String categoryBreakdownMovementOnlyNote(int count);
+
+  /// AC-E3.2's closing row. Cash (US-B4/OQ-19) has no card and no account, and an SMS may name too few digits to key on — so without this row the per-card footer would be smaller than the period total shown everywhere else, and the only conclusion available to the user would be that the app had lost some of their spending.
+  ///
+  /// In en, this message translates to:
+  /// **'Cash and unmatched'**
+  String get instrumentBreakdownUnassigned;
+
+  /// AC-E3.2 — equals the period total shown on Home and S-10.
+  ///
+  /// In en, this message translates to:
+  /// **'Total'**
+  String get instrumentBreakdownTotalLine;
+
+  /// AC-E3.2's guard, rendered for the same reason as the category one: a reconciliation break must never be silent (NFR-A6).
+  ///
+  /// In en, this message translates to:
+  /// **'These card figures do not add up to the period total. Please report this.'**
+  String get instrumentBreakdownReconciliationFailed;
+
+  /// The approved mockup (S-30) shows a card at 0.00 on purpose: a card the user holds and did not use is information, and hiding it would leave them unsure whether the app forgot the card or they forgot the spending.
+  ///
+  /// In en, this message translates to:
+  /// **'Not used this period'**
+  String get instrumentBreakdownNoActivity;
+
+  /// Two banks can each issue a card ending 4821, so the row names the bank too — exactly where the user is reconciling against a statement.
+  ///
+  /// In en, this message translates to:
+  /// **'{instrument} · {bank}'**
+  String instrumentBreakdownBankLabel(String instrument, String bank);
+
+  /// AC-E4.1's current-period card.
+  ///
+  /// In en, this message translates to:
+  /// **'{month} (this period)'**
+  String monthComparisonThisPeriod(String month);
+
+  /// AC-E4.1's prior-period card.
+  ///
+  /// In en, this message translates to:
+  /// **'{month} (previous)'**
+  String monthComparisonPriorPeriod(String month);
+
+  /// AC-E4.1's difference, as a sentence rather than a bare signed number: '+239.50' beside two totals is ambiguous about which direction it belongs to.
+  ///
+  /// In en, this message translates to:
+  /// **'{amount} more than {month}'**
+  String monthComparisonUp(String amount, String month);
+
+  /// AC-E4.1's difference in the other direction. Deliberately not coloured as good news alone — brand.md §2.3 keeps the ordinary case neutral.
+  ///
+  /// In en, this message translates to:
+  /// **'{amount} less than {month}'**
+  String monthComparisonDown(String amount, String month);
+
+  /// An exactly-equal period is rare but real, and 'up 0.00' would read as a rounding artefact.
+  ///
+  /// In en, this message translates to:
+  /// **'The same as {month}'**
+  String monthComparisonSame(String month);
+
+  /// AC-E4.2 — with fewer than two months of data there is no honest comparison to draw. The arithmetic would still work (this month vs nothing = up 100%), and every number in it would be correct while the conclusion was nonsense.
+  ///
+  /// In en, this message translates to:
+  /// **'Not enough history yet'**
+  String get monthComparisonInsufficientTitle;
+
+  /// AC-E4.2 — states when the feature becomes available instead of leaving the screen looking broken.
+  ///
+  /// In en, this message translates to:
+  /// **'Check back after your second month of use to see a comparison you can rely on.'**
+  String get monthComparisonInsufficientBody;
+
+  /// ADR-009 case 4 applied to a delta. Treating an unconvertible period as zero would report 'you spent 3,000 less' to someone whose previous month was entirely in a currency no message quoted a rate for.
+  ///
+  /// In en, this message translates to:
+  /// **'One of these periods contains transactions the app could not convert, so the difference is not shown.'**
+  String get monthComparisonIncomplete;
+
+  /// AC-E5.1. 'Merchant name' rather than 'search' because that is the only field searched — promising more than that would make an empty result read as a bug.
+  ///
+  /// In en, this message translates to:
+  /// **'Search a merchant name'**
+  String get searchTransactionsHint;
+
+  /// NFR-U2 — the clear affordance needs a name a screen reader can announce, not just an X glyph.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear search'**
+  String get searchClear;
+
+  /// S-27 — the filter sheet.
+  ///
+  /// In en, this message translates to:
+  /// **'Filter'**
+  String get filterTitle;
+
+  /// NFR-U2 tooltip for the filter icon in S-10's app bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Filter transactions'**
+  String get filterOpen;
+
+  /// The filter button's badge. A date range counts once even with both ends set, and so does an amount range — the user set one control.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 filter} other{{count} filters}}'**
+  String filterActiveCount(int count);
+
+  /// AC-E5.3's way out, and design.md Flow E's 'always visible when active'.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear filters'**
+  String get filterClearAll;
+
+  /// AC-E5.2 facet.
+  ///
+  /// In en, this message translates to:
+  /// **'Date range'**
+  String get filterSectionDates;
+
+  /// AC-E5.2 facet. Includes Uncategorized as a first-class choice — 'show me what the app could not label' is one of the most useful filters here.
+  ///
+  /// In en, this message translates to:
+  /// **'Categories'**
+  String get filterSectionCategories;
+
+  /// AC-E5.2 facet.
+  ///
+  /// In en, this message translates to:
+  /// **'Cards and accounts'**
+  String get filterSectionInstruments;
+
+  /// AC-E5.2 facet.
+  ///
+  /// In en, this message translates to:
+  /// **'Amount range'**
+  String get filterSectionAmount;
+
+  /// Lower bound of the amount range.
+  ///
+  /// In en, this message translates to:
+  /// **'From'**
+  String get filterAmountMin;
+
+  /// Upper bound of the amount range.
+  ///
+  /// In en, this message translates to:
+  /// **'To'**
+  String get filterAmountMax;
+
+  /// NFR-A5 — an amount range typed into a form is in ONE currency while a ledger can hold several, so the screen states which one and where the rate came from rather than silently comparing 20.00 against 20.00 USD.
+  ///
+  /// In en, this message translates to:
+  /// **'Compared in {currency}, using the rate each transaction recorded.'**
+  String filterAmountCurrencyNote(String currency);
+
+  /// Names the expected shape rather than saying 'invalid input' — brand voice principle 4.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter an amount like 45.00'**
+  String get filterAmountInvalid;
+
+  /// Caught at entry rather than silently returning nothing, which would look identical to 'you have no transactions in that range'.
+  ///
+  /// In en, this message translates to:
+  /// **'The lower bound is above the upper bound'**
+  String get filterAmountRangeInverted;
+
+  /// Start of the date-range facet.
+  ///
+  /// In en, this message translates to:
+  /// **'From'**
+  String get filterDateFrom;
+
+  /// End of the date-range facet. Inclusive to the user; stored as a half-open bound so a transaction cannot fall in two ranges.
+  ///
+  /// In en, this message translates to:
+  /// **'To'**
+  String get filterDateTo;
+
+  /// The unset state of the date facet, stated rather than left blank.
+  ///
+  /// In en, this message translates to:
+  /// **'Any date'**
+  String get filterDateAny;
+
+  /// ADR-009 case 4 applied to the amount filter: a foreign purchase whose message quoted no rate cannot be compared to a bound at all. Excluded and COUNTED, never dropped silently — a filter that quietly omits a purchase is the same defect as a total that does.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 transaction has no {currency} figure and is not shown} other{{count} transactions have no {currency} figure and are not shown}}'**
+  String filterNotComparableByAmount(int count, String currency);
+
+  /// AC-E5.3 — deliberately different copy from the true-empty and empty-for-period states. Telling a user with two years of history that they have no transactions looks exactly like data loss.
+  ///
+  /// In en, this message translates to:
+  /// **'No transactions match'**
+  String get txnListFilteredEmptyTitle;
+
+  /// AC-E5.3 — points at the control that resolves the state, and does so in words rather than relying on the user spotting the button.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing in this month matches what you searched for. Clearing the filter brings the full list back.'**
+  String get txnListFilteredEmptyBody;
+
+  /// AC-E5.2 — the displayed total must reflect the filtered subset, so it is LABELLED as filtered. An unlabelled figure that silently changed meaning when a filter was applied would be worse than no filter at all.
+  ///
+  /// In en, this message translates to:
+  /// **'Filtered total'**
+  String get txnListFilteredTotal;
+
+  /// NFR-A6's traceability in its cheapest form: a total with a count beside it can be checked.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{No transactions} =1{1 transaction} other{{count} transactions}}'**
+  String txnListResultCount(int count);
 
   /// KHA-133. Title of the re-scan screen and its More-menu row. Plain language on purpose: the user is not being asked to understand watermarks or rule packs.
   ///

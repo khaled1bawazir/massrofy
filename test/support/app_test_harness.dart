@@ -17,6 +17,8 @@
 /// implementations, because those are exactly what the wiring has to reach.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -26,6 +28,7 @@ import 'package:massrofy/data/dao/audit_log_dao.dart';
 import 'package:massrofy/data/dao/raw_message_dao.dart';
 import 'package:massrofy/data/dao/transaction_dao.dart';
 import 'package:massrofy/data/db/app_database.dart';
+import 'package:massrofy/features/ingestion/sms_broadcast_signal.dart';
 import 'package:massrofy/features/ingestion/sms_permission_service.dart';
 import 'package:massrofy/features/security/app_lock_controller.dart';
 import 'package:massrofy/features/security/app_lock_state.dart';
@@ -89,6 +92,28 @@ class FakeSmsPermissionService implements SmsPermissionService {
   Future<void> requestImmediateSweep() async {}
 }
 
+/// A hand-driven [SmsBroadcastSignal] — **KHA-122**.
+///
+/// The Kotlin side raises the real signal from a `BroadcastReceiver`, which no
+/// widget test has. This lets a test say "an SMS just arrived" and then assert
+/// what the app did about it, which is the only way to cover the defect: the
+/// screen-level symptom was a *missing trigger*, and no test that renders a
+/// screen over fixed values can see one of those.
+class FakeSmsBroadcastSignal implements SmsBroadcastSignal {
+  // Broadcast, not single-subscription: the provider may resubscribe after a
+  // rebuild, and a single-subscription controller would throw on the second
+  // listen rather than reporting the behaviour under test.
+  final StreamController<void> _controller = StreamController<void>.broadcast();
+
+  @override
+  Stream<void> get incoming => _controller.stream;
+
+  /// Delivers one *"an SMS arrived"* marker.
+  void emit() => _controller.add(null);
+
+  Future<void> close() => _controller.close();
+}
+
 /// A real, plain in-memory [UnlockedDatabaseSession] plus its database.
 ///
 /// The caller owns closing it — `addTearDown(session.close)`.
@@ -137,6 +162,7 @@ Widget hostScope({
   AppLockState lockState = const AppLockState(status: AppLockStatus.unlocked),
   String locale = 'en',
   double textScale = 1.0,
+  SmsBroadcastSignal? smsSignal,
 }) => ProviderScope(
   overrides: [
     appLockControllerProvider.overrideWith(
@@ -146,6 +172,16 @@ Widget hostScope({
       (Ref ref) async => lockState.isUnlocked ? session.session : null,
     ),
     smsPermissionServiceProvider.overrideWithValue(permissions),
+    // **KHA-122.** Overridden unconditionally, even though most host tests never
+    // build `foregroundSmsSignalProvider`: the real implementation opens an
+    // `EventChannel` on a platform that does not exist in `flutter test`, and a
+    // harness that leaves one platform boundary un-faked is a harness that fails
+    // mysteriously the first time some screen happens to reach it. The default is
+    // a signal that never fires, which is the correct neutral behaviour for a
+    // test that is not about ingestion.
+    smsBroadcastSignalProvider.overrideWithValue(
+      smsSignal ?? FakeSmsBroadcastSignal(),
+    ),
   ],
   child: wrapHost(child, locale: locale, textScale: textScale),
 );

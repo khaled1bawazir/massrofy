@@ -387,6 +387,7 @@ final StreamProvider<LedgerView> ledgerViewProvider =
 
         yield LedgerView(
           transactions: ordered,
+          analysis: analysis,
           internalTransferStates: <int, String>{
             for (final LedgerTransaction txn in outcome.transactions)
               if (analysis.stateFor(txn) != null)
@@ -404,6 +405,25 @@ final class LedgerView {
   /// internal-transfer analysis below correct.
   final List<LedgerTransaction> transactions;
 
+  /// The internal-transfer analysis over the **whole** set, carried so a caller
+  /// that slices the list can hand it to `LedgerTotals` instead of letting the
+  /// pairing be re-derived from the slice.
+  ///
+  /// **P5b made this necessary rather than merely tidy.** Before KHA-38 the only
+  /// slice was "this period", and the screens got away without it. A *filter* can
+  /// exclude one leg of an internal transfer and keep the other — search a
+  /// merchant name, or filter to one card, and the pair is split by construction.
+  /// A re-derived analysis over that slice would find no pair, so the surviving
+  /// leg would silently start counting as spend: AC-B11.1 broken, in the total
+  /// AC-E5.2 is about, with no visible symptom. `period_totals.dart` names this as
+  /// *"the most plausible way to reintroduce AC-B11.1 as a bug"*, so the verdict
+  /// travels with the data.
+  ///
+  /// [internalTransferStates] is the same information flattened for the widgets,
+  /// which need a per-row string rather than an analysis object. Both come from
+  /// this one value, so they cannot disagree.
+  final InternalTransferAnalysis analysis;
+
   /// Transaction id → `internal` | `candidate` | `external`, computed over the
   /// whole set. Absent means "the detector had nothing to say".
   final Map<int, String> internalTransferStates;
@@ -417,6 +437,7 @@ final class LedgerView {
     required this.transactions,
     required this.internalTransferStates,
     required this.unreadable,
+    this.analysis = InternalTransferAnalysis.empty,
   });
 
   static const LedgerView empty = LedgerView(

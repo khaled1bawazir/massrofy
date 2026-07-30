@@ -1306,7 +1306,245 @@ class AppLocalizationsEn extends AppLocalizations {
   String get moreSectionApp => 'App';
 
   @override
-  String get moreReportsComingSoon => 'Reports arrive in the next release';
+  String get commonApply => 'Apply';
+
+  @override
+  String get commonClose => 'Close';
+
+  @override
+  String get navReports => 'Reports';
+
+  @override
+  String get reportsHubTitle => 'Reports';
+
+  @override
+  String get reportsHubSubtitle =>
+      'Every figure here is the sum of transactions you can open and check.';
+
+  @override
+  String get reportsByCategory => 'By category';
+
+  @override
+  String reportsByCategorySummary(String name, String amount) {
+    return 'Top category: $name — $amount';
+  }
+
+  @override
+  String get reportsByCard => 'By card and account';
+
+  @override
+  String reportsByCardSummary(String name, String amount) {
+    return 'Most used: $name — $amount';
+  }
+
+  @override
+  String get reportsMonthOverMonth => 'Month over month';
+
+  @override
+  String get reportsSpentVsKept => 'Spent vs kept';
+
+  @override
+  String get reportsNothingYetTitle => 'Nothing to report yet';
+
+  @override
+  String get reportsNothingYetBody =>
+      'Once a bank message arrives, or you add a transaction by hand, the breakdowns appear here.';
+
+  @override
+  String get reportsUnavailable => 'These figures could not be loaded.';
+
+  @override
+  String categoryBreakdownShareOfPeriod(int percent) {
+    return '$percent% of the period';
+  }
+
+  @override
+  String get categoryBreakdownShareUnknown => 'share not available';
+
+  @override
+  String get categoryBreakdownTotalLine => 'Total';
+
+  @override
+  String get categoryBreakdownReconciliationFailed =>
+      'These category figures do not add up to the period total. Please report this.';
+
+  @override
+  String categoryBreakdownOpenTransactions(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Show all $count transactions',
+      one: 'Show the 1 transaction',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get categoryBreakdownEmptyCategoryNote =>
+      'No transactions in this category this period';
+
+  @override
+  String categoryBreakdownMovementOnlyNote(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count transactions, not counted as spending',
+      one: '1 transaction, not counted as spending',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get instrumentBreakdownUnassigned => 'Cash and unmatched';
+
+  @override
+  String get instrumentBreakdownTotalLine => 'Total';
+
+  @override
+  String get instrumentBreakdownReconciliationFailed =>
+      'These card figures do not add up to the period total. Please report this.';
+
+  @override
+  String get instrumentBreakdownNoActivity => 'Not used this period';
+
+  @override
+  String instrumentBreakdownBankLabel(String instrument, String bank) {
+    return '$instrument · $bank';
+  }
+
+  @override
+  String monthComparisonThisPeriod(String month) {
+    return '$month (this period)';
+  }
+
+  @override
+  String monthComparisonPriorPeriod(String month) {
+    return '$month (previous)';
+  }
+
+  @override
+  String monthComparisonUp(String amount, String month) {
+    return '$amount more than $month';
+  }
+
+  @override
+  String monthComparisonDown(String amount, String month) {
+    return '$amount less than $month';
+  }
+
+  @override
+  String monthComparisonSame(String month) {
+    return 'The same as $month';
+  }
+
+  @override
+  String get monthComparisonInsufficientTitle => 'Not enough history yet';
+
+  @override
+  String get monthComparisonInsufficientBody =>
+      'Check back after your second month of use to see a comparison you can rely on.';
+
+  @override
+  String get monthComparisonIncomplete =>
+      'One of these periods contains transactions the app could not convert, so the difference is not shown.';
+
+  @override
+  String get searchTransactionsHint => 'Search a merchant name';
+
+  @override
+  String get searchClear => 'Clear search';
+
+  @override
+  String get filterTitle => 'Filter';
+
+  @override
+  String get filterOpen => 'Filter transactions';
+
+  @override
+  String filterActiveCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count filters',
+      one: '1 filter',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get filterClearAll => 'Clear filters';
+
+  @override
+  String get filterSectionDates => 'Date range';
+
+  @override
+  String get filterSectionCategories => 'Categories';
+
+  @override
+  String get filterSectionInstruments => 'Cards and accounts';
+
+  @override
+  String get filterSectionAmount => 'Amount range';
+
+  @override
+  String get filterAmountMin => 'From';
+
+  @override
+  String get filterAmountMax => 'To';
+
+  @override
+  String filterAmountCurrencyNote(String currency) {
+    return 'Compared in $currency, using the rate each transaction recorded.';
+  }
+
+  @override
+  String get filterAmountInvalid => 'Enter an amount like 45.00';
+
+  @override
+  String get filterAmountRangeInverted =>
+      'The lower bound is above the upper bound';
+
+  @override
+  String get filterDateFrom => 'From';
+
+  @override
+  String get filterDateTo => 'To';
+
+  @override
+  String get filterDateAny => 'Any date';
+
+  @override
+  String filterNotComparableByAmount(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count transactions have no $currency figure and are not shown',
+      one: '1 transaction has no $currency figure and is not shown',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get txnListFilteredEmptyTitle => 'No transactions match';
+
+  @override
+  String get txnListFilteredEmptyBody =>
+      'Nothing in this month matches what you searched for. Clearing the filter brings the full list back.';
+
+  @override
+  String get txnListFilteredTotal => 'Filtered total';
+
+  @override
+  String txnListResultCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count transactions',
+      one: '1 transaction',
+      zero: 'No transactions',
+    );
+    return '$_temp0';
+  }
 
   @override
   String get recheckBanksTitle => 'Check my banks again';

@@ -37,6 +37,25 @@ import android.provider.Telephony
  * running. It is also why this app cannot ever be published on Google Play
  * (`RECEIVE_SMS`/`READ_SMS` are restricted to default SMS handlers) — a
  * lock-in the ADR records deliberately as H-12, satisfied by side-loading.
+ *
+ * ## KHA-122 — this receiver now signals the foreground isolate as well
+ *
+ * The WorkManager enqueue below wakes a *background* isolate, and **ADR-018
+ * decision 1** makes that isolate a ratified no-op, because it cannot unwrap the
+ * DB Master Key. So the enqueue alone never produced a transaction. The second
+ * line hands the same "something arrived" fact to the **foreground** isolate,
+ * which does hold the key — closing AC-A1.1's *"without any user action"* for
+ * the app-open-and-idle case QA found on a device.
+ *
+ * Both calls stay, and neither is redundant:
+ *  - the enqueue is the wake path that survives the process being dead, and it
+ *    is what keeps Layer 1 in place for whatever ADR-018 decides in future;
+ *  - the signal only does anything when a foregrounded engine is listening, and
+ *    is a no-op otherwise (see [SmsForegroundBridge]).
+ *
+ * **NFR-R7 is unaffected**: no new broadcast is registered, no extra wake
+ * happens, and the added work is one `Handler.post` on a thread that is already
+ * running because this receiver was already being called.
  */
 class SmsReceiver : BroadcastReceiver() {
 
@@ -48,7 +67,9 @@ class SmsReceiver : BroadcastReceiver() {
         // Note the total absence of `Telephony.Sms.Intents.getMessagesFromIntent(intent)`.
         // If you are tempted to add it, read the class doc comment first — the
         // fact that this method cannot leak a message body is a security
-        // property, not an oversight.
+        // property, not an oversight. That applies to the signal below too: it
+        // carries a bare marker, never the message.
         IngestScheduler.enqueueExpeditedSweep(context)
+        SmsForegroundBridge.signalSmsReceived()
     }
 }

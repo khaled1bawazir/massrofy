@@ -208,7 +208,6 @@ void main() {
       key: _testChainKey,
       normalizedBody: SmsTextNormalizer.normalize(sanitized.value),
       sender: record.address,
-      smsTimestampUtc: record.receivedAt,
     );
   }
 

@@ -80,6 +80,13 @@ class MainActivity : FlutterFragmentActivity() {
                 )
             )
         }
+
+        // KHA-122: the Kotlin -> Dart signal that lets the FOREGROUND isolate
+        // sweep as soon as an SMS lands, instead of waiting for the next
+        // `AppLifecycleState.resumed`. Attached here and nowhere else — this is
+        // the only engine that holds the unwrapped DB Master Key (ADR-005), and
+        // therefore the only one that can act on the signal (ADR-018 D1).
+        SmsForegroundBridge.attach(flutterEngine.dartExecutor.binaryMessenger)
     }
 
     override fun onRequestPermissionsResult(
@@ -97,6 +104,10 @@ class MainActivity : FlutterFragmentActivity() {
         // holds the application context).
         smsChannel?.activity = null
         smsChannel = null
+        // Same reasoning for the KHA-122 signal: the bridge is a process-wide
+        // object, so a sink belonging to a destroyed engine would outlive the
+        // engine and throw on the next SMS.
+        SmsForegroundBridge.detach()
         super.onDestroy()
     }
 }

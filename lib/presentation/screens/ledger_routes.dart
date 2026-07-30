@@ -40,16 +40,20 @@ import '../../data/db/app_database.dart';
 import '../../features/categorization/categories.dart';
 import '../../features/categorization/learned_rules.dart';
 import '../../features/ledger/bank_tree.dart';
+import '../../features/ledger/base_currency.dart';
 import '../../features/ledger/ledger_transaction.dart';
 import '../../features/ledger/manual_entry.dart';
 import '../../features/ledger/period_totals.dart';
 import '../../features/ledger/transaction_edit.dart';
+import '../../features/ledger/transaction_filter.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../providers/app_providers.dart';
 import '../providers/categorization_providers.dart';
 import '../providers/ingestion_providers.dart';
 import '../providers/ledger_providers.dart';
+import '../providers/report_providers.dart';
 import '../widgets/category_widgets.dart';
+import '../widgets/filter_widgets.dart';
 import '../widgets/scoped_snack_bar.dart';
 import 'banks_screen.dart';
 import 'categorization_routes.dart';
@@ -125,14 +129,50 @@ class TransactionListHost extends ConsumerWidget {
       categoryResolverProvider,
     );
 
+    // **KHA-38.** Only the unscoped list offers search/filter: on an
+    // instrument-scoped list the set of rows *is* the screen's subject, and
+    // filtering it again would leave the user unsure which narrowing they were
+    // looking at.
+    final bool searchable = instrumentId == null;
+    final TransactionFilter filter = searchable
+        ? ref.watch(transactionFilterProvider)
+        : TransactionFilter.none;
+    final TransactionFilterNotifier filters = ref.read(
+      transactionFilterProvider.notifier,
+    );
+
+    // Watched only when the facet is offered, so the scoped list does not take a
+    // dependency it has no use for.
+    final List<FilterInstrumentOption> instrumentOptions = searchable
+        ? _instrumentOptions(ref)
+        : const <FilterInstrumentOption>[];
+
     final LedgerView ledger = ledgerAsync.value ?? LedgerView.empty;
     final List<LedgerTransaction> scoped = instrumentId == null
         ? ledger.transactions
         : ledger.forInstrument(instrumentId!);
-    final List<LedgerTransaction> rows = <LedgerTransaction>[
+    final List<LedgerTransaction> inPeriod = <LedgerTransaction>[
       for (final LedgerTransaction txn in scoped)
         if (period.contains(txn.occurredAt)) txn,
     ];
+
+    // **AC-E5.2, and the single most important line in this host.**
+    //
+    // The filter is applied **once**, here, and both the rows and the figure below
+    // come from its result. There is no second predicate and no second query, so
+    // *"the displayed total reflects the filtered subset"* is structural rather
+    // than something two code paths have to agree about (NFR-A6).
+    final FilterOutcome filtered = filter.isActive
+        ? filter.apply(
+            inPeriod,
+            resolver: resolver.value ?? CategoryResolver.defaults(),
+          )
+        : FilterOutcome(
+            transactions: inPeriod,
+            notComparableByAmount: 0,
+            wasActive: false,
+          );
+    final List<LedgerTransaction> rows = filtered.transactions;
 
     return TransactionListScreen(
       title: title,
@@ -141,7 +181,18 @@ class TransactionListHost extends ConsumerWidget {
       // the same list rendered beneath it, with the internal-transfer verdicts
       // already derived from the whole ledger. No second query exists that
       // could disagree with what is on screen.
-      totals: LedgerTotals.spend(rows, period: period),
+      //
+      // `transfers:` carries the analysis from the whole ledger. Passing it is
+      // **required now that a filter exists**: `LedgerTotals` would otherwise
+      // re-derive the pairing from this slice, and a filter can trivially exclude
+      // one leg of an internal transfer (search a merchant, filter one card),
+      // which would silently start counting the other leg as spend — the exact
+      // AC-B11.1 regression `period_totals.dart` names as the most plausible one.
+      totals: LedgerTotals.spend(
+        rows,
+        period: period,
+        transfers: ledger.analysis,
+      ),
       period: period,
       isCurrentMonth: periods.isCurrentMonth,
       internalTransferStates: ledger.internalTransferStates,
@@ -155,6 +206,19 @@ class TransactionListHost extends ConsumerWidget {
       // screen's two empty states.
       ledgerHasAnyTransactions: scoped.isNotEmpty,
       unreadableCount: ledger.unreadable.length,
+      filter: filter,
+      notComparableByAmountCount: filtered.notComparableByAmount,
+      onQueryChanged: searchable ? filters.setQuery : null,
+      onFilterChanged: searchable ? filters.set : null,
+      onClearFilter: searchable ? filters.clear : null,
+      filterCategoryResolver: resolver.value,
+      filterInstrumentLabels: <int, String>{
+        for (final FilterInstrumentOption option in instrumentOptions)
+          option.instrumentId: option.label,
+      },
+      onOpenFilterSheet: searchable
+          ? () => _openFilterSheet(context, ref, instrumentOptions)
+          : null,
       isLoading: ledgerAsync.isLoading,
       hasError: ledgerAsync.hasError,
       onOpenTransaction: (LedgerTransaction txn) =>
@@ -170,6 +234,46 @@ class TransactionListHost extends ConsumerWidget {
       onNextMonth: () => periods.shiftMonths(1),
       onCurrentMonth: periods.showCurrentMonth,
     );
+  }
+
+  /// The card/account facet's choices, and the labels its chips show.
+  ///
+  /// Read from **`bankTreeProvider`**, not from the reports layer. An earlier
+  /// draft took them from `instrumentBreakdownProvider`, which worked and was
+  /// wrong in two ways worth naming: it opened a second Drift subscription just to
+  /// label three chips, and it made S-10 depend on S-30 for no reason the feature
+  /// justifies. The bank tree is what `ManualEntryHost` already reads for the same
+  /// purpose, and it is where a renamed instrument's label lives (AC-B3.1), so
+  /// every surface names an instrument the same way.
+  List<FilterInstrumentOption> _instrumentOptions(WidgetRef ref) =>
+      FilterInstrumentOption.fromBankTree(
+        ref.watch(bankTreeProvider).value ?? const <BankTreeNode>[],
+      );
+
+  /// **S-27.** Opens the sheet and applies whatever it returns.
+  Future<void> _openFilterSheet(
+    BuildContext context,
+    WidgetRef ref,
+    List<FilterInstrumentOption> instruments,
+  ) async {
+    final PeriodRange period = ref.read(ledgerPeriodProvider);
+    final TransactionFilter? next = await showTransactionFilterSheet(
+      context: context,
+      initial: ref.read(transactionFilterProvider),
+      categories:
+          ref.read(categoryResolverProvider).value?.all ??
+          CategoryResolver.defaults().all,
+      // Passed in rather than re-read: the list the sheet offers must be the same
+      // list the chips behind it are labelled from, or a user could select an
+      // instrument the chips cannot name.
+      instruments: instruments,
+      baseCurrencyCode: BaseCurrency.defaultCode,
+      periodStartUtc: period.startUtc,
+      periodEndUtcExclusive: period.endUtcExclusive,
+    );
+    if (next != null) {
+      ref.read(transactionFilterProvider.notifier).set(next);
+    }
   }
 }
 
