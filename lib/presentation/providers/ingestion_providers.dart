@@ -37,6 +37,7 @@ import '../../features/ingestion/background_entrypoint.dart';
 import '../../features/ingestion/content_hmac.dart';
 import '../../features/ingestion/historical_importer.dart';
 import '../../features/ingestion/ingestion_pipeline.dart';
+import '../../features/ingestion/out_of_window_discard.dart';
 import '../../features/ingestion/review_queue.dart';
 import '../../features/ingestion/sms_broadcast_signal.dart';
 import '../../features/ingestion/sms_permission_service.dart';
@@ -422,6 +423,68 @@ final StreamProvider<List<ReviewQueueItem>> reviewQueueProvider =
         ],
       );
     });
+
+/// **KHA-157 (E)** — the discard action, bound to the **unlocked** database
+/// session.
+///
+/// `null` while the app is locked, for the same reason
+/// [ingestionPipelineProvider] is: ADR-005 makes the lock cryptographic, so
+/// with no unwrapped DB Master Key there is no database and therefore no
+/// service. The screen renders the offer without its button in that case,
+/// rather than a button that would fail.
+final FutureProvider<OutOfWindowDiscard?> outOfWindowDiscardProvider =
+    FutureProvider<OutOfWindowDiscard?>((Ref ref) async {
+      final UnlockedDatabaseSession? session = await ref.watch(
+        unlockedDatabaseSessionProvider.future,
+      );
+      if (session == null) {
+        return null;
+      }
+
+      return OutOfWindowDiscard(
+        database: session.database,
+        rawMessageDao: session.rawMessageDao,
+        watermarkDao: IngestWatermarkDao(session.database),
+        auditLogDao: session.auditLogDao,
+        clock: ref.watch(clockProvider),
+        logger: ref.watch(safeLoggerProvider),
+      );
+    });
+
+/// **KHA-157 (E)** — how many pending review items fall outside AC-A3.1's
+/// window, for the banner on S-18.
+///
+/// ## Why this watches [reviewQueueProvider] and then ignores its value
+///
+/// The count has to fall to zero the instant the discard commits, or the
+/// banner sits there offering to delete rows that are already gone. Rather
+/// than have the button invalidate this provider — which would put the
+/// refresh logic at the call site, where the *next* call site would forget it
+/// — this re-derives whenever the queue's own Drift stream emits. The queue
+/// stream fires on any change to `raw_message`, including the delete, so the
+/// two can never disagree about what is in the inbox.
+///
+/// The value is deliberately discarded: it is watched as a *change signal*,
+/// and the count itself is computed by SQL against the same predicate the
+/// delete uses (see `RawMessageDao._isPendingReviewItem`). Counting the
+/// already-loaded list in Dart instead would be one more definition of "still
+/// pending" to keep in step with the delete.
+final FutureProvider<OutOfWindowReviewSummary?>
+outOfWindowReviewSummaryProvider = FutureProvider<OutOfWindowReviewSummary?>((
+  Ref ref,
+) async {
+  ref.watch(reviewQueueProvider);
+
+  final OutOfWindowDiscard? discard = await ref.watch(
+    outOfWindowDiscardProvider.future,
+  );
+  if (discard == null) {
+    // Locked: we have not looked, which is a different thing from "there are
+    // none" and is why the screen's parameter is nullable.
+    return null;
+  }
+  return discard.summary();
+});
 
 /// Registers the Dart entrypoint the background worker calls, and arms
 /// ADR-006's Layer-2 periodic sweep. Called once at startup.

@@ -290,7 +290,28 @@ final class IngestionPipeline {
   /// **All four call exactly this method** — one code path, so a bug cannot
   /// exist on the rare path and not the common one, and the self-healing
   /// property is automatic rather than a special case.
+  ///
+  /// ## KHA-157 — the first thing this does is decide whether "since" means
+  /// anything yet
+  ///
+  /// See [_seedWatermarkIfNeeded]. On a fresh install there is no such thing
+  /// as "incremental", and until KHA-157 this method quietly interpreted that
+  /// as "everything": `lastProcessedSmsProviderId` defaults to `0`, nothing
+  /// ever moved it, and `readSince` bounds on `_id` alone — so the very first
+  /// sweep read the device's **entire** SMS history and dropped years of
+  /// messages into the review queue. AC-A3.1's "from the start of the current
+  /// calendar month" was only ever enforced on the *import* path, which
+  /// `foregroundSweepProvider` runs second.
   Future<IngestionRunResult> runIncremental() async {
+    if (await _seedWatermarkIfNeeded()) {
+      // Seeded on this call, which means there is by definition nothing newer
+      // than what we just recorded. Returning an empty result rather than
+      // falling through to the loop is not an optimisation — see
+      // [_seedWatermarkIfNeeded] for why re-reading after the write is the one
+      // ordering that would lose a message.
+      return const IngestionRunResult();
+    }
+
     IngestionRunResult total = const IngestionRunResult();
 
     // Drain in batches rather than processing exactly one.
@@ -329,6 +350,70 @@ final class IngestionPipeline {
     }
 
     return total;
+  }
+
+  /// **KHA-157 (C) — the one-time high-water-mark seed.**
+  ///
+  /// Returns `true` when this call either seeded the watermark or decided it
+  /// could not, and the caller must therefore sweep nothing this time.
+  ///
+  /// ## The discriminator is `lastProcessedSmsDate == null` — item (B)
+  ///
+  /// No new column, and no migration. [IngestWatermarkDao.advanceTo] writes
+  /// both watermark columns together and its date parameter is non-nullable,
+  /// so a null date can only mean *"neither advanced nor seeded, not once,
+  /// ever"* — and a single write leaves that state permanently, with no path
+  /// back. It is deliberately **not** the `idle`-means-`completed` conflation
+  /// that [IngestWatermarkDao.completeImport] documents: there one value meant
+  /// two different things, here one write moves the row out of its initial
+  /// state for good. The guarantee dies if any future writer ever sets the
+  /// provider id without the date, which is why `advanceTo` and
+  /// [IngestWatermarkDao.seedTo] are the only permitted writers of either
+  /// column.
+  ///
+  /// ## Why the seed lives here and nowhere else
+  ///
+  /// All four ADR-006 triggers funnel through [runIncremental], so a guard
+  /// placed here cannot be bypassed by adding a fifth. The alternatives were
+  /// considered and rejected in the ADR: a permission-grant callback misses
+  /// the OS-Settings and auto-re-grant paths, and letting `HistoricalImporter`
+  /// advance the incremental watermark is both the conflation its own doc
+  /// comment forbids and too late anyway — `foregroundSweepProvider` calls
+  /// this method *before* `runOrResume()`, so the flood would already have
+  /// happened.
+  ///
+  /// ## Read first, write second — and never re-read
+  ///
+  /// The ordering is load-bearing. A message that arrives between the read and
+  /// the write has an `_id` **above** the value being written, so the next
+  /// sweep picks it up. Re-reading the inbox after the write — or worse,
+  /// falling through into the batch loop on this same call — would let that
+  /// message be swept now *and* leave the watermark above it, which is
+  /// harmless, or be missed entirely if the re-read raced the other way. One
+  /// read, one write, return.
+  ///
+  /// An unreadable inbox seeds nothing at all. That is the case the whole
+  /// nullable return type exists for — see [SmsSource.highWaterMark].
+  Future<bool> _seedWatermarkIfNeeded() async {
+    final IngestWatermarkRow row = await watermarkDao.current();
+    if (row.lastProcessedSmsDate != null) {
+      return false;
+    }
+
+    final InboxHighWaterMark? mark = await smsSource.highWaterMark();
+    if (mark == null) {
+      // No permission, or the provider refused. Seed nothing and sweep
+      // nothing: recording a position we could not actually observe would
+      // mark the watermark seeded at 0 and hand the *next* run — the one
+      // that finally has permission — the entire inbox.
+      return true;
+    }
+
+    await watermarkDao.seedTo(
+      smsProviderId: mark.providerId,
+      smsDate: mark.dateUtc,
+    );
+    return true;
   }
 
   /// Processes [records] in order, oldest first.

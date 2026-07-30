@@ -49,6 +49,7 @@ import 'package:massrofy/features/parsing/rule_pack_message_parser.dart';
 
 import '../../support/fake_sms_source.dart';
 import '../../support/plain_test_database.dart';
+import '../../support/watermark_seed.dart';
 import 'support/load_bundled_pack.dart';
 
 final List<int> _testChainKey = List<int>.generate(32, (int i) => i + 91);
@@ -76,8 +77,13 @@ void main() {
     ),
   ];
 
-  setUp(() {
+  setUp(() async {
     db = openPlainTestDatabase();
+    // KHA-157: this fixture's subject is what a re-scan does to a *deleted*
+    // transaction, not where the incremental sweep starts. Seeding at the
+    // beginning makes `runIncremental` read the whole fixture inbox — which is
+    // what a watermark of 0 used to mean implicitly, and now has to be said.
+    await seedWatermarkAtBeginning(IngestWatermarkDao(db));
     final AuditLogDao auditLogDao = AuditLogDao(
       db,
       auditChainKey: _testChainKey,

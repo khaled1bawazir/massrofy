@@ -114,6 +114,44 @@ final class ReviewQueueItem {
       'ReviewQueueItem(#$rawMessageId, ${receivedAt.toIso8601String()})';
 }
 
+/// **KHA-157 (E)** — how many still-pending unparsed items arrived *before*
+/// the window AC-A3.1 authorised, and where that window starts.
+///
+/// ## Why the date travels with the count
+///
+/// The offer this drives is *"N items received before &lt;date&gt; — discard
+/// them"*, and the date is not decoration: it is the claim the user can check
+/// against the list in front of them before agreeing to a deletion. A bare
+/// "discard 424 items" asks them to trust an unexplained number.
+///
+/// A plain value type in `features/`, like every other type on this screen, so
+/// the widget layer never imports `data/` (architecture §3) and widget tests
+/// need no database. `OutOfWindowDiscard` in `out_of_window_discard.dart`
+/// produces it; the screen only ever reads it.
+final class OutOfWindowReviewSummary {
+  final int itemCount;
+
+  /// `min(importFromDate, startOfCurrentMonthUtc(now))` — AC-A3.1's lower
+  /// bound as this app actually computes it, in UTC. The screen shifts it into
+  /// Riyadh wall-clock time before printing.
+  final DateTime windowStartUtc;
+
+  const OutOfWindowReviewSummary({
+    required this.itemCount,
+    required this.windowStartUtc,
+  });
+
+  /// Nothing to offer — the overwhelmingly common case. A healthy install has
+  /// never had an out-of-window message, so the banner never appears at all.
+  bool get hasItems => itemCount > 0;
+
+  /// A count and a date. No sender, no body (NFR-S4).
+  @override
+  String toString() =>
+      'OutOfWindowReviewSummary($itemCount before '
+      '${windowStartUtc.toIso8601String()})';
+}
+
 /// One item in the "low confidence" tab: a transaction that *was* parsed but
 /// is flagged for the user — including ADR-017's possible duplicates
 /// (AC-A5.2).

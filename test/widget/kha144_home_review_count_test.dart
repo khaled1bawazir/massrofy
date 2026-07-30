@@ -62,6 +62,7 @@ import 'package:massrofy/presentation/screens/needs_review_screen.dart';
 import '../features/ingestion/support/load_bundled_pack.dart';
 import '../support/app_test_harness.dart';
 import '../support/fake_sms_source.dart';
+import '../support/watermark_seed.dart';
 
 /// A deterministic 32-byte key. The audit chain and the content HMAC are other
 /// suites' subjects; a fixed key keeps failures here reproducible.
@@ -148,9 +149,14 @@ void main() {
   Future<IngestionRunResult> ingest(
     WidgetTester tester,
     List<RawSmsRecord> inbox,
-  ) => real(
-    tester,
-    () async => IngestionPipeline(
+  ) => real(tester, () async {
+    // KHA-157: this file's subject is the Home badge count, and the inbox is
+    // only how the rows get there. Seeding the incremental watermark at the
+    // beginning keeps `runIncremental` reading the whole fixture inbox — which
+    // is what a watermark of 0 used to mean implicitly, before the seed made
+    // "never ingested" and "caught up as far as row 0" distinguishable.
+    await seedWatermarkAtBeginning(IngestWatermarkDao(session.database));
+    return IngestionPipeline(
       database: session.database,
       smsSource: FakeSmsSource(inbox),
       parser: parser,
@@ -160,8 +166,8 @@ void main() {
       logger: SafeLogger(DiagnosticRingBuffer()),
       contentHmacKey: _testKey,
       categorizer: await buildCategorizer(),
-    ).runIncremental(),
-  );
+    ).runIncremental();
+  });
 
   RawSmsRecord record(int providerId, String sender, String body) =>
       RawSmsRecord(

@@ -62,6 +62,7 @@ import 'package:massrofy/features/parsing/rule_pack_message_parser.dart';
 import '../features/ingestion/support/load_bundled_pack.dart';
 import '../support/fake_sms_source.dart';
 import '../support/plain_test_database.dart';
+import '../support/watermark_seed.dart';
 
 final List<int> _qaKey = List<int>.generate(32, (int i) => 200 - i);
 
@@ -366,7 +367,7 @@ void main() {
     late TransactionDao transactionDao;
     late IngestWatermarkDao watermarkDao;
 
-    setUp(() {
+    setUp(() async {
       db = openPlainTestDatabase();
       rawMessageDao = RawMessageDao(db);
       transactionDao = TransactionDao(
@@ -374,6 +375,9 @@ void main() {
         AuditLogDao(db, auditChainKey: _qaKey),
       );
       watermarkDao = IngestWatermarkDao(db);
+      // KHA-157: the subject is ADR-007's sender gate, not where the sweep
+      // starts. Seed at the beginning so each probe's fixture inbox is read.
+      await seedWatermarkAtBeginning(watermarkDao);
     });
 
     tearDown(() async => db.close());
@@ -516,7 +520,7 @@ void main() {
     late TransactionDao transactionDao;
     late IngestWatermarkDao watermarkDao;
 
-    setUp(() {
+    setUp(() async {
       db = openPlainTestDatabase();
       rawMessageDao = RawMessageDao(db);
       transactionDao = TransactionDao(
@@ -524,6 +528,9 @@ void main() {
         AuditLogDao(db, auditChainKey: _qaKey),
       );
       watermarkDao = IngestWatermarkDao(db);
+      // KHA-157: the subject is ADR-007's sender gate, not where the sweep
+      // starts. Seed at the beginning so each probe's fixture inbox is read.
+      await seedWatermarkAtBeginning(watermarkDao);
     });
 
     tearDown(() async => db.close());

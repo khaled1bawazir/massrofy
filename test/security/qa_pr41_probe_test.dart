@@ -785,6 +785,46 @@ void main() {
       await db.close();
     });
 
+    /// Waits for the **historical import** to land [expected] transactions.
+    ///
+    /// ## Why this probe needs a wait it did not need before (KHA-157)
+    ///
+    /// Read this before "simplifying" it back, because the previous version
+    /// passed for a reason that turned out to be a live defect.
+    ///
+    /// `foregroundSweepProvider` awaits `runIncremental()` and then fires the
+    /// historical import **without** awaiting it — deliberately, because
+    /// AC-A3.2/NFR-R2 require the import to be non-blocking. Until KHA-157 that
+    /// did not matter here: `runIncremental()` read `_id > 0` on a fresh
+    /// watermark, i.e. the **entire inbox**, so all three messages were already
+    /// transactions by the time the sweep's future resolved. That read is
+    /// exactly the bug — on the reporting device it pulled 424 out-of-window
+    /// messages into Needs Review — and it is now fixed: the first sweep seeds
+    /// the watermark from the inbox's high-water mark and ingests nothing.
+    ///
+    /// So on a fresh install the thing that turns a granted permission into a
+    /// ledger is the **importer**, which is date-bounded to the current month
+    /// (AC-A3.1) and always was the component that honoured that bound. This
+    /// probe's subject — *"does permission actually turn into a ledger?"* — is
+    /// unchanged and still proven; what changed is which component proves it,
+    /// and therefore that the assertion has to wait for work that is
+    /// deliberately asynchronous.
+    ///
+    /// Bounded, so a genuine failure to import fails as a wrong count after a
+    /// few milliseconds rather than as a test-suite timeout.
+    Future<List<TransactionRow>> importedRows(int expected) async {
+      for (int i = 0; i < 200; i++) {
+        final List<TransactionRow> rows = await session.transactionDao
+            .watchLive()
+            .first;
+        if (rows.length >= expected) {
+          return rows;
+        }
+        await Future<void>.delayed(Duration.zero);
+      }
+      return session.transactionDao.watchLive().first;
+    }
+
     test('B1: **the human\'s real scenario** — permission granted OUTSIDE the '
         'app (Android Settings), never through the rationale screen, and the '
         'initial import still runs', () async {
@@ -807,11 +847,8 @@ void main() {
       );
       expect(permissions.requestCalls, 0, reason: 'granted out of band');
 
-      final List<TransactionRow> rows = await session.transactionDao
-          .watchLive()
-          .first;
       expect(
-        rows,
+        await importedRows(3),
         hasLength(3),
         reason:
             'all three inbox messages must have become transactions — this '
@@ -855,7 +892,7 @@ void main() {
           foregroundSweepProvider.future,
         );
         expect(result, isNotNull);
-        expect(await session.transactionDao.watchLive().first, hasLength(3));
+        expect(await importedRows(3), hasLength(3));
       },
     );
   });

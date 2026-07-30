@@ -112,6 +112,9 @@ class SmsChannel(private val context: Context) : MethodChannel.MethodCallHandler
                 }
                 result.success(null)
             }
+            // KHA-157 (A). Ids and a timestamp only — this is the one read in
+            // the app that is guaranteed to touch no message content at all.
+            "highWaterMark" -> result.success(highWaterMark())
             "readSince" -> result.success(
                 readSince(
                     afterId = (call.argument<Any>("afterId") as? Number)?.toLong() ?: 0L,
@@ -254,6 +257,60 @@ class SmsChannel(private val context: Context) : MethodChannel.MethodCallHandler
             args = arrayOf(fromEpochMs.toString(), afterId.toString()),
             limit = limit,
         )
+    }
+
+    /**
+     * **KHA-157 (A) — the newest inbox row's `_id` and `date`, and nothing
+     * else.**
+     *
+     * ## The projection is two columns, not four
+     *
+     * [PROJECTION] is deliberately not reused here. This query exists to
+     * answer "where does the future start?", which needs no body and no
+     * sender, and NFR-P1's data minimisation means not asking for what we do
+     * not need — even for the microseconds it would live in memory. It is the
+     * only inbox read in the app that cannot leak message content, because it
+     * never requests any.
+     *
+     * ## Three return shapes, and the distinction that matters
+     *
+     * - `null` — **unreadable**: `SecurityException` (no `READ_SMS`, or an
+     *   Android 11+ auto-revoke), or a null cursor from the provider.
+     * - `mapOf("empty" to true)` — read fine, no rows.
+     * - `mapOf("id" to Long, "date" to Long)` — the newest row.
+     *
+     * The Dart side must be able to tell the first from the second: seeding a
+     * watermark while permission is denied would mark it seeded at 0 and then
+     * sweep the entire device history the moment permission arrived. That is
+     * the 424-item flood KHA-157 was filed for, so the ambiguity is removed
+     * here rather than guessed at there.
+     *
+     * `LIMIT 1` on a `_id DESC` sort, so this is one row however large the
+     * inbox is.
+     */
+    private fun highWaterMark(): Map<String, Any?>? {
+        return try {
+            context.contentResolver.query(
+                INBOX,
+                arrayOf(Telephony.Sms._ID, Telephony.Sms.DATE),
+                null,
+                null,
+                "${Telephony.Sms._ID} DESC LIMIT 1",
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) {
+                    return@use mapOf<String, Any?>("empty" to true)
+                }
+                mapOf<String, Any?>(
+                    "id" to cursor.getLong(cursor.getColumnIndexOrThrow(Telephony.Sms._ID)),
+                    "date" to cursor.getLong(cursor.getColumnIndexOrThrow(Telephony.Sms.DATE)),
+                )
+            }
+            // A null cursor means the provider refused the query. Falling
+            // through to `null` here — rather than to "empty" — is the safe
+            // direction: seed nothing, sweep nothing, retry next sweep.
+        } catch (_: SecurityException) {
+            null
+        }
     }
 
     /** A count for the progress bar (AC-A3.2). Never content. */

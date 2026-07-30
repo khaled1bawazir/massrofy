@@ -41,6 +41,7 @@ import '../../features/categorization/categories.dart';
 import '../../features/categorization/categorization_service.dart';
 import '../../features/categorization/category_correction.dart';
 import '../../features/categorization/learned_rules.dart';
+import '../../features/ingestion/out_of_window_discard.dart';
 import '../../features/ingestion/review_queue.dart';
 import '../../features/ledger/bank_tree.dart';
 import '../../features/ledger/internal_transfer_decision.dart';
@@ -290,6 +291,19 @@ class NeedsReviewHost extends ConsumerWidget {
     );
     final AsyncValue<ReviewInboxView> inbox = ref.watch(reviewInboxProvider);
 
+    // **KHA-157 (E).** Deliberately *not* joined into the error/loading gates
+    // below. This is a housekeeping offer, not one of the three lists the
+    // screen exists to show: if counting the out-of-window items fails or is
+    // still in flight, the right outcome is a review inbox with no banner on
+    // it, not a review inbox the user cannot open. `maybeWhen`'s `orElse`
+    // yields null — "we have not looked" — which renders nothing.
+    final OutOfWindowReviewSummary? outOfWindow = ref
+        .watch(outOfWindowReviewSummaryProvider)
+        .maybeWhen(
+          data: (OutOfWindowReviewSummary? summary) => summary,
+          orElse: () => null,
+        );
+
     // design.md §3.4's Error state, ahead of everything else: a failed read of
     // any of these lists must not render as an empty inbox, because an empty
     // inbox is this screen's *good news* state and showing it wrongly is the
@@ -325,6 +339,35 @@ class NeedsReviewHost extends ConsumerWidget {
       unreadable: view.unreadable,
       categoryAssignments:
           assignments.value ?? const <int, CategoryAssignment>{},
+      outOfWindow: outOfWindow,
+      // **KHA-157 (E).** The card asks for confirmation before calling this;
+      // this closure does the work and reports it. Nothing here re-checks the
+      // count or the cutoff: `discardOutOfWindowReviewItems` recomputes the
+      // window itself, because the user may have left the dialog open across a
+      // month boundary and a stale bound could delete an in-window message.
+      onDiscardOutOfWindow: () async {
+        final OutOfWindowDiscard? discard = await ref.read(
+          outOfWindowDiscardProvider.future,
+        );
+        if (discard == null) {
+          // Locked between building the button and confirming it. Doing
+          // nothing is correct — the offer is still there after unlocking.
+          return;
+        }
+        final int removed = await discard.discardOutOfWindowReviewItems();
+        if (removed == 0 || !context.mounted) {
+          return;
+        }
+        // A bulk deletion that produces no acknowledgement leaves the user
+        // unsure whether it ran — and the list refreshing underneath them is
+        // ambiguous when the rows were off-screen. No Undo action is offered,
+        // because there is nothing to undo to: see
+        // `RawMessageDao.deletePendingReviewReceivedBefore`.
+        showScopedSnackBar(
+          context: context,
+          message: l10n.reviewOutOfWindowDone(removed),
+        );
+      },
       onCategorize: (FlaggedTransactionItem item) => correctTransactionCategory(
         context: context,
         ref: ref,

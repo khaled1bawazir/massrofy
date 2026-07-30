@@ -45,6 +45,7 @@ import 'package:massrofy/features/parsing/rule_pack_message_parser.dart';
 
 import '../../support/fake_sms_source.dart';
 import '../../support/plain_test_database.dart';
+import '../../support/watermark_seed.dart';
 
 final List<int> _testChainKey = List<int>.generate(32, (int i) => i);
 
@@ -208,13 +209,15 @@ void main() {
   late IngestWatermarkDao watermarkDao;
   late SafeLogger logger;
 
-  setUp(() {
+  setUp(() async {
     db = openPlainTestDatabase();
     auditLogDao = AuditLogDao(db, auditChainKey: _testChainKey);
     rawMessageDao = RawMessageDao(db);
     transactionDao = TransactionDao(db, auditLogDao);
     watermarkDao = IngestWatermarkDao(db);
     logger = SafeLogger(DiagnosticRingBuffer());
+    // KHA-157: the subject is the KHA-133 re-scan, which never touches the incremental watermark. Seed at the beginning so the ordinary sweep these cases run first behaves as it did.
+    await seedWatermarkAtBeginning(watermarkDao);
   });
 
   tearDown(() async => db.close());

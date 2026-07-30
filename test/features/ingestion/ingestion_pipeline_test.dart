@@ -31,6 +31,7 @@ import 'package:massrofy/features/parsing/rule_pack_message_parser.dart';
 import '../../fixtures/synthetic_sms_corpus.dart';
 import '../../support/fake_sms_source.dart';
 import '../../support/plain_test_database.dart';
+import '../../support/watermark_seed.dart';
 import '../../support/throwing_parser.dart';
 import 'support/load_bundled_pack.dart';
 
@@ -44,7 +45,7 @@ void main() {
   late RulePackMessageParser parser;
   late SafeLogger logger;
 
-  setUp(() {
+  setUp(() async {
     db = openPlainTestDatabase();
     final AuditLogDao auditLogDao = AuditLogDao(
       db,
@@ -55,6 +56,8 @@ void main() {
     watermarkDao = IngestWatermarkDao(db);
     parser = RulePackMessageParser(packs: <RulePack>[loadBundledRulePack()]);
     logger = SafeLogger(DiagnosticRingBuffer());
+    // KHA-157: the subject of this file is what the pipeline DOES with a message. Seeding the watermark at the beginning keeps the inbox fully readable; the seed itself is tested in kha157_watermark_seed_test.dart.
+    await seedWatermarkAtBeginning(watermarkDao);
   });
 
   tearDown(() async => db.close());

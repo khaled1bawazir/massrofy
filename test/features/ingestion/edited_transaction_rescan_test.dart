@@ -62,6 +62,7 @@ import 'package:massrofy/features/parsing/rule_pack_message_parser.dart';
 
 import '../../support/fake_sms_source.dart';
 import '../../support/plain_test_database.dart';
+import '../../support/watermark_seed.dart';
 import 'support/load_bundled_pack.dart';
 
 final List<int> _qaChainKey = List<int>.generate(32, (int i) => i + 101);
@@ -88,8 +89,11 @@ void main() {
     ),
   ];
 
-  setUp(() {
+  setUp(() async {
     db = openPlainTestDatabase();
+    // KHA-157: the subject is a user edit surviving a re-scan. Seed at the
+    // beginning so `runIncremental` reads the whole fixture inbox.
+    await seedWatermarkAtBeginning(IngestWatermarkDao(db));
     final AuditLogDao auditLogDao = AuditLogDao(db, auditChainKey: _qaChainKey);
     transactionDao = TransactionDao(db, auditLogDao);
     editService = TransactionEditService(

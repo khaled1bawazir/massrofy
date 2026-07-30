@@ -66,6 +66,7 @@ import 'package:massrofy/features/parsing/rule_pack_message_parser.dart';
 
 import '../../support/fake_sms_source.dart';
 import '../../support/plain_test_database.dart';
+import '../../support/watermark_seed.dart';
 import 'support/load_bundled_pack.dart';
 
 final List<int> _testChainKey = List<int>.generate(32, (int i) => i);
@@ -88,7 +89,7 @@ void main() {
   late RulePackMessageParser parser;
   late SafeLogger logger;
 
-  setUp(() {
+  setUp(() async {
     db = openPlainTestDatabase();
     final AuditLogDao auditLogDao = AuditLogDao(
       db,
@@ -99,6 +100,8 @@ void main() {
     watermarkDao = IngestWatermarkDao(db);
     parser = RulePackMessageParser(packs: <RulePack>[loadBundledRulePack()]);
     logger = SafeLogger(DiagnosticRingBuffer());
+    // KHA-157: two overlapping sweeps over one already-seeded inbox is the subject; where the sweep starts is not.
+    await seedWatermarkAtBeginning(watermarkDao);
   });
 
   tearDown(() async => db.close());

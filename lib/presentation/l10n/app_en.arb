@@ -747,6 +747,43 @@
     "description": "KHA-74 — the headline count, so an incomplete total is visibly incomplete.",
     "placeholders": {"count": {"type": "int"}}
   },
+  "reviewOutOfWindowTitle": "Messages from before {since}",
+  "@reviewOutOfWindowTitle": {
+    "description": "KHA-157 (E) banner heading on the Not-understood tab. Names the date so the offer is checkable against the list underneath it, rather than asking the user to trust an unexplained number before a deletion.",
+    "placeholders": {"since": {"type": "String", "example": "1 July 2026"}}
+  },
+  "reviewOutOfWindowBody": "{count, plural, one{1 message that arrived before {since} was read by mistake. Massrofy only tracks from that date onwards, so it is not part of your spending.} other{{count} messages that arrived before {since} were read by mistake. Massrofy only tracks from that date onwards, so they are not part of your spending.}}",
+  "@reviewOutOfWindowBody": {
+    "description": "KHA-157 (E). Explains WHY these are here before offering to remove them — 'read by mistake' is the honest cause, and AC-A3.1's window is the reason they do not belong. Housekeeping tone, not a warning: nothing is wrong with the user's data. The date appears once and is referred back to, because the full date form (which carries the year, and the year matters here) is long.",
+    "placeholders": {"count": {"type": "int", "example": "424"}, "since": {"type": "String", "example": "1 July 2026"}}
+  },
+  "reviewOutOfWindowAction": "Discard them",
+  "@reviewOutOfWindowAction": {
+    "description": "KHA-157 (E) primary action on the banner. Opens a confirmation dialog; it never deletes on the first tap."
+  },
+  "reviewOutOfWindowConfirmTitle": "{count, plural, one{Discard 1 old message?} other{Discard {count} old messages?}}",
+  "@reviewOutOfWindowConfirmTitle": {
+    "description": "KHA-157 (E) confirmation title. This action really does delete rows — unlike every other exit from this queue — so it asks first, exactly as the duplicate merge does (O-QA-8).",
+    "placeholders": {"count": {"type": "int", "example": "424"}}
+  },
+  "reviewOutOfWindowConfirmBody": "These messages arrived before {since}, so they were never part of what Massrofy tracks. Their stored text will be deleted and they will not come back. Your recorded transactions are not affected.",
+  "@reviewOutOfWindowConfirmBody": {
+    "description": "KHA-157 (E) confirmation body. Three facts in the order the user needs them: why these are being removed, that it is permanent, and — the thing they will actually be afraid of — that their transactions are untouched.",
+    "placeholders": {"since": {"type": "String", "example": "1 July 2026"}}
+  },
+  "reviewOutOfWindowConfirmCancel": "Keep them",
+  "@reviewOutOfWindowConfirmCancel": {
+    "description": "KHA-157 (E) cancel. Positively worded and placed first, mirroring the merge dialog so the two destructive confirmations read as one product."
+  },
+  "reviewOutOfWindowConfirmAccept": "Discard",
+  "@reviewOutOfWindowConfirmAccept": {
+    "description": "KHA-157 (E) destructive confirm."
+  },
+  "reviewOutOfWindowDone": "{count, plural, one{1 old message discarded} other{{count} old messages discarded}}",
+  "@reviewOutOfWindowDone": {
+    "description": "KHA-157 (E) confirmation after the fact. A bulk deletion that produces no acknowledgement leaves the user unsure whether it ran.",
+    "placeholders": {"count": {"type": "int", "example": "424"}}
+  },
   "needsReviewTabTransfers": "Transfers ({count})",
   "@needsReviewTabTransfers": {
     "description": "S-18 gains an AC-B11.2 tab: transfers awaiting the user's judgement, kept apart from unparsed messages and duplicate flags because the question is a different one.",

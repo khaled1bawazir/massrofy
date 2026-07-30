@@ -1478,6 +1478,54 @@ abstract class AppLocalizations {
   /// **'{count, plural, one{1 transaction is missing from your totals} other{{count} transactions are missing from your totals}}'**
   String reviewDataProblemCount(int count);
 
+  /// KHA-157 (E) banner heading on the Not-understood tab. Names the date so the offer is checkable against the list underneath it, rather than asking the user to trust an unexplained number before a deletion.
+  ///
+  /// In en, this message translates to:
+  /// **'Messages from before {since}'**
+  String reviewOutOfWindowTitle(String since);
+
+  /// KHA-157 (E). Explains WHY these are here before offering to remove them — 'read by mistake' is the honest cause, and AC-A3.1's window is the reason they do not belong. Housekeeping tone, not a warning: nothing is wrong with the user's data. The date appears once and is referred back to, because the full date form (which carries the year, and the year matters here) is long.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{1 message that arrived before {since} was read by mistake. Massrofy only tracks from that date onwards, so it is not part of your spending.} other{{count} messages that arrived before {since} were read by mistake. Massrofy only tracks from that date onwards, so they are not part of your spending.}}'**
+  String reviewOutOfWindowBody(int count, String since);
+
+  /// KHA-157 (E) primary action on the banner. Opens a confirmation dialog; it never deletes on the first tap.
+  ///
+  /// In en, this message translates to:
+  /// **'Discard them'**
+  String get reviewOutOfWindowAction;
+
+  /// KHA-157 (E) confirmation title. This action really does delete rows — unlike every other exit from this queue — so it asks first, exactly as the duplicate merge does (O-QA-8).
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{Discard 1 old message?} other{Discard {count} old messages?}}'**
+  String reviewOutOfWindowConfirmTitle(int count);
+
+  /// KHA-157 (E) confirmation body. Three facts in the order the user needs them: why these are being removed, that it is permanent, and — the thing they will actually be afraid of — that their transactions are untouched.
+  ///
+  /// In en, this message translates to:
+  /// **'These messages arrived before {since}, so they were never part of what Massrofy tracks. Their stored text will be deleted and they will not come back. Your recorded transactions are not affected.'**
+  String reviewOutOfWindowConfirmBody(String since);
+
+  /// KHA-157 (E) cancel. Positively worded and placed first, mirroring the merge dialog so the two destructive confirmations read as one product.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep them'**
+  String get reviewOutOfWindowConfirmCancel;
+
+  /// KHA-157 (E) destructive confirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Discard'**
+  String get reviewOutOfWindowConfirmAccept;
+
+  /// KHA-157 (E) confirmation after the fact. A bulk deletion that produces no acknowledgement leaves the user unsure whether it ran.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{1 old message discarded} other{{count} old messages discarded}}'**
+  String reviewOutOfWindowDone(int count);
+
   /// S-18 gains an AC-B11.2 tab: transfers awaiting the user's judgement, kept apart from unparsed messages and duplicate flags because the question is a different one.
   ///
   /// In en, this message translates to:

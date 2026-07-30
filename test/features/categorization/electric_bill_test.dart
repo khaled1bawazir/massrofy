@@ -34,6 +34,7 @@ import 'package:massrofy/features/parsing/rule_pack_message_parser.dart';
 
 import '../../support/fake_sms_source.dart';
 import '../../support/plain_test_database.dart';
+import '../../support/watermark_seed.dart';
 import '../ingestion/support/load_bundled_pack.dart';
 
 final List<int> _testChainKey = List<int>.generate(32, (int i) => i + 21);
@@ -70,6 +71,11 @@ void main() {
       transactionDao: transactionDao,
     );
     await service.ensureDefaultsSeeded();
+    // KHA-157: the subject of this file is the learning loop, and the inbox is
+    // only how the two bills are delivered. Seeding the incremental watermark
+    // at the beginning keeps the fixture inbox readable by `runIncremental` —
+    // which is what a watermark of 0 used to mean implicitly.
+    await seedWatermarkAtBeginning(IngestWatermarkDao(db));
   });
 
   tearDown(() async => db.close());

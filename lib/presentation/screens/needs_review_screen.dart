@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/time/clock.dart' show RiyadhCalendar;
 import '../../features/categorization/categories.dart'
     show categoryReviewReasons;
 import '../../features/categorization/learned_rules.dart';
@@ -125,6 +126,24 @@ class NeedsReviewScreen extends StatelessWidget {
   /// sheet for a flagged row. Null renders the chip read-only.
   final void Function(FlaggedTransactionItem item)? onCategorize;
 
+  /// **KHA-157 (E)** — the offer to clear out messages the app read by
+  /// mistake, from before AC-A3.1's window.
+  ///
+  /// Null (the default) renders nothing at all, and so does a summary with no
+  /// items. Both are the same thing on screen and different things in fact —
+  /// "we have not looked" versus "we looked and there are none" — which is why
+  /// this is nullable rather than defaulted to an empty summary the screen
+  /// would then be asserting.
+  ///
+  /// The banner exists for devices the pre-seed incremental sweep flooded, and
+  /// it disappears for good once they are cleared.
+  final OutOfWindowReviewSummary? outOfWindow;
+
+  /// Performs the discard. Null renders the offer **without** its button —
+  /// the same discipline the merge action follows, so an action is never
+  /// presented without something behind it.
+  final Future<void> Function()? onDiscardOutOfWindow;
+
   const NeedsReviewScreen({
     required this.unparsed,
     required this.flagged,
@@ -138,6 +157,8 @@ class NeedsReviewScreen extends StatelessWidget {
     this.onTransferVerdict,
     this.categoryAssignments = const <int, CategoryAssignment>{},
     this.onCategorize,
+    this.outOfWindow,
+    this.onDiscardOutOfWindow,
     super.key,
   });
 
@@ -172,6 +193,18 @@ class NeedsReviewScreen extends StatelessWidget {
                 children: <Widget>[
                   _TabList<ReviewQueueItem>(
                     items: unparsed,
+                    // KHA-157 (E). Scoped to *this* tab rather than placed
+                    // above all three, unlike the data-problem banner: the
+                    // offer concerns unparsed messages only, and a header over
+                    // the tab bar would imply it acted on flagged transactions
+                    // and transfers too. It cannot; see
+                    // `out_of_window_discard.dart`.
+                    header: outOfWindow != null && outOfWindow!.hasItems
+                        ? _OutOfWindowDiscardCard(
+                            summary: outOfWindow!,
+                            onDiscard: onDiscardOutOfWindow,
+                          )
+                        : null,
                     builder: (ReviewQueueItem item) => _UnparsedCard(
                       item: item,
                       onFillInDetails: onFillInDetails,
@@ -211,18 +244,178 @@ class _TabList<T> extends StatelessWidget {
   final List<T> items;
   final Widget Function(T item) builder;
 
-  const _TabList({required this.items, required this.builder});
+  /// An optional card pinned above the list — KHA-157 (E)'s discard offer.
+  ///
+  /// Rendered as **index 0 of the same `ListView`** rather than in a `Column`
+  /// above it, so it scrolls away with the list instead of eating vertical
+  /// space on a phone showing a long queue. `itemCount` and the index shift
+  /// below are the whole mechanism.
+  final Widget? header;
+
+  const _TabList({required this.items, required this.builder, this.header});
 
   @override
   Widget build(BuildContext context) {
     if (items.isEmpty) {
+      // Deliberately still the reassuring empty state, and the header is
+      // dropped with it. In steady state the two cannot disagree — an
+      // out-of-window item is itself a row in `items`, so a header implies a
+      // non-empty list. The case this branch really covers is the *transient*
+      // right after a discard: the queue's Drift stream emits `[]` a frame
+      // before the count is recomputed, and for that frame a stale banner
+      // would be offering to delete rows that are already gone. Preferring the
+      // empty state resolves it in the honest direction.
       return const _EmptyState();
     }
+
+    final int leading = header == null ? 0 : 1;
     return ListView.builder(
       padding: const EdgeInsetsDirectional.all(16),
-      itemCount: items.length,
-      itemBuilder: (BuildContext context, int index) => builder(items[index]),
+      itemCount: items.length + leading,
+      itemBuilder: (BuildContext context, int index) {
+        if (header != null && index == 0) {
+          return header!;
+        }
+        return builder(items[index - leading]);
+      },
     );
+  }
+}
+
+/// **KHA-157 (E) — "N items received before &lt;date&gt; — discard them".**
+///
+/// ## Why this is an offer and not a warning
+///
+/// Nothing is wrong with the user's data. The app read further back than it
+/// should have, and these rows are the residue; the tone is housekeeping, so
+/// this uses the info palette rather than the error palette the neighbouring
+/// data-problem banner uses. That banner says *"a number we showed you is
+/// incomplete"*, which the user can do nothing about. This one says *"we can
+/// tidy this up if you want"*, which they can.
+///
+/// ## Why it asks before deleting
+///
+/// Unlike every other exit from this queue, this one really does delete rows —
+/// see `RawMessageDao.deletePendingReviewReceivedBefore` for why that is safe
+/// here and nowhere else. It is irreversible and it acts on hundreds of rows at
+/// once, so it gets the same explicit confirmation the merge action does
+/// (O-QA-8), with the same deliberate details: the cancel is positively worded
+/// ("Keep them") and comes first, and a dialog dismissed by a barrier tap calls
+/// nothing at all.
+class _OutOfWindowDiscardCard extends StatelessWidget {
+  final OutOfWindowReviewSummary summary;
+  final Future<void> Function()? onDiscard;
+
+  const _OutOfWindowDiscardCard({required this.summary, this.onDiscard});
+
+  @override
+  Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final TextTheme text = Theme.of(context).textTheme;
+    final String since = _windowStartLabel(context);
+
+    return Container(
+      key: const Key('needsReview.outOfWindow'),
+      margin: const EdgeInsetsDirectional.only(bottom: 12),
+      padding: const EdgeInsetsDirectional.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.infoTint,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.info),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              // NFR-U4: icon AND words, never a tone carried by colour alone.
+              const Icon(
+                Icons.history_toggle_off,
+                size: 18,
+                color: AppColors.info,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  l10n.reviewOutOfWindowTitle(since),
+                  style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            l10n.reviewOutOfWindowBody(summary.itemCount, since),
+            style: text.bodySmall?.copyWith(color: AppColors.ink700),
+          ),
+          if (onDiscard != null) ...<Widget>[
+            const SizedBox(height: 10),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: OutlinedButton.icon(
+                key: const Key('needsReview.outOfWindowDiscard'),
+                onPressed: () => _confirmDiscard(context),
+                icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+                label: Text(l10n.reviewOutOfWindowAction),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// The window start, in Riyadh wall-clock time and the device's locale.
+  ///
+  /// ## Two deliberate choices, both about being checkable
+  ///
+  /// **The Riyadh shift is load-bearing, not cosmetic.** A Riyadh calendar
+  /// month begins at 21:00 UTC on the last day of the *previous* month, so
+  /// printing the raw UTC instant would label a window starting on 1 July as
+  /// "30 June" — the wrong day, on the one date the user is asked to check
+  /// before agreeing to a deletion. `recheck_banks_screen.dart` documents the
+  /// same trap for the same value.
+  ///
+  /// **`formatFullDate`, not `formatMediumDate`** — which is what the re-check
+  /// screen uses, and the difference is intentional. The medium format renders
+  /// as *"Wed, Jul 1"*, with **no year**. That is fine there, where the window
+  /// is always the current month; it is not fine here, where the whole point is
+  /// that the rows being deleted are from *previous years* — the flood reached
+  /// back to 2025. "Before Jul 1" would be ambiguous about the one dimension
+  /// that decides what gets deleted.
+  String _windowStartLabel(BuildContext context) => MaterialLocalizations.of(
+    context,
+  ).formatFullDate(RiyadhCalendar.toRiyadhWallClock(summary.windowStartUtc));
+
+  Future<void> _confirmDiscard(BuildContext context) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final String since = _windowStartLabel(context);
+
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: Text(l10n.reviewOutOfWindowConfirmTitle(summary.itemCount)),
+        content: Text(l10n.reviewOutOfWindowConfirmBody(since)),
+        actions: <Widget>[
+          TextButton(
+            key: const Key('needsReview.outOfWindowCancel'),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(l10n.reviewOutOfWindowConfirmCancel),
+          ),
+          FilledButton(
+            key: const Key('needsReview.outOfWindowConfirm'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(l10n.reviewOutOfWindowConfirmAccept),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      // Non-null when the button was built, and a `StatelessWidget`'s fields
+      // cannot change underneath an await — a rebuild produces a new instance
+      // rather than mutating this one.
+      await onDiscard?.call();
+    }
   }
 }
 

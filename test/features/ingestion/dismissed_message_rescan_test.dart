@@ -49,6 +49,7 @@ import 'package:massrofy/features/parsing/rule_pack_message_parser.dart';
 
 import '../../support/fake_sms_source.dart';
 import '../../support/plain_test_database.dart';
+import '../../support/watermark_seed.dart';
 import 'support/load_bundled_pack.dart';
 
 final List<int> _testChainKey = List<int>.generate(32, (int i) => i + 71);
@@ -75,8 +76,12 @@ void main() {
     ),
   ];
 
-  setUp(() {
+  setUp(() async {
     db = openPlainTestDatabase();
+    // KHA-157: the subject here is a dismissal surviving a re-scan, not where
+    // the incremental sweep starts. Seed at the beginning so `runIncremental`
+    // reads the whole fixture inbox.
+    await seedWatermarkAtBeginning(IngestWatermarkDao(db));
     final AuditLogDao auditLogDao = AuditLogDao(
       db,
       auditChainKey: _testChainKey,

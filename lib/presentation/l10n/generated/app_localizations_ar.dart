@@ -833,6 +833,72 @@ class AppLocalizationsAr extends AppLocalizations {
   }
 
   @override
+  String reviewOutOfWindowTitle(String since) {
+    return 'رسائل أقدم من $since';
+  }
+
+  @override
+  String reviewOutOfWindowBody(int count, String since) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          'تمت قراءة $count رسالة وصلت قبل $since عن طريق الخطأ. مصروفي يتتبّع من ذلك التاريخ فما بعد فقط، لذا فهي ليست جزءاً من مصروفاتك.',
+      many:
+          'تمت قراءة $count رسالة وصلت قبل $since عن طريق الخطأ. مصروفي يتتبّع من ذلك التاريخ فما بعد فقط، لذا فهي ليست جزءاً من مصروفاتك.',
+      few:
+          'تمت قراءة $count رسائل وصلت قبل $since عن طريق الخطأ. مصروفي يتتبّع من ذلك التاريخ فما بعد فقط، لذا فهي ليست جزءاً من مصروفاتك.',
+      two:
+          'تمت قراءة رسالتين وصلتا قبل $since عن طريق الخطأ. مصروفي يتتبّع من ذلك التاريخ فما بعد فقط، لذا فهما ليستا جزءاً من مصروفاتك.',
+      one:
+          'تمت قراءة رسالة واحدة وصلت قبل $since عن طريق الخطأ. مصروفي يتتبّع من ذلك التاريخ فما بعد فقط، لذا فهي ليست جزءاً من مصروفاتك.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get reviewOutOfWindowAction => 'تخلّص منها';
+
+  @override
+  String reviewOutOfWindowConfirmTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'هل تريد حذف $count رسالة قديمة؟',
+      many: 'هل تريد حذف $count رسالة قديمة؟',
+      few: 'هل تريد حذف $count رسائل قديمة؟',
+      two: 'هل تريد حذف رسالتين قديمتين؟',
+      one: 'هل تريد حذف رسالة قديمة واحدة؟',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String reviewOutOfWindowConfirmBody(String since) {
+    return 'وصلت هذه الرسائل قبل $since، لذا لم تكن يوماً ضمن ما يتتبّعه مصروفي. سيُحذف نصّها المحفوظ ولن تعود. معاملاتك المسجّلة لن تتأثر.';
+  }
+
+  @override
+  String get reviewOutOfWindowConfirmCancel => 'احتفظ بها';
+
+  @override
+  String get reviewOutOfWindowConfirmAccept => 'احذف';
+
+  @override
+  String reviewOutOfWindowDone(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'تم حذف $count رسالة قديمة',
+      many: 'تم حذف $count رسالة قديمة',
+      few: 'تم حذف $count رسائل قديمة',
+      two: 'تم حذف رسالتين قديمتين',
+      one: 'تم حذف رسالة قديمة واحدة',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String needsReviewTabTransfers(int count) {
     return 'تحويلات ($count)';
   }
