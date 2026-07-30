@@ -40,6 +40,7 @@ import '../l10n/generated/app_localizations.dart';
 import '../theme/app_colors.dart';
 import 'categorization_routes.dart';
 import 'home_screen.dart';
+import 'ingestion_routes.dart';
 import 'ledger_routes.dart';
 
 class AppShell extends StatefulWidget {
@@ -192,6 +193,21 @@ class MoreMenuScreen extends ConsumerWidget {
 
           const SizedBox(height: 16),
           _GroupHeader(label: l10n.moreSectionApp),
+          // **KHA-133.** ADR-006's KHA-133 subsection places this in
+          // "Settings → Diagnostics"; the More menu's App section *is* this
+          // app's settings surface, so the action lives here rather than
+          // behind a Diagnostics screen that would exist only to hold one row.
+          //
+          // Discovery is a known weak point of this whole decision — ADR-006
+          // says so plainly ("the re-check button is found only by a user who
+          // goes looking"). The standing fix is US-A6's parser-health panel,
+          // not a fourth nav tab.
+          _MenuRow(
+            rowKey: const Key('more.recheckBanks'),
+            icon: Icons.refresh,
+            label: l10n.recheckBanksTitle,
+            onTap: () => openRecheckBanks(context),
+          ),
           _MenuRow(
             rowKey: const Key('more.lockNow'),
             icon: Icons.lock_outline,

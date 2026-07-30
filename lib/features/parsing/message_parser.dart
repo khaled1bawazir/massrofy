@@ -62,4 +62,31 @@ abstract interface class MessageParser {
   /// sanitises, and only then parses. Returns an empty list for an unknown
   /// sender (whose body is about to be discarded entirely anyway).
   List<RegExp> redactionPatternsForSender(String sender);
+
+  /// The `bankId` of the bank whose `senderPatterns` match [sender], or `null`
+  /// if no active pack recognises it.
+  ///
+  /// ## Why the port grew a method for this
+  ///
+  /// Bank resolution already happens inside [parse] — but only as a step on
+  /// the way to a [ParseOutcome], which requires a *body*. KHA-133's re-scan
+  /// (and US-A6's Banks & Senders screen, AC-A6.1) both need the answer for a
+  /// bare sender string, **without** reading the message at all.
+  ///
+  /// That is not a convenience; it is the privacy property, and it is why this
+  /// is a separate method rather than "just call `parse` and look at the
+  /// outcome". `docs/architecture.md` ADR-006's KHA-133 subsection, Q2:
+  ///
+  /// > *"A bank-scoped re-scan parses only messages whose sender resolves to
+  /// > the target bank, and for every other message in the window it looks at
+  /// > the **sender string and stops there**."*
+  ///
+  /// A caller that had to `parse` in order to find out would have sanitised,
+  /// normalised and regex-evaluated the body of every personal message in the
+  /// window before discovering it should not have. This method makes "we never
+  /// looked at that body" a fact about the call graph.
+  ///
+  /// Returns the id, not a display name: the id is stable, the display name is
+  /// localised, and callers that need a label look it up from the pack.
+  String? bankIdForSender(String sender);
 }
