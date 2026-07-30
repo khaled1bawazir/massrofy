@@ -201,3 +201,18 @@ Format per entry:
   declares TIER: personal; scale docs (~300/~150 line caps), QA depth (~5-10
   probes), review rounds (1), and Linear/build-log ceremony DOWN to it. Use
   /quick for small changes. Over-engineering costs the human time and tokens.
+
+- **[2026-07-30] [process] The GitHub check-runs/jobs status field can be stale for ~40-70
+  minutes on this repo — repeatedly, not a one-off.** At least three separate agents today
+  computed correct baseline-vs-elapsed arithmetic on a job that had actually already finished,
+  because the `status`/`started_at` fields they read were stale, not because their math was
+  wrong. One case: a job the standing rule's own baseline-check caught as a false alarm was
+  re-flagged as "stalled ~71 minutes" an hour later by a *different* agent, on the *same PR*,
+  using the exact same reasoning that had just been corrected. **-> The aggregate `ci` fan-in
+  check is the only reliable real-time signal on this repo** — it only appears/goes green once
+  every individual job has genuinely resolved, so it cannot go stale the way one job's `status`
+  field can. Before writing "job X is hung" anywhere, check whether the `ci` check exists and is
+  green first; if it's already green, no individual job's stale `in_progress` reading is worth
+  reporting as a problem. Re-fetch rather than trust a read from more than a minute or two ago.
+  Extends [[massrofy_dont_call_ci_hung_without_baseline_check]] (memory), which now also has
+  this update.
