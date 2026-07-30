@@ -80,14 +80,14 @@ Every pattern in this document is established here, not inherited.
 > **Nothing here blocks the in-flight six-bank rule dispatch, and the explicit recommendation is
 > not to disturb it.**
 
-> **v1.9 ships `DRAFT` inside ADR-006 and fixes a live defect on the human's own device**
+> **v1.9 ships, approved, inside ADR-006 and fixes a live defect on the human's own device**
 > (**KHA-157**): the incremental sweep's watermark is **never seeded**, so on a fresh install the
 > first sweep reads `_id > 0` — *the entire SMS inbox, unbounded by date* — and floods the review
 > queue with years of pre-history. AC-A3.1's "current calendar month only" was only ever enforced
 > on the historical-import path. The fix is a **one-time high-water-mark seed** taken before the
-> first incremental read. **No schema change.** One thing needs the human: whether to ship the
-> bounded, user-triggered cleanup of the already-flooded queue described in item (E), or to leave
-> those rows and dismiss them by hand.
+> first incremental read. **No schema change.** Item (E)'s open question is resolved: ship the
+> bounded, user-triggered cleanup of the already-flooded queue rather than leaving those rows to be
+> dismissed by hand — done, and already shipped.
 
 ---
 
@@ -469,7 +469,7 @@ which makes every rule-pack fix forward-only. Read that subsection before touchi
 `_processOne`'s `NotFinancialSender` branch, `HistoricalImporter.runOrResume`, `_withDedupGuard`,
 or any `redact[]` array in a rule pack.
 **Extended again by the KHA-157 decision (v1.9, 2026-07-30)** — the second dated subsection at the
-end of this ADR, **`DRAFT`**. Step 3 of Layer 1 below says the pipeline reads rows with
+end of this ADR, **APPROVED**. Step 3 of Layer 1 below says the pipeline reads rows with
 `date > lastProcessedSmsDate OR _id > lastProcessedSmsProviderId`. **The shipped code reads only
 the `_id` half, and that watermark is never seeded**, so on a fresh install the "incremental" read
 is the whole inbox. Read that subsection before touching `runIncremental`, `SmsSource`, or
@@ -3135,7 +3135,7 @@ AC-A3.1)
 > **No column is added for re-scan.** A re-scan is transient: it runs with
 > `advanceWatermark: false` and writes none of these fields. Recording *which rule pack the
 > watermark was last swept under* was considered and rejected — see that subsection, Q3 option (2).
-> **Correction, v1.9 (`DRAFT`):** `lastProcessedSmsDate` is **nullable, and its nullness is
+> **Correction, v1.9 (approved):** `lastProcessedSmsDate` is **nullable, and its nullness is
 > load-bearing** — a null date means the incremental watermark has never been seeded, which is the
 > state that made the first sweep read the entire inbox (ADR-006's KHA-157 subsection). It is
 > written only by `advanceTo` and by the one-time seed, always together with the provider id.
