@@ -570,32 +570,49 @@ class SpentVsKeptScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
-    final PeriodReport? current = report;
 
     return Scaffold(
       backgroundColor: AppColors.surface,
       appBar: AppBar(title: Text(l10n.reportsSpentVsKept)),
-      body: isLoading
-          ? const Center(
-              key: Key('spentVsKept.loading'),
-              child: CircularProgressIndicator(),
-            )
-          : hasError || current == null
-          ? CategorySectionError(message: l10n.reportsUnavailable)
-          : ListView(
-              padding: const EdgeInsetsDirectional.fromSTEB(16, 8, 16, 24),
-              children: <Widget>[
-                PeriodSelector(
-                  period: period,
-                  isCurrentMonth: isCurrentMonth,
-                  onPreviousMonth: onPreviousMonth,
-                  onNextMonth: onNextMonth,
-                  onCurrentMonth: onCurrentMonth,
-                ),
-                const SizedBox(height: 8),
-                SpentVsKeptCard(report: current),
-              ],
-            ),
+      body: _body(context, l10n),
+    );
+  }
+
+  /// A `_body` method rather than a nested ternary in `build`, matching the other
+  /// three screens in this file — three-armed conditionals read badly inline, and
+  /// design.md §3.4 requires each of these arms to be visibly distinct rather than
+  /// something a reader has to untangle.
+  Widget _body(BuildContext context, AppLocalizations l10n) {
+    if (isLoading) {
+      return const Center(
+        key: Key('spentVsKept.loading'),
+        child: CircularProgressIndicator(),
+      );
+    }
+    final PeriodReport? current = report;
+    if (hasError || current == null) {
+      // A null report with no error is the locked case (ADR-005 — there is no
+      // database, so there are no figures). It renders as the error state rather
+      // than as a zeroed card for the reason stated all over this codebase: a
+      // reassuring figure the user believes is worse than a message they can act
+      // on. It should be unreachable — `app.dart` renders the lock gate instead of
+      // any screen — but it is handled rather than assumed.
+      return CategorySectionError(message: l10n.reportsUnavailable);
+    }
+
+    return ListView(
+      padding: const EdgeInsetsDirectional.fromSTEB(16, 8, 16, 24),
+      children: <Widget>[
+        PeriodSelector(
+          period: period,
+          isCurrentMonth: isCurrentMonth,
+          onPreviousMonth: onPreviousMonth,
+          onNextMonth: onNextMonth,
+          onCurrentMonth: onCurrentMonth,
+        ),
+        const SizedBox(height: 8),
+        SpentVsKeptCard(report: current),
+      ],
     );
   }
 }
