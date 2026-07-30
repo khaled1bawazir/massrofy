@@ -1,0 +1,16 @@
+Resolving dependencies...
+Downloading packages...
+Got dependencies!
+24 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading C:/Users/aasb2/OneDrive/Desktop/Massrofy/.claude/worktrees/agent-a1b48b5a522d1af85/test/qa/kha133_rescan_probes_test.dart
+00:00 +0: P1 item (F): the content_hmac really does drift with redact[] a redact[] change moves the hmac, so findByContentHmac MISSES and only findBySmsProviderId still identifies the stored row
+00:00 +1: P2 concurrency: an ordinary sweep overlapping a re-scan a live incremental sweep running CONCURRENTLY with a re-scan over the same inbox still writes each transaction exactly once
+00:00 +2: P2 concurrency: an ordinary sweep overlapping a re-scan the concurrent sweep still owns the watermark: it advances, and the re-scan does not hold it back
+00:00 +3: P3 item (B): a re-scan during an unfinished historical import a paused, half-finished import keeps its exact cursor and state across a re-scan, and still resumes correctly afterwards
+00:00 +4: P4 item (C): the window is the WIDER of the two candidates an importFromDate earlier than the month start widens the window, and a message in that extra ground is re-examined
+00:00 +5: P4 item (C): the window is the WIDER of the two candidates a message OLDER than the window is never touched
+00:00 +6: P5 the sms_provider_id pre-check under a live run the same inbox row seen twice with DIFFERENT text is suppressed, not counted as a failure
+00:00 +7: P6 oracle: the reported count equals the real ledger delta newTransactions equals the independently measured row delta, and the recovered amounts sum to the corpus figures
+00:00 +8: P7 item (B): no watermark write is even reachable rescan_coordinator.dart names no watermark mutation method at all
+00:00 +9: All tests passed!

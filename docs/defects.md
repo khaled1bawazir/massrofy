@@ -1677,6 +1677,87 @@ naming that dependency would close it.
 
 ---
 
+## Observations from the pass-11 probe suite (PR #46 / KHA-133 — recorded for audit, not defects)
+
+Neither blocks the merge. Neither touches dedup, cursor movement or money
+correctness — the three properties this PR had to get right, all of which held
+under attack (see `docs/test-plan.md` §7i).
+
+### O-QA-42 — `RawMessageDao.insert`'s doc comment states the exact opposite of the premise item (F) was built on, in the same file, ~150 lines above the fix
+
+**Severity: Low** (documentation, but load-bearing documentation).
+
+**Observed.** `lib/data/dao/raw_message_dao.dart`, the doc on `insert`:
+
+> `[contentHmac]` is the D1-exact dedup key (ADR-017) — computed by the caller
+> … over the *normalised* body, sender, and timestamp, **never over the redacted
+> display text, so dedup semantics don't shift if a redaction rule changes
+> later.**
+
+**Expected.** The sentence to be true, or corrected.
+
+**Actual.** It is false, and QA proved it by execution rather than by reading:
+probe **P1** computes the same message's hmac under the shipped pack and under a
+pack whose `bank-aljazira` rules carry `redact: ["EXTRA MART|TAMIMI MARKETS"]`
+and asserts the two differ. They do. The chain is
+`_processOne` → `SmsSanitizer.sanitize(record.body, extraRedactPatterns: parser.redactionPatternsForSender(...))`
+→ `SmsTextNormalizer.normalize(sanitized.value)` → `ContentHmac.compute(normalizedBody: normalized, …)`.
+The normalised text *is* the redacted text, so the hmac shifts exactly when a
+`redact[]` changes — which is precisely ADR-006 Q1's finding and the entire
+reason `findBySmsProviderId` was added.
+
+**Why it is worth recording rather than shrugging at.** This false sentence is
+the most likely explanation for why the hole stayed invisible until the architect
+went looking, and it now sits ~150 lines above `findBySmsProviderId`, whose own
+doc says the opposite correctly and at length. A future maintainer who reads
+`insert`'s doc first has been told, in the codebase's own voice, that the new
+pre-check is guarding against something that cannot happen — which is an argument
+for deleting it.
+
+**Not introduced by this PR** (it predates it), but this PR is the one that made
+it contradictory and is editing that file already. Suggested: delete the clause
+from `and never over the redacted display text` onward, or replace it with a
+pointer to `findBySmsProviderId`. Owner: mobile-engineer. No test change needed —
+P1 already pins the real behaviour.
+
+### O-QA-43 — a failure in the audit append discards a result for writes that already committed, which is the one direction item (E) says must not happen
+
+**Severity: Low** (narrow trigger, no data loss, no double-count).
+
+**Steps to reproduce (by inspection; not reproduced live because the trigger
+needs an induced DAO failure).** `RescanCoordinator._run`:
+
+1. `_walk(...)` runs and commits each recovered message in its own DB
+   transaction. Say 12 transactions are now in the ledger.
+2. `await _recordUserAction(...)` is called **after** the walk.
+3. If that append throws (app locks mid-run and the session closes, disk full,
+   chain contention), the exception propagates out of `recheckAllBanks()`.
+4. `RescanController.run`'s `catch` sets `RescanFailed(unexpectedError)`.
+
+**Expected.** The user is told what the re-scan did — item (E): *"a re-scan makes
+weeks-old transactions appear at once, and retroactive numbers with no stated
+cause are worse than no numbers."*
+
+**Actual.** The user is shown "something went wrong", while 12 weeks-old
+transactions have silently appeared in their ledger and no audit entry explains
+them. That is the exact failure mode item (E) exists to prevent, reached through
+the error path rather than the happy one.
+
+**Mitigating, and why this is Low not Medium.** Nothing is lost or double-counted
+— the writes are correct and a subsequent re-scan is still idempotent. The
+ordering itself is deliberate and defensible: the file's comment explains that
+writing the audit entry *after* the walk keeps the recorded counts true, and that
+"a crash mid-walk therefore records nothing, which is the right direction to be
+wrong in." QA agrees with that reasoning for a crash *during* the walk; the gap
+is only the narrow window where the walk fully succeeded and just the audit
+append failed. A cheap improvement would be to catch around
+`_recordUserAction` and still return the `RescanResult` (with the audit failure
+surfaced separately), so the user is never left with unexplained retroactive
+numbers. Owner: mobile-engineer. Suggested for KHA-129/US-A6, which revisits this
+screen anyway.
+
+---
+
 ## Observations from the pass-10 probe suite (PR #43 / KHA-128 — recorded for audit, not defects)
 
 Neither is a merge blocker and neither was filed as a new Linear issue: both are

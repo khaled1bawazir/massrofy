@@ -1516,6 +1516,92 @@ disclosure is accurate and complete.
 
 ---
 
+## 7i. Eleventh pass — KHA-133, PR #46 (`feature/kha-133-rescan`, head `17e3444`)
+
+**Scope.** The "check my banks again" recovery action. Normative spec is
+`docs/architecture.md` ADR-006's **KHA-133 decision** subsection (APPROVED
+2026-07-30), items **(A)–(G)**. This is money-adjacent by construction — it writes
+transaction rows over ground the app has already swept — so it got depth beyond
+the `TIER: personal` norm, concentrated on dedup and cursor safety.
+
+**Gates re-run by QA on the current head, not cited from the PR body.** The PR
+body's figures were measured on `8f7e47f`; head is `17e3444`. Re-measured:
+
+| Gate | Result on `17e3444` (+ QA probe file) |
+|---|---|
+| `flutter analyze` | **No issues found** |
+| `dart format --set-exit-if-changed .` | 249 files, 1 changed — **the QA probe file only**; production tree clean |
+| `flutter test` (plain) | 1641 passed, 3 skipped, **1 failed** — `privacy_overlay_release_mode_test.dart` |
+| `flutter test --exclude-tags=release_mode_guard` (CI's actual invocation, ci.yml L132) | **1641 passed, 3 skipped, 0 failed** |
+| GitHub `ci` aggregate check | **success** — all 6 checks green (run 30543017203) |
+
+The single plain-run failure is the known release-mode guard: ci.yml excludes it
+by tag from the main step and runs it separately with
+`--dart-define=dart.vm.product=true` (L134–150). QA read the workflow rather than
+accepting the claim; the engineer's description of it is accurate.
+
+**Traceability — ADR-006 normative items to tests.**
+
+| Item | Requirement | Test(s) | Status |
+|---|---|---|---|
+| **(A)** | One mechanism, one code path — `pipeline.processAll(chunk, advanceWatermark: false)`, no second pipeline, no `importState` reset | `rescan_coordinator.dart` builds on the injected `IngestionPipeline`; suite's "completed import stays a no-op"; QA **P3** | **PASS** |
+| **(B)** | Neither cursor moves | Suite ×5 (watermark unchanged, unchanged even when writing, next sweep still picks up, import fields untouched, completed import no-op); QA **P3** (paused mid-flight import), QA **P7** (source guard: no write method is even *named*) | **PASS** |
+| **(C)** | Window = `min(importFromDate, startOfCurrentMonthUtc)` | Suite (June-25 import date pins `windowFromUtc`, plus `isUtc` flag); QA **P4** (the extra ground is actually *walked*; older-than-window still excluded in a mixed inbox) | **PASS** |
+| **(D)** | Scope per bank, "all banks" as a loop not a blanket | Suite (`recheckBank` narrows, unknown bank scans nothing, non-bank body never parsed via recording parser) | **PASS** |
+| **(E)** | Result reported to user **and** written to audit as a user action | Suite (audit entry `actor: 'user'`, chain stays verifiable, `foundNothingNew` semantics); 18 widget tests over all 7 presentations | **PASS** (one Low observation, O-QA-13) |
+| **(F)** | `_withDedupGuard` pre-checks `sms_provider_id` as well as `content_hmac` | Suite (redact-drift case asserts `failedWithError == 0`); QA **P1** (counterfactual — proves the hmac genuinely drifts, the content-hmac lookup misses, the provider-id lookup hits) and QA **P5** (the new key exercised through a live run) | **PASS** |
+| **(G1)** | No `redact[]` added or changed | `git diff` on `assets/rule_packs/sa-core.json` — **file untouched by this PR** | **PASS** |
+| **(G2)** | No `importState` reset, no "re-import" button | QA **P7** grep guard + suite's paused/completed import tests | **PASS** |
+
+**QA-authored probe suite** — `test/qa/kha133_rescan_probes_test.dart`, **9 probes,
+all passing**. Written to attack what the engineer's own 23 tests do not reach:
+
+| Probe | Attack | Result |
+|---|---|---|
+| **P1** | Is item (F)'s premise even true? Compute the hmac under the shipped pack and under a `redact[]`-bearing pack and compare; then show `findByContentHmac(drifted)` misses while `findBySmsProviderId('1')` hits | **Premise confirmed, fix confirmed load-bearing.** Without this, the engineer's item (F) test would pass equally well if the hole never existed |
+| **P2a** | **The race the engineer's suite does not cover:** a live `runIncremental()` sweep and a `recheckAllBanks()` re-scan in flight *simultaneously* over the same inbox (both futures started, then `Future.wait`). The suite only runs them sequentially | **Repelled.** Exactly 2 transactions, `failedWithError == 0` on both, both fully accounted for, and a third run finds nothing left |
+| **P2b** | Same overlap, watermark direction: the two calls *disagree* about `advanceWatermark` while interleaved | **Repelled.** Sweep still reaches providerId 4; re-scan does not hold it back |
+| **P3** | Re-scan during a **paused, half-finished** import carrying a live cursor — the state with something to lose. Suite only covers `completed` | **Repelled.** State, cursor, processed count, total and fromDate all byte-identical |
+| **P4a** | Does the `min()`-widened window actually get *walked*, or just reported? A June message in a July inbox with `importFromDate = 10 June` | **Repelled.** Window is the June date, message is in-window and examined |
+| **P4b** | "Check again" must not become "full history" — a May message in a mixed inbox | **Repelled.** Out of window, untouched |
+| **P5** | The new pre-check via a different route than redact drift: the same `sms_provider_id` seen twice with **different text**, so hmacs differ and only the new key can catch it. `UNIQUE` on `sms_provider_id` verified present, so this genuinely distinguishes | **Repelled.** Suppressed, `failedWithError == 0`, one row. Before this PR it threw and counted a failure |
+| **P6** | **Business oracle** — the headline count is derived from the pipeline's own counters, so it is exactly the number that stays plausible if the counters are wrong. Recomputed the delta from the database instead | **Correct.** `newTransactions` == real row delta; amounts are `152.75` + `64` SAR = 216.75, matching the corpus fixtures by hand |
+| **P7** | Item (B) as a *reachability* claim rather than a behavioural one: no watermark mutation method (`advanceTo`, `beginImport`, `recordImportProgress`, `completeImport`, `pauseImport`) is named anywhere in the coordinator, comments stripped | **Confirmed.** Exactly one `watermarkDao.*` call and it is `current()` |
+
+**Claims independently re-verified rather than accepted.**
+
+- **Dedup key encoding.** The new pre-check queries
+  `record.providerId.toString()`; every insert path writes
+  `smsProviderId: record.providerId.toString()`. Same encoding on both sides —
+  checked because a mismatch here would make the fix silently inert.
+- **`UNIQUE` on `sms_provider_id`** genuinely exists
+  (`raw_message_table.dart:19`, `constraintIsAlways('UNIQUE')` in the generated
+  schema), which is what makes P5 a real differentiator rather than a test that
+  passes either way.
+- **The two self-review fixes are real.** The `.toUtc()` on `importFromDate` is
+  present and pinned by the suite's `isUtc` assertion; ICU plurals exist for all
+  four count strings, and the Arabic forms carry `=1/=2/few/many/other`.
+- **Reachability (the KHA-113 lesson).** `openRecheckBanks` is called from
+  `app_shell.dart`'s More → App section under `Key('more.recheckBanks')`, and the
+  "every More-menu destination is reachable" enumeration was extended to include
+  it. Not a dead end. Discoverability itself remains ADR-006's stated weak point
+  and is US-A6/KHA-129's job, correctly out of scope here.
+- **The core KHA-128 scenario is genuinely tested.** The four-act end-to-end test
+  is real and its control assertion — `afterFix.examined == 0`, "widening the
+  pack alone recovers nothing" — holds. QA re-ran it in isolation and independently
+  reproduced the recovered amounts.
+
+**Findings — none merge-blocking.** Two Low observations, `O-QA-42` and
+`O-QA-43` in `docs/defects.md`. Neither affects dedup, cursor or money
+correctness.
+
+**Overall (pass 11, PR #46): no defect found that blocks merge.** The property
+this PR most needed to get right — that a re-scan cannot double-count — held
+against every attack QA could construct, including a concurrency surface the
+engineer's suite does not cover.
+
+---
+
 ## 8. Untestable-as-written criteria
 
 None found in Epic 0, Epic A, or the Epic B slice built by P3a. Every AC in the
