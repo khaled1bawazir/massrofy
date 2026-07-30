@@ -930,7 +930,7 @@ task or violate the rule: the rule author may *read* real samples the user delib
 must then commit a **synthetic** fixture that mimics the shape. Real message text never enters the
 repository.
 
-#### Canonical SMS field taxonomy — the fixed slot vocabulary rules are written against. Proposed 2026-07-30.
+#### Canonical SMS field taxonomy — the fixed slot vocabulary rules are written against. Proposed 2026-07-30. Re-derived against SAMA Circular 42023876, 2026-07-30.
 
 **STATUS: DRAFT — awaiting human approval.** Everything above in ADR-007 stays `APPROVED` and is
 unchanged by this subsection. It adds **no schema change, no rule change, and nothing that blocks the
@@ -943,12 +943,158 @@ bank — each written as its own regex from a blank page. That does not scale, a
 format-teaching capability being scoped in parallel: you cannot ask a user to *label* parts of a
 message unless there is a small, fixed, well-understood set of labels to label with.
 
-##### The claim, and the evidence for it
+##### The primary authority: the message shape is regulated, not emergent
 
-A bank transaction SMS is not free-form prose. It is a **lossy, human-readable rendering of a
-bank-to-customer debit/credit notification** — the thing ISO 20022 models formally as `camt.054`.
-That is why the slot set is not arbitrary, and it is why independent parsers built for completely
-different markets converge on nearly the same list:
+The slot set is not our invention and not a generalisation from samples. In Saudi Arabia **the
+content of a bank transaction notification is mandated by the regulator**, which makes this the one
+market where a parser can be written against a published specification rather than against
+guesswork.
+
+> **SAMA (Saudi Central Bank) — *Standardization of Notification Elements Sent to Financial
+> Institutions Customers*, Circular No. 42023876, dated 14/04/1442H (≈ 29/11/2020), in force.**
+> Binds **all** financial institutions in the Kingdom. Its stated purpose is customer awareness via
+> notification messages covering transactions on **accounts, card memberships, and electronic
+> wallets**. It sets a **minimum** element set per transaction category in **Table No. (1)**, and a
+> **standardised bilingual (Arabic–English) transaction-description vocabulary** in **Table No. (2)**.
+> Extended in 2021 by *The Key Elements of SMS Notifications for Newly Updated Mada Transactions*
+> (compliance due end of Q1 2022). Adjacent instruments that also constrain notification content:
+> *Instant SMS Notification Service* (SMS for **every** debit and credit on personal accounts and
+> credit-card accounts) and the *Rules of Issuance and Operation of Credit Cards*.
+
+This reframes the whole exercise. A Saudi bank SMS is not free-form prose that we hope has structure;
+it is a rendering of a **regulator-specified minimum field set**. Consequences that matter
+architecturally:
+
+- **The slot set has a floor we can rely on.** If a rule cannot find `amount`, `occurredAt` or an
+  instrument reference in a transaction-shaped message from a licensed institution, the likeliest
+  explanation is a defect in *our* pattern, not a bank that omitted the field. That flips the default
+  diagnosis for R-4/KHA-128-class losses.
+- **SAMA defines the ceiling of what *will appear*; our tiers define the floor of what we *keep*.**
+  These are different questions and the gap is deliberate. SAMA mandates that banks *send* things
+  (available credit, total amount due) that NFR-S2/NFR-P4 would rather we did not *store*. Receiving
+  and discarding a field is not a conformance failure — see Tier 3.
+- **It is a prior, not a guarantee.** The SMS is still a lossy rendering chosen by each bank's
+  template author, and observed messages deviate. The regulation tells a rule author what to *look*
+  for; only a real sample tells them what the bank actually *printed*. Rules stay sample-verified.
+
+**Both tables are now retrieved verbatim** (2026-07-30, follow-up fetch — the first pass could not
+read through the rulebook's table viewer; a direct fetch of `/en/table-no-1` and `/en/table-no-2`
+did). Full text below. Nothing in this subsection now rests on an unverified summary.
+
+*Sources:* the circular at `rulebook.sama.gov.sa/en/standardization-notification-elements-sent-financial-institutions-customers`;
+its tables at `/en/table-no-1` and `/en/table-no-2`; the 2021 extension at
+`/en/key-elements-sms-notifications-newly-updated-mada-transactions`; and the adjacent
+`/en/instant-sms-notification-service` and `/en/rules-issuance-and-operation-credit-cards`.
+
+##### Table No. (1), verbatim — minimum elements per notification category
+
+18 categories, each with its own minimum field list. Reproduced in full since this is the primary
+engineering reference for what a rule's `requiredFields`/`extract` set should expect to find.
+
+| Category | Minimum elements |
+|---|---|
+| Internal Purchases | Amount, Currency · Store Name · Card Type (Mada, Credit), Executed Through (e.g. Apple Pay, Mada Pay, Atheer) · Card Number (Last Four Digits) · Date · Time |
+| International Purchases | Amount, Currency · Store Name · Country · Card Type (Mada, Credit), Executed Through · Card Number (Last Four Digits) · Date · Time |
+| Internal Cash Withdrawal | Amount, Currency · Withdrawal Location (ATM Location or Branch/Code) · Card Type (Mada, Credit) · Card Number (Last Four Digits) · Date · Time |
+| International Cash Withdrawal | Amount, Currency · Country · Fees · Card Type (Mada, Credit) · Card Number (Last Four Digits) · Date · Time |
+| Checks | Amount, Currency · Payee Name / Cheque Holder's Account Number · Date · Time |
+| Cash Deposit | Amount, Currency · Deposit Method (e.g. Branch or ATM) · Account Number · Date · Time |
+| Domestic Transfers | Transferred Amount, Currency · Fees · Sender's Name (incoming) · Receiver's Name (outgoing) · Sender's Account Number (incoming) · Receiver's Account Number (outgoing) · Date · Time |
+| International Transfers | Transferred Amount, Currency · Fees · Sender's Name · Receiver's Name · Sender's Account Number · Receiver's Account Number · Transfer Intermediary Company Name (e.g. Western Union) · Destination Country · Date · Time |
+| Internet Purchases | Amount, Currency · Website or Store · Card Type (Mada, Credit), Executed Through · Card Number (Last Four Digits) · Account Number · Date · Time |
+| Government Bill Payments | Amount, Currency · Entity · Service · Invoice Number · Date · Time |
+| Other Bill Payments | Amount, Currency · Biller · Service · Invoice Number · Date · Time |
+| Financing / Refinancing Transactions | Financing Type · Total Amount of Financing · Monthly Installment · Account Number · Date · Time |
+| Monthly Financing Deduction | Financing Type · Due Installment · **Total Remaining** · Amount · Account Number · Date · Time |
+| Fees | Amount, Currency · Reason · Account Number · Date · Time |
+| Refund / Reversal | Amount, Currency · Country (external transactions) · Store/Website/Entity · Account Number · Date · Time |
+| Mobile App Transactions | App Name (e.g. Apple Pay) · Amount, Currency · Store Name or Website · Card Type (Mada, Credit), Card Number (Last Four Digits) · Account Number · Date · Time |
+| E-Wallet Top-Up | Wallet Name (e.g. STCPay) · Amount, Currency · Top-Up Channel (Mada, Credit, SADAD, etc.) · Card Number (Last Four Digits) · Date · Time |
+| E-Wallet Transactions | Amount, Currency · Card Type (Mada, Credit) · Card Number (Last Four Digits) · Store or Website · Date · Time |
+
+Two corrections this makes to claims below: **no category names a standalone "reference number"
+element** — transfers are identified by sender/receiver name + account number, not a reference
+code, so `referenceNumber`'s status as ADR-017 D2's dedup key is Massrofy's own design choice, not
+a SAMA mandate; and **"Refund" and "Reversal" are one category, not two** in Table No. (1) — Table
+No. (2)'s separate "Reverse Transaction" term is a *description*, not evidence of a second category
+structure. The `reversal`-aliased-to-`refund` decision below is correct for exactly this reason,
+made stronger, not weaker.
+
+##### Table No. (2), verbatim — standardised bilingual transaction-description vocabulary
+
+60 entries. This is the anchor-token reference for `messageType` regex — Arabic and English wording
+a rule's message-body pattern should key on, never `senderPatterns`.
+
+| Arabic | English |
+|---|---|
+| سداد فاتورة | Bill Payment |
+| سداد فاتورة لمرة واحدة | Bill Payment one time |
+| إصدار شيك مصدّق | Certified Cheque Issued |
+| بطاقة ائتمانية الغاء حجز مبلغ | Credit Card Cash Release |
+| بطاقة ائتمانية حجز مبلغ | Credit Card Cash Reserve |
+| بطاقة ائتمانية استرجاع نقدي | Credit Card Cashback |
+| بطاقة ائتمانية تأكيد سداد | Credit Card Credited |
+| بطاقة ائتمانية تسديد | Credit Card Payment |
+| بطاقة ائتمانية استرداد مبلغ | Credit Card Refund |
+| إيداع رسوم | Credit Transaction Fees |
+| حوالة واردة من بطاقة | Credit transfer from card |
+| حوالة واردة بين حساباتك | Credit transfer Between Your Accounts |
+| حوالة واردة حساب مواطن | Credit transfer Citizen Account |
+| سحب نقدي طارئ | Credit transfer Emergency Cash Withdrawal |
+| حوالة واردة من حسابك الجاري | Credit transfer From your Current Account |
+| حوالة واردة من حسابك الاستثماري | Credit transfer From Your Investment Account |
+| حوالة واردة حافز | Credit transfer Hafiz |
+| حوالة واردة داخلية | Credit transfer Internal |
+| حوالة واردة دولية | Credit transfer International |
+| حوالة واردة تمويل | Credit transfer Loan |
+| حوالة واردة محلية | Credit transfer Local |
+| حوالة واردة راتب | Credit transfer Salary |
+| حوالة واردة كفيل | Credit transfer Sponsor |
+| حوالة واردة مكافأة طلاب | Credit transfer Student Reward |
+| خصم رسوم | Debit Transaction Fees |
+| حوالة صادرة الى بطاقة | Debit Transfer to card |
+| حوالة صادرة بين حساباتك | Debit Transfer Between Your Account |
+| حوالة صادرة داخلية | Debit Transfer Internal |
+| حوالة صادرة دولية | Debit Transfer International |
+| خصم قسط تمويل | Debit Transfer Loan Instalment |
+| حوالة صادرة محلية | Debit Transfer Local |
+| حوالة صادرة راتب | Debit Transfer Salary |
+| حوالة صادرة مكفول | Debit Transfer Sponsored |
+| حوالة صادرة الى حسابك الجاري | Debit Transfer To Your Current Account |
+| حوالة صادرة الى حسابك الاستثماري | Debit Transfer To Your Investment account |
+| خصم شيك مصدق | Debit Certified Cheque |
+| خصم شيك ورقي | Debit Paper Cheque |
+| إيداع صراف آلي | Deposit ATM |
+| إيداع فرع | Deposit Branch |
+| إيداع شيك مصدق | Deposit Certified Cheque |
+| إيداع شيك ورقي | Deposit Paper Cheque |
+| شراء عملة أجنبية | Foreign Currency Purchase |
+| سحب صراف آلي دولي | International ATM Withdrawal |
+| مدفوعات وزارة الداخلية | MOI Payments |
+| شراء إنترنت | Online Purchase |
+| امر مستديم سداد فواتير | Permanent transfer Bill Payment |
+| امر مستديم حوالة صادرة داخلية | Permanent transfer Debit transfer Bank internal |
+| امر مستديم حوالة صادرة بين حساباتك | Permanent transfer Debit transfer Between Your Accounts |
+| امر مستديم حوالة صادرة دولية | Permanent transfer Debit transfer International |
+| امر مستديم حوالة صادرة محلية | Permanent transfer Debit transfer Local |
+| امر مستديم حوالة صادرة راتب | Permanent transfer Debit transfer Salary |
+| امر مستديم مدفوعات وزارة الداخلية | Permanent transfer MOI Payments |
+| شراء عبر نقاط البيع دولية | PoS International Purchase |
+| شراء عبر نقاط البيع | Pos Purchase |
+| شراء ونقد عبر نقاط البيع | Pos Purchase & Cashback |
+| تسوية نقطة البيع | PoS settlement |
+| حوالة واردة | Received transfer |
+| استرجاع مدفوعات وزارة الداخلية | Refunding MOI Payments |
+| حوالة عكسية | Reverse Transaction |
+| سحب صراف آلي | ATM Withdrawal |
+| سحب فرع | Branch Withdrawal |
+
+##### Secondary corroboration — the same shape is reached independently elsewhere
+
+SAMA is the authority; these remain in the record because they show the slot set is a property of the
+*domain*, not of one regulator, which is what makes it safe to fix the vocabulary rather than keep
+rediscovering it per bank. ISO 20022 `camt.054` is the formal model of exactly this artefact — a
+bank-to-customer debit/credit notification.
 
 | Source | Slots it settled on |
 |---|---|
@@ -957,8 +1103,7 @@ different markets converge on nearly the same list:
 | `pennywiseai-tracker` (Kotlin, 85+ banks across 14 countries, Arabic + English, includes Saudi) | `amount, type, merchant, reference, accountLast4, balance, creditLimit, currency, fromAccount, toAccount, isFromCard, bankName, timestamp` |
 | `transaction-parser-th` (Thai market) | provider, type, date, time, from/to account, amount, balance |
 
-Four independent derivations, three markets, one shape. That is strong enough to **fix** the
-vocabulary rather than keep rediscovering it per bank.
+One regulator and four independent derivations across three markets, one shape.
 
 ##### Tier 0 — declared by the rule, never extracted
 
@@ -970,40 +1115,96 @@ writes the rule — which is why they are auditable and why no regex should try 
 **`messageType` carries the channel dimension, and should keep carrying it.** POS vs ecommerce vs ATM
 vs wallet is the one "field" that is frequently *not* present as a span at all — it is implied by
 which template the bank chose. Encoding it as `pos_purchase` / `online_purchase` / `withdrawal`
-rather than as an extracted `channel` slot is correct and stays. Recommended vocabulary, shaped
-`<event>` optionally suffixed `_<channel>`:
+rather than as an extracted `channel` slot is correct and stays. SAMA's own structure agrees: it
+organises the mandate by *transaction category*, and category, not a separate channel field, is what
+selects the required elements.
+
+**SAMA's categories, mapped.** Table No. (1), now retrieved verbatim above, has exactly 18: Internal
+Purchases, International Purchases, Internal/International Cash Withdrawal, Checks, Cash Deposit,
+Domestic/International Transfers, Internet Purchases, Government/Other Bill Payments,
+Financing/Refinancing, Monthly Financing Deduction, Fees, Refund/Reversal, Mobile App Transactions,
+E-Wallet Top-Up, E-Wallet Transactions. Mapping those against the shipped vocabulary is what this
+re-derivation was for, and it found **four genuine gaps and four false ones.**
+
+Vocabulary, shaped `<event>` optionally suffixed `_<channel>`. **Bold entries are added by this
+revision;** the rest are unchanged and already shipping in `sa-core.json`:
 
 `pos_purchase` · `online_purchase` · `withdrawal` · `refund` · `transfer_out` · `transfer_in` ·
-`salary_income` · `bill_payment` · `card_repayment` · `installment` · `fee` · `account_debit` ·
-`account_credit`, plus the `intent: ignore` set `otp` · `marketing` · `balance_info`.
+`salary_income` · `bill_payment` · `card_repayment` · `installment` · `fee` · **`deposit`** ·
+**`cheque`** · **`wallet_topup`** · **`reversal`** · `account_debit` · `account_credit`, plus the
+`intent: ignore` set `otp` · `marketing` · `balance_info`.
+
+| Added | Why the gap is real |
+|---|---|
+| `deposit` | SAMA treats deposits as their own category. Today a cash or salary-unrelated deposit can only be `account_credit`, which is the fallback bucket — it parses, but the user sees an unlabelled credit. |
+| `cheque` | Its own SAMA category, and it carries a cheque number that belongs in `referenceNumber`. Nothing in the current vocabulary names it. |
+| `wallet_topup` | **The highest-value addition.** Loading STC Pay / urpay / an Apple Pay balance is a SAMA category and is common in this market. Today it lands as `transfer_out` or `account_debit`. It is structurally a `card_repayment`-shaped event — *money moving between the user's own instruments* — and mislabelling it hides that from anyone reasoning about double counting. See the `affectsSpend` note below; the type must exist before that judgement can even be expressed. |
+| `reversal` | SAMA distinguishes reversals from refunds. Arithmetically both are credits back, so **aliasing `reversal` to `refund` in v1 is acceptable and loses no money** — the reason to name it is that a reversal cancels a specific prior authorisation and is the correct future hook for matching-and-cancelling rather than posting income. Lowest priority of the four. |
+
+**Considered and deliberately *not* added** — recording these matters as much as the additions,
+because each is a plausible-looking mistake:
+
+- *International purchase / withdrawal as separate types.* The international-ness is already carried,
+  and carried better, by the presence of `convertedAmount` / `exchangeRate` / `feeAmount`. A type
+  suffix would duplicate state that can then disagree with itself.
+- *Apple Pay / mada Pay / Atheer / mobile-app as types.* SAMA mandates an **"Executed Through"**
+  element naming the wallet or channel, so this *will* appear in real messages. It is a channel, not
+  an event, and it changes no number — Tier 3. If it ever earns representation it is a `_<channel>`
+  suffix, not a new event.
+- *Financing disbursement.* A drawdown is a credit; `account_credit` carries it. Adding a type for a
+  once-a-year event is vocabulary bloat at `TIER: personal`.
+- *Government payment as distinct from bill payment.* SADAD-shaped and already served by
+  `bill_payment` + `billerCode`.
+
+**`affectsSpend` for `wallet_topup` is a deliberate per-rule call, not a default.** Massrofy ingests
+bank SMS, so a top-up is normally the *only* visible event and should count as spend (`true`). If the
+wallet's own notifications are also being ingested, counting both double-counts — the identical trap
+`card_repayment` already documents. Rule authors must decide it explicitly and say why.
 
 This stays **recommended, not enforced.** §5.2's forward-compatibility rule — an unrecognised
 `messageType` routes to the review queue and is never discarded — is load-bearing and must not be
 traded for a closed enum. A list a human checks against beats an enum that rejects a newer pack.
+That property is now doing more work than before: the four new types must be able to appear in a pack
+without an engine change, and under §5.2 they can.
+
+**Table No. (2) is the anchor-token reference for whoever writes the discriminating regex**, now
+reproduced in full above — 60 Arabic/English term pairs, e.g. `سداد فاتورة` / "Bill Payment". Two
+cautions: it is a *description* vocabulary, not a sender-identity one, so it informs message-body
+patterns and **not** `senderPatterns` — sender identity stays resolved per ADR-007 step 2 and
+AC-B12.3 — and a bank that words a message differently is still a bank whose message we must parse,
+so the list is a starting point for patterns, never a filter on them.
 
 ##### Tier 1 — universal slots
 
-Present in essentially every transaction-shaped message, in every bank and both languages.
+Present in essentially every transaction-shaped message, in every bank and both languages. **All four
+correspond to elements SAMA mandates as a minimum across categories** — amount and currency, date and
+time, and card details given as *type* plus *last four digits*.
 
 | Slot | Note |
 |---|---|
 | *(bank identity)* | **Not a slot.** Resolved from the sender, never from the body (ADR-007 step 2, AC-B12.3). Listed only so nobody adds a `bankName` extract. |
-| `amount` | The movement's value. |
-| `currency` | Satellite of `amount`. Frequently absent as a span and supplied by `literal: "SAR"` — that is exactly what `literal` is for. |
-| `instrumentRef` (+ `…Network`, `…Type`) | Which card or account. `kind` is rule-declared, never guessed from digit count (AC-B13.1/2). |
-| `occurredAt` | Universal as a *concept*, not as a span — `received_at_fallback` covers its absence. |
+| `amount` | The movement's value. SAMA-mandated. |
+| `currency` | Satellite of `amount`. SAMA mandates it alongside the amount, but banks routinely omit it from the SAR-domestic template because it is implied — so it stays frequently absent as a span and supplied by `literal: "SAR"`. That is exactly what `literal` is for. |
+| `instrumentRef` (+ `…Network`, `…Type`) | Which card or account. **SAMA corroborates the split we already enforce:** it mandates *card type* (mada, credit) and *card number — last four digits* as two separate elements. That is the regulator independently confirming AC-B13.1/2 — `kind` is rule-declared, never guessed from digit count. Guessing was already banned; it is now also contrary to how the source data is specified. |
+| `occurredAt` | SAMA mandates date **and time**, which strengthens this slot's status: a missing timestamp span is a template quirk or a pattern defect, not the norm. `received_at_fallback` stays the correct safety net but should be the exception, and a rule relying on it habitually is worth a second look. |
 
 ##### Tier 2 — conditional slots, determined by `messageType`
 
+SAMA's remaining mandated element families — reference/account numbers, transaction location or
+entity name, and the FX and fee elements required for international and credit-card transactions —
+land here. Every one already has a slot; **the re-derivation added no Tier 2 slot.** What it changed
+is the confidence level: several of these are now known to be *required to be present*, not merely
+observed sometimes.
+
 | Slot | Appears on |
 |---|---|
-| `merchant` | purchases, refunds, bill payments (biller as merchant), ATM (location as merchant) |
+| `merchant` | purchases, refunds, bill payments (biller as merchant), ATM (location as merchant). SAMA's "transaction location or entity name" element |
 | `counterpartyName` | transfers in/out, salary |
 | `counterpartyBankName` | interbank transfers. This is the **other** bank; confusing it with the sending bank is the easiest wrong answer in the whole taxonomy |
-| `referenceNumber` | transfers, some bill payments. Where present it is the reliable dedup key (ADR-017 D2) |
-| `remainingBalance` (+ `…Currency`) | installments, and any bank that prints a balance-after |
-| `feeAmount` (+ `…Currency`) | FX purchases, some transfers |
-| `convertedAmount` (+ `…Currency`), `exchangeRate` | foreign-currency purchases |
+| `referenceNumber` | transfers, cheques (the cheque number), some bill payments. **SAMA mandates a reference or account number for several categories**, which materially strengthens ADR-017 D2 — the dedup key we prefer is one the regulator requires to be there |
+| `remainingBalance` (+ `…Currency`) | financing/installment messages — Table No. (1)'s "Total Remaining". **Not** a plain account balance-after; see the open question at the end for why |
+| `feeAmount` (+ `…Currency`) | FX purchases, some transfers. SAMA-mandated for international card transactions |
+| `convertedAmount` (+ `…Currency`), `exchangeRate` | foreign-currency purchases. `exchangeRate` is SAMA-mandated for these |
 | `settlementRef` (+ `…Network`, `…Type`) | card repayment — the **second** instrument (AC-B14.1) |
 | `billerCode`, `invoiceNumber` | bill payments (SADAD-shaped) |
 
@@ -1014,16 +1215,27 @@ learning loop nothing to attach to and is permanently uncategorisable. This is w
 maps an ATM location into `merchant`, and maps a biller name into both `merchant` and `billerCode`.
 Those read like smells and are not — they are this rule, correctly applied.
 
-##### Tier 3 — observed in real messages and deliberately **not** given slots
+##### Tier 3 — present in real messages and deliberately **not** given slots
 
-Branch name · ATM city as its own field · loyalty/points balance · credit limit and available credit ·
+Branch name · ATM city as its own field · loyalty/points balance · **credit limit and available
+credit** · **"total amount due"** · **"Executed Through" (Apple Pay / mada Pay / Atheer / app)** ·
 IBAN · the bank's service phone number · promotional tails · "available" vs "outstanding" balance as
 two distinct figures.
 
-Each is either bank-specific, or (IBAN, full credit limit) something NFR-S2/NFR-P4 would rather we
-did not hold at all. **Adding a slot is a schema decision and the default answer is no.** The bar: a
-field earns a slot when it changes a number the user sees or resolves an identity — not when it
-merely appears.
+**Three of these are now known to be SAMA-mandated, and that changes nothing about the decision — but
+it does change how the decision must be justified.** Available credit and total amount due are
+required elements of a credit-card notification; "Executed Through" is a required element of a mada
+notification. They will therefore appear reliably, not occasionally, and a rule author will be
+tempted to catch them. The answer is still no, for the reason stated at the top: **SAMA governs what
+the bank must send; NFR-S2/NFR-P4 govern what we choose to keep.** Declining to extract a mandated
+element is data minimisation, not non-conformance — we are the recipient, not the issuer. Say this
+out loud in review, because "but the regulator requires it" reads like an argument for a slot and is
+not one.
+
+Each entry is either bank-specific, or (IBAN, full credit limit, available credit) something
+NFR-S2/NFR-P4 would rather we did not hold at all. **Adding a slot is a schema decision and the
+default answer is no.** The bar: a field earns a slot when it changes a number the user sees or
+resolves an identity — not when it merely appears, and not merely because it is mandated upstream.
 
 ##### Does the existing schema support this? Yes — the gap is validation, not structure
 
@@ -1058,7 +1270,8 @@ that are already broken.
 Not duplicating their PRD work. Three observations from the architecture side:
 
 1. **A fixed label palette is what makes the feature buildable at all.** With Tier 1 + Tier 2 the
-   palette is ~14 chips, each carrying a *type* — money · currency · datetime · masked-identifier ·
+   palette is ~14 chips — unchanged by the SAMA re-derivation, which added four `messageType` values
+   but no new extractable slot — each carrying a *type* — money · currency · datetime · masked-identifier ·
    reference · free text. Typed labels let the app reject a bad selection **at teach time** ("that
    span doesn't look like an amount") instead of at parse time, months later, inside someone's
    totals. Free-form labels make that check impossible: there is nothing to check against.
@@ -1096,12 +1309,31 @@ Not duplicating their PRD work. Three observations from the architecture side:
 cheap to correct before anything is persisted from it and expensive after — and nothing currently
 catches it.
 
-**Open question for the human (the only one here).** `remainingBalance` serves two different
-real-world quantities: a loan's remaining principal (PRD §3.4) and an account's balance-after. They
-are not the same thing. Keeping one informational, never-arithmetic slot is the simpler and safer
-option and is what I recommend at `TIER: personal` — but it means the app can never truthfully label
-that figure without also reading `messageType`. Say so if you want them split before more banks are
-written.
+**The four new `messageType` values are additive and need no engine change** (§5.2), so they are
+strictly forward-looking too: use them when a cheque, deposit, wallet top-up or reversal template is
+first written for a bank. Do not reclassify existing rules to reach them.
+
+##### Open questions for the human
+
+**1. `remainingBalance` — narrowed by Table No. (1), not fully closed.** Now that Table No. (1) is
+verbatim (above), it names exactly **one** "remaining" element, in exactly one category: **"Total
+Remaining"**, under *Monthly Financing Deduction*, alongside "Financing Type" and "Due Installment".
+That is unambiguously the loan/financing **remaining-principal** sense (PRD §3.4) — Table No. (1) has
+**no "account balance-after" field in any of its 18 categories**, so that sense is not a regulator
+mandate at all, just something a bank may print beyond the minimum. The third sense, a card's
+**available credit**, comes from a *different* document (the Credit Card Issuance Rules, not Table
+No. (1)) and was already ruled Tier 3 below — excluded, not stored.
+
+Net effect: the regulator's own primary table treats "remaining balance" as **one thing** —
+financing remaining-principal — which is the strongest evidence yet for keeping `remainingBalance`
+a single slot, now with a tighter, SAMA-anchored meaning: *populate it for financing/installment
+messages only; a bank that separately prints a balance-after on a plain debit notification is
+printing something SAMA doesn't require, treat it as Tier 3 unless a future need justifies a slot.*
+This is a recommendation, not yet marked approved — say so if you want it split anyway.
+
+**2. Obtain the two SAMA tables verbatim — done, 2026-07-30.** Both retrieved and reproduced in full
+above via a direct fetch of `/en/table-no-1` and `/en/table-no-2`. No remaining
+**[unverified detail]** markers in this subsection.
 
 ---
 
