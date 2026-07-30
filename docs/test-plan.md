@@ -1539,3 +1539,81 @@ verified rather than accepted (§1a), and 18 QA-authored attacks were all repell
 
 Carried forward, unchanged: the two device-verification gaps (§5) remain open and
 belong on the P10/KHA-52 critical path.
+
+---
+
+# PR #44 — P5b: reports (KHA-37), search/filter (KHA-38), immediate foreground sweep (KHA-122)
+
+**Measured on `feature/p5b-reports-search-immediate-sweep` @ `4308d7a`.** TIER:
+personal, so depth is scaled to journeys first, with real depth reserved for the
+two areas the brief named: NFR-A6 reconciliation and KHA-122's race safety.
+
+## 0. Gates re-run by QA on the current head (not cited from the engineer)
+
+| Gate | Result on `4308d7a` |
+|---|---|
+| `flutter test --exclude-tags=release_mode_guard` | **1540 passed, 3 skipped, 0 failed** — matches the PR body |
+| `flutter analyze --fatal-infos` | **No issues found** |
+| `dart format --set-exit-if-changed .` | **clean (exit 0)** |
+| GitHub `ci` aggregate check | **success**, 6/6 jobs green on `4308d7a` (run 30503458998) |
+| Merge candidate vs current `main` (`7f000e4`) | **zero file overlap**, clean merge, **1688 passed / 3 skipped / 0 failed** on the merged tree |
+
+Evidence: `docs/evidence/qa-pr44/merged-with-main-full-suite.log`,
+`docs/evidence/qa-pr44/mutation-log.md`.
+
+## 1. Traceability — criterion -> test -> status
+
+`RUNTIME` = walked on the `massrofy_test` AVD (API 35) with a debug build of
+`4308d7a`, screenshot in `docs/evidence/qa-pr44/`.
+
+| Criterion | Test(s) | Status |
+|---|---|---|
+| **AC-A1.1** — transaction appears with no user action, app open and idle | `immediate_sweep_wiring_test.dart` + device walk | **PASS — RUNTIME-VERIFIED.** SMS sent with the app never leaving the foreground (`mCurrentFocus` stayed on `MainActivity` throughout); row + total appeared within seconds. `05-home.png` (before, `0.00 SAR`) -> `06-after-sms-5s.png` (after, `-312.40 SAR`, `QANDA FOODS`, Riyadh `1:20 PM`). Reconfirmed twice more on a purchase and a refund (`10-more-txns.png`) |
+| **AC-A1.3** — revoked permission | `immediate_sweep_wiring_test.dart` (no subscription when denied) | PASS |
+| **AC-A1.4** — backgrounded/locked unchanged | `immediate_sweep_wiring_test.dart` (locked -> no subscription) + device walk | **PASS — RUNTIME-VERIFIED.** Backgrounding collapsed to the lock gate (`08-after-resume.png`, NFR-S3), and the post-unlock resume sweep added nothing (`09-resume-unlocked.png`) |
+| **AC-A5.1** — identical SMS delivered twice -> exactly one transaction | `immediate_sweep_race_test.dart` (redelivery case) + device walk | **FAIL — RUNTIME. -> KHA-137 (High).** Two transactions, month total doubled to `-624.80 SAR`. `07-redelivered.png`. The green unit test holds `receivedAt` constant, which a real retry cannot |
+| **AC-A5.1** — concurrent immediate + resume sweep | `immediate_sweep_race_test.dart` cases 1, 2, 4 | PASS — reviewed as genuinely load-bearing; `written` summed across both runs is asserted `== 1`, which rules out both loss and duplication |
+| **NFR-R7** — no extra wakeups | code review: the signal is raised from the **existing** manifest `SmsReceiver`; no new `registerReceiver` anywhere | PASS |
+| **NFR-S1/S4** — the signal carries no message content | `sms_foreground_bridge_test.dart` (forbidden-identifier scan on comment-stripped source) | PASS |
+| KHA-122 wiring is real (Kotlin -> Dart) | traced by hand: `SmsReceiver.onReceive` -> `SmsForegroundBridge.signalSmsReceived()` -> `EventChannel massrofy/sms_events` (installed by `MainActivity.configureFlutterEngine`, torn down in `onDestroy`) -> `AndroidSmsBroadcastSignal.incoming` -> `foregroundSmsSignalProvider` -> `ref.invalidate(foregroundSweepProvider)` -> `IngestionPipeline.runIncremental()` | PASS — the mechanism is real, not plausible-sounding |
+| KHA-122's `app.dart` call site is protected by a test | **mutation M2** | **FAIL. -> KHA-138 (Medium).** Deleting the line leaves all 1540 tests green |
+| **AC-E2.1** — each category with total and share | `report_widgets.dart` `percentShareOf` (exact `Decimal`/`Rational`, null not 0% on a zero denominator); `p5b_reconciliation_widget_test.dart` | PASS |
+| **AC-E2.2** — selecting a category lists its transactions | shared `TransactionFilter` + the same S-10 push | PASS — correctly *not* a second filtered-list screen, so AC-E5.2's total has one implementation |
+| **AC-E2.3** — Uncategorized on its own line, never folded | `p5b_reconciliation_widget_test.dart` (row present; no `take`, no "Other") | PASS |
+| **AC-C1.3** — category totals incl. Uncategorized sum to the period total | `category_sum_invariant_test.dart` (data) + `p5b_reconciliation_widget_test.dart` (**figures read off the rendered tree**) | PASS — the widget-level path (G-QA-34-1) is genuinely covered this time |
+| **AC-E3.1** — per-card breakdown, each with its total | `instrument_breakdown_test.dart` + device walk | **PASS — RUNTIME-VERIFIED.** `12-instrument-breakdown.png` |
+| **AC-E3.2** — card totals sum to the period total shown elsewhere | `instrument_breakdown_test.dart`, `p5b_reconciliation_widget_test.dart`, + device walk with an independent oracle | **PASS — RUNTIME-VERIFIED.** `****4472 -624.80` + `****9002 -600.00` = `Total -1,224.80`, byte-identical to Home's figure. Hand-recomputed from the four raw messages: `312.40 + 312.40 + 660.00 - 60.00 = 1224.80` |
+| The "Cash and unmatched" row is what makes AC-E3.2 exact | `instrument_breakdown_test.dart` — the counterfactual asserts the instrument rows **alone** sum to `3300.00` against a `3360.00` total | PASS — the claim is correct and the counterfactual is real |
+| **NFR-A6** — the 200-run corpus exercises a cross-bank internal transfer | **mutations M1a / M1b / M1c** | **FAIL. -> KHA-139 (Medium).** The planted pair is inert: it is excluded by `affectsSpend: false`, which the shipped rule pack does not set for `transfer_out`, so `InternalTransferDetector` never participates. P5a's gap is still open, one level deeper |
+| **AC-B11.2** — an unproven (candidate) transfer keeps counting | *nothing existed*; now `test/qa/pr44_p5b_qa_probes_test.dart` | PASS (newly pinned by QA) |
+| **AC-E4.1** — current vs prior period and the difference | `month_comparison_test.dart` | PASS |
+| **AC-E4.2** — under two months, state it rather than mislead | `month_comparison_test.dart` + device walk | **PASS — RUNTIME-VERIFIED.** `11-reports.png` shows *"Month over month — Not enough history yet"*; no chart, no delta, not zeroed |
+| The fourth BottomNav tab replaces P5a's placeholder | `p5b_shell_navigation_test.dart` (positive) + `p5a_shell_navigation_test.dart` (**inverted**, `findsNothing`) + device walk | **PASS — RUNTIME-VERIFIED.** Reports at index 2 (`05-home.png`). The placeholder assertion was inverted, not deleted — standing practice followed |
+| **AC-E5.1** — merchant search, both scripts | `transaction_filter_test.dart` (Latin, Arabic, 3 orthographic variants, Arabic-Indic digits, counterparty) + device walk | **PASS — RUNTIME-VERIFIED.** `14-search-noon.png`: lowercase `noon` matches `NOON.COM` |
+| **AC-E5.2** — the displayed total reflects the FILTERED subset | `transaction_filter_test.dart` + `test/qa/pr44_p5b_qa_probes_test.dart` + device walk | **PASS — RUNTIME-VERIFIED with an independent oracle.** *"Filtered total -600.00 SAR"* against a period total of `-1,224.80`; hand-computed `660.00 - 60.00 = 600.00`. Label correctly changes to *"Filtered total"* |
+| **AC-E5.3** — explicit empty state with a way to clear | `transaction_filter_test.dart` + device walk | **PASS (body) / LOW defect (summary row).** `15-filtered-empty.png`: the body state and Clear-filters action are correct; the row above still says *"No transactions in this period"*, which is false. **-> KHA-140 (Low)** |
+| **NFR-A5** — amount range compares base-currency magnitudes; non-comparable rows excluded **and counted** | `transaction_filter_test.dart` | PASS |
+| **NFR-S4** — no search history persisted or logged | `transaction_filter_test.dart` + QA probe (`toString` leaks neither query, amount, date nor instrument id) | PASS |
+| Date picker builds **Riyadh** midnight, not UTC | *no test existed*; now `test/qa/pr44_p5b_qa_probes_test.dart` group *"Riyadh date-range bound"* | PASS — the fix is in the shipped code and is now pinned, including the counterfactual (a UTC-midnight bound drops an 01:00-Riyadh purchase) |
+| Filter sheet reads instruments from the correct provider | `ledger_routes.dart:241-250` reads `bankTreeProvider` via `FilterInstrumentOption.fromBankTree` | PASS — the self-review fix is present; no reports-provider dependency, no extra Drift subscription |
+
+## 2. Attack / edge probes run (TIER: personal — 9 probes, not 30)
+
+Recorded whether they succeeded or not, per the audit rule.
+
+| # | Probe | Result |
+|---|---|---|
+| P1 | Delete KHA-122's production wire; does CI notice? | **ATTACK SUCCEEDED** -> KHA-138 |
+| P2 | Drop the shared transfer analysis; does the footer identity break? | Attack repelled (behaviour identical — benign fallback), but the test's claim to catch it is false -> KHA-139 F2 |
+| P3 | Give the corpus fixture production's `affectsSpend`; does the corpus still pass? | **ATTACK SUCCEEDED** (8 failures) -> KHA-139 F1 |
+| P4 | Redeliver a byte-identical SMS on a real device | **ATTACK SUCCEEDED** -> KHA-137 (High) |
+| P5 | Immediate sweep racing a resume sweep; can it double-count? | Repelled — one transaction, on device and in the race suite |
+| P6 | A 1 ms delivery-time difference vs. the D1 dedup | **ATTACK SUCCEEDED** (root cause of P4) |
+| P7 | Filter a subset, then check subset + complement == whole | Repelled — money is conserved across a partition |
+| P8 | Force a transaction into the 00:00-03:00 Riyadh boundary of a date filter | Repelled by the shipped code (the self-review fix works); the UTC-midnight counterfactual is now pinned as a regression guard |
+| P9 | Make `TransactionFilter.toString` leak a query, amount, date or instrument id | Repelled — facet shapes only |
+
+## 3. Verdict
+
+`QA: FAIL 44` — see `docs/defects.md` for the blocking item and the full
+non-blocking list.
