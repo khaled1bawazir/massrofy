@@ -22,20 +22,71 @@
     "Note on `network` values: they are extracted verbatim from the message, so the",
     "Arabic-language bank yields Arabic tokens. Canonicalising those onto the",
     "visa|mada|mastercard vocabulary in architecture §4.2 is P3 entity-resolution work,",
-    "not a parser concern — the parser's job is to report what the message said."
+    "not a parser concern — the parser's job is to report what the message said.",
+    "",
+    "=== KHA-128: senderPatterns are HUMAN-CONFIRMED, not inferred =============",
+    "",
+    "The original `senderPatterns` for the two banks below were written from assumption",
+    "(`^(BAJ|Aljazira|AlJazira|BankAlJazira)$`, `^(D360|D360Bank|D-360)$`) and matched",
+    "NOTHING on a real device: the sender ids actually shown are `Jazira Bank` and",
+    "`D360 Bank`, with a space. Every message from both banks was therefore discarded at",
+    "gate 1 as a non-financial sender — silently, and by design, because NFR-P4 keeps no",
+    "trace of an unmatched sender. The user saw 0.00 SAR and an empty review queue.",
+    "",
+    "So: the sender id is the one field in this file that MUST NOT be guessed. These",
+    "seven strings were read off the reporting user's phone and confirmed on KHA-128 on",
+    "2026-07-30: `Jazira Bank`, `nera`, `D360 Bank`, `AlRajhi Bank`, `STC Bank`, `SAIB`,",
+    "`SAB`. The earlier guessed alternatives are KEPT rather than replaced — an unused",
+    "alternative is dead weight, a missing one loses a financial message.",
+    "",
+    "Two deliberate choices in how they are written:",
+    "  - `\\s*` between a brand's own words (`^D360\\s*Bank$`) rather than one literal",
+    "    space. `\\s` also covers the non-breaking space an Arabic-locale device can",
+    "    deliver, and the no-space spelling. Widening WITHIN one brand's own words is",
+    "    safe: `^...$` anchoring means a false positive needs a whole sender id equal to",
+    "    that brand, and the cost of a miss is a silently dropped transaction.",
+    "  - `^STC\\s*Bank$` deliberately does NOT match a bare `STC`, which is the telecom",
+    "    operator, not the bank. Case is irrelevant everywhere: the loader compiles every",
+    "    pattern with `caseSensitive: false`.",
+    "",
+    "Scope of that confirmation, stated so nothing here looks more verified than it is:",
+    "only the SENDER IDS were read off a device. Each bank's `displayName` and `aliases`",
+    "come from public branding, and the Arabic display names for `nera` and `stc bank` are",
+    "transliterations of a Latin-script brand rather than confirmed official strings. That",
+    "is a much smaller risk than a wrong sender pattern and it is not the same kind of",
+    "claim: identity is `bankId` and nothing else (AC-B12.3), and a display string is only",
+    "ever an input to name lookup — a wrong one shows a wrong label, it cannot lose a",
+    "message. Correct them freely; never repoint a `bankId`, which is persisted.",
+    "",
+    "=== The five banks below carry `messageRules: []`, and that is correct ====",
+    "",
+    "nera, AlRajhi, STC Bank, SAIB and SAB declare a confirmed sender and NO parsing",
+    "templates, because no real message-body sample exists for them yet and NFR-M3",
+    "forbids inventing one that pretends to be real. That is a complete, shippable state,",
+    "not a stub — AC-A6.5 (PRD Addendum A, approved): a sender that passes gate 1 with no",
+    "matching template lands in the Needs Review queue with its sanitised text, where",
+    "US-A4/S-19 completes it by hand. Concretely, an empty `messageRules` list makes the",
+    "engine's rule loop iterate zero times and fall through to its step 4 branch —",
+    "`UnparsedMessage(noRuleMatched)` — which is the same path a configured bank takes",
+    "when it changes a template. So a recognised sender is useful IMMEDIATELY with zero",
+    "rules written, and `test/features/ingestion/sender_only_bank_review_test.dart`",
+    "proves it end to end rather than at the data level only.",
+    "",
+    "Adding real templates for these five is separate follow-up work, gated on real",
+    "(synthetic-ified) samples. Do not invent them here to make the file look finished."
   ],
 
   "schemaVersion": 1,
   "packId": "sa-core",
-  "packVersion": "2026.07.28",
+  "packVersion": "2026.07.30",
   "locales": ["ar", "en"],
 
   "banks": [
     {
       "bankId": "bank-aljazira",
       "displayName": { "ar": "بنك الجزيرة", "en": "Bank Aljazira" },
-      "aliases": ["ALJAZIRA", "BAJ", "الجزيرة"],
-      "senderPatterns": ["^(BAJ|Aljazira|AlJazira|BankAlJazira)$"],
+      "aliases": ["ALJAZIRA", "BAJ", "الجزيرة", "Jazira Bank"],
+      "senderPatterns": ["^(BAJ|Aljazira|AlJazira|BankAlJazira)$", "^Jazira\\s*Bank$"],
 
       "messageRules": [
         {
@@ -353,7 +404,7 @@
       "bankId": "d360",
       "displayName": { "ar": "دي ٣٦٠", "en": "D360 Bank" },
       "aliases": ["D360", "D360BANK"],
-      "senderPatterns": ["^(D360|D360Bank|D-360)$"],
+      "senderPatterns": ["^(D360|D360Bank|D-360)$", "^D360\\s*Bank$"],
 
       "messageRules": [
         {
@@ -647,6 +698,46 @@
           "redact": []
         }
       ]
+    },
+
+    {
+      "bankId": "nera",
+      "displayName": { "ar": "نيرا", "en": "nera" },
+      "aliases": [],
+      "senderPatterns": ["^nera$"],
+      "messageRules": []
+    },
+
+    {
+      "bankId": "al-rajhi",
+      "displayName": { "ar": "مصرف الراجحي", "en": "AlRajhi Bank" },
+      "aliases": ["Al Rajhi", "AlRajhi", "الراجحي"],
+      "senderPatterns": ["^Al\\s*Rajhi\\s*Bank$"],
+      "messageRules": []
+    },
+
+    {
+      "bankId": "stc-bank",
+      "displayName": { "ar": "بنك stc", "en": "STC Bank" },
+      "aliases": [],
+      "senderPatterns": ["^STC\\s*Bank$"],
+      "messageRules": []
+    },
+
+    {
+      "bankId": "saib",
+      "displayName": { "ar": "البنك السعودي للاستثمار", "en": "SAIB" },
+      "aliases": ["Saudi Investment Bank", "The Saudi Investment Bank"],
+      "senderPatterns": ["^SAIB$"],
+      "messageRules": []
+    },
+
+    {
+      "bankId": "sab",
+      "displayName": { "ar": "البنك السعودي الأول", "en": "SAB" },
+      "aliases": ["Saudi Awwal Bank"],
+      "senderPatterns": ["^SAB$"],
+      "messageRules": []
     }
   ]
 }
