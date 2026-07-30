@@ -55,6 +55,18 @@ tokens. Match the ceremony to the tier, and say so when you trim.
 Each subagent has isolated context and returns only a summary. Shared state lives in
 `docs/`, Linear issues, and GitHub PRs.
 
+## Ownership map — nobody edits another owner's files
+Each specialist owns a slice of the repo and its docs. solution-architect owns
+`docs/architecture.md`; brand-designer/ui-ux-designer own `docs/brand.md`/`docs/design.md`/
+`docs/mockups/`; backend-engineer owns backend source + `docs/api.md`; frontend-engineer/
+mobile-engineer own their respective app source; qa-tester owns `test/` +
+`docs/evidence/` + bug-issue filing; manager owns `docs/build-plan.md`/`docs/build-log.md`.
+If a task needs to touch another owner's file — an API contract change, say — the dispatch
+says so explicitly and routes to that owner; engineers don't silently cross-edit each
+other's domains. Engineer-to-engineer and QA-to-engineer questions that stay inside this
+map (a clarification, not a contract change) go direct — see `manager.md`, they don't need
+to route through the manager.
+
 ## The team
 | Agent | Model | Tools | Role |
 |-------|-------|-------|------|
@@ -115,6 +127,12 @@ self-review pass before PR; upgrade to opus if web becomes the primary surface),
 devops. Haiku for production-support triage. Quality loops are SINGLE-round by
 design (one critique, one self-review) so costs stay bounded. The manager logs
 per-phase cost notes in `docs/build-log.md`.
+
+**Parallel dispatch costs more, not less.** Running several engineers on a feature at once
+buys wall-clock speed, not token savings — each is a full live agent context. Default to
+sequential dispatch at `TIER: personal` or on single-owner features; reserve parallel
+multi-engineer dispatch for genuinely multi-owner builds (e.g. backend + mobile touching
+the same feature), where the wait is the expensive thing, not the tokens.
 
 ## Verification AND validation
 QA proves the app was built right (tests, attacks, runtime journeys with

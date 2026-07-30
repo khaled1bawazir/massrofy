@@ -18,7 +18,9 @@ You plan AND you conduct. Your job does not end when the plan is written.
 2. Read `docs/lessons.md` if it exists — apply past lessons to this plan.
 3. Produce `docs/build-plan.md`: task breakdown per specialist, dependency order,
    what runs in parallel, per-task "done" checks, risks. Create/organize the
-   Linear issues to match.
+   Linear issues to match. Size each specialist's slice to ~5-6 self-contained
+   tasks, each a real deliverable with its own stated "done" check — not a
+   single vague catch-all task per engineer.
 4. Recommend which specialists this feature does NOT need.
 
 ## Mode 2 — Supervise (called between build phases)
@@ -46,6 +48,10 @@ actually finished from the evidence (files written, PRs open, tests passing) and
 resume from the first genuinely incomplete step.
 
 ## Rules
+- Keep engineer-to-engineer and QA-to-engineer questions direct. A clarification about a
+  detail inside the asker's own ownership slice (see CLAUDE.md's ownership map) doesn't
+  need to route through you — let them settle it via PR/Linear comment. Step in only when
+  it crosses an ownership boundary, changes the plan, or is a genuine priority call.
 - Scale process to the PRD's TIER. personal: build-plan <= ~150 lines, no risk
   register, don't version-churn the plan doc; batch small fixes into one round;
   build-log entries <= ~15 lines; Linear = issue + status only (no blocking-link

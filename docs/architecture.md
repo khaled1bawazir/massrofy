@@ -2,7 +2,7 @@ STATUS: APPROVED
 
 # Massrofy — Architecture Decision Record
 
-**Version:** 1.8
+**Version:** 1.9
 **Date:** 2026-07-30 (v1.5: 2026-07-30; v1.4: 2026-07-29; v1.3: 2026-07-29; v1.2: 2026-07-29; v1.1: 2026-07-28; v1.0: 2026-07-27)
 **Author:** solution-architect agent (phase 3 — architecture, human gate 2)
 **Sources of truth:** `docs/PRD.md` v0.3 (STATUS: Approved), `docs/build-plan.md` v1.0
@@ -80,15 +80,25 @@ Every pattern in this document is established here, not inherited.
 > **Nothing here blocks the in-flight six-bank rule dispatch, and the explicit recommendation is
 > not to disturb it.**
 
+> **v1.9 ships, approved, inside ADR-006 and fixes a live defect on the human's own device**
+> (**KHA-157**): the incremental sweep's watermark is **never seeded**, so on a fresh install the
+> first sweep reads `_id > 0` — *the entire SMS inbox, unbounded by date* — and floods the review
+> queue with years of pre-history. AC-A3.1's "current calendar month only" was only ever enforced
+> on the historical-import path. The fix is a **one-time high-water-mark seed** taken before the
+> first incremental read. **No schema change.** Item (E)'s open question is resolved: ship the
+> bounded, user-triggered cleanup of the already-flooded queue rather than leaving those rows to be
+> dismissed by hand — done, and already shipped.
+
 ---
 
 ## Changelog
 
 | Version | Date | Change |
 |---|---|---|
-| **1.8** | 2026-07-30 | **ADR-007 extended — canonical SMS field taxonomy proposed (subsection is DRAFT, awaiting the human).** Rules are currently written per bank from a blank page: 15+ message shapes across 7 banks in one day of device testing, each its own one-off regex. This records a **fixed slot vocabulary** — Tier 0 rule-declared (`intent`, `messageType`, `sign`, `affectsSpend`), Tier 1 universal (`amount`, `currency`, `instrumentRef`, `occurredAt`), Tier 2 conditional (counterparty in its three roles, `referenceNumber`, fee/FX, `settlementRef`, biller fields, balance-after), Tier 3 explicitly **not** slotted (branch, loyalty points, credit limit, IBAN). The evidence that the slot set is not arbitrary: a transaction SMS is a lossy rendering of an ISO 20022 `camt.054` notification, and three independent open-source parsers across India, Thailand and MENA converge on the same list. **No schema change and no rule change** — `MessageRule`/`FieldExtraction` already express every slot, and the six shipping banks already conform, so this is methodology plus one safety net. **The one real defect it exposes:** `rule_pack_loader.dart` `_parseExtract` validates `transform`, `maskPolicy`, `kind` and `timezone` but **never the field name**, and `RulePackMessageParser._extract` reads a hardcoded name list — so a typo'd `extract` key loads cleanly, is never read, and yields nothing. A **silent no-op**, which is exactly what `field_transforms.dart` makes fatal for a typo'd *transform* name. Not a live bug today (all packs use the correct names); closed by validating both `extract` keys and `requiredFields` against the vocabulary at load time. **Recommendation: apply forward, do not retrofit** the in-flight six-bank set — pattern churn is the risky operation (R-4, KHA-128) and there is nothing to retrofit at the field level. One zero-work carve-out for the reviewer of that dispatch, and one open question on `remainingBalance` serving two different quantities. |
-| **1.7** | 2026-07-30 | **ADR-017 amended — KHA-137 decided (subsection is DRAFT, awaiting the human).** D1's content hash **drops `receivedAt` entirely**: `contentHmac = HMAC-SHA256(k, scheme ‖ normalisedBody ‖ normalisedSender)`. Folding the delivery instant in at millisecond precision meant a carrier redelivery — which by definition arrives at a *different* instant — hashed differently, D1 missed, and a second transaction was written; QA reproduced this on a device, doubling a real total. The AC-A5.1 test missed it because it varied the provider id and held `receivedAt` fixed, i.e. it varied the one thing a redelivery does not control. **AC-A5.3 is not weakened**, verified in code rather than assumed: every transaction rule in `sa-core.json` requires an in-body `occurredAt` captured to the minute, so two genuinely separate purchases differ in the body itself; and AC-A5.2's flag path is `DuplicatePolicy.decide`'s D2/D3 tiers over parsed *fields*, never the content hash. Coarse timestamp buckets and a "same-hash-within-window" variant are both **rejected**, and for the same arithmetic: identical bodies imply the same in-body minute, so the genuine pair is co-located in time and lands in any bucket/window together — the timestamp discriminates nothing it is asked to discriminate, while every boundary silently reproduces KHA-137. One **irreducible residual** is recorded: two real purchases, same card, merchant, amount **and minute** are byte-identical and the second is suppressed; recovery is US-B4 manual entry. **Forward-only, no backfill, no schema change (DB stays 7)** — but every stored digest becomes stale, which makes ADR-006 KHA-133 item **(F)** (the `sms_provider_id` pre-check in `_withDedupGuard`) live rather than latent, so it **must ship in the same PR** under (G).1's own rule. |
-| **1.6** | 2026-07-30 | **ADR-006 extended — KHA-133 decided (subsection is DRAFT, awaiting the human).** A rule-pack fix is currently **forward-only**: the `NotFinancialSender` branch advances the watermark for a discarded message, `runIncremental` only reads `_id >` the watermark, and `importState == completed` is terminal — so KHA-128's corrected sender patterns cannot recover a single message already swept. Decision: **a user-triggered, bank-scoped re-scan, which is AC-A6.10's existing "check again" capability pointed at banks that were configured with wrong patterns rather than at a newly linked sender.** KHA-133 is therefore **not a new mechanism and rides with US-A6**. Both alternatives are rejected: an **automatic re-scan on pack change** re-walks the month on every APK install and silently back-dates transactions, and **recording the swept pack version in the watermark** buys a worse version of that at the price of a schema migration — unnecessary, because `advanceWatermark: false` plus D1 already make a bounded re-scan idempotent and cursor-neutral. **No schema change; DB stays where P5b leaves it.** Dedup safety is confirmed by code, not assumed: a `NotFinancialSender` discard leaves **no row at all**, so the re-scan's write is a *first* write with nothing to double-count, while already-stored messages are suppressed on `content_hmac`. **One real hole found:** `contentHmac` is computed over text sanitised with the pack's per-bank `redact[]`, so it is a function of the pack — change a `redact[]` and the hmac pre-check misses, the insert hits the `sms_provider_id` `UNIQUE` constraint, and a benign duplicate is reported as `failedWithError`, stalling the watermark. Latent today (all `redact` arrays are `[]`); closed by pre-checking `sms_provider_id` in `_withDedupGuard`. Privacy is settled **explicitly**: re-reading is not re-retaining, on the same ground ADR-007 v1.5 already used, and a bank-scoped re-scan reads *strictly less* than the sweep the app runs every 15 minutes. New **H-17**. Two prohibitions bind the in-flight KHA-128 PR (no `redact[]` changes, no `importState` reset) but add no work to it. |
+| **1.9** | 2026-07-30 | **ADR-006 extended — KHA-157 decided, approved.** The incremental watermark is **never seeded**. `lastProcessedSmsProviderId` defaults to `0`, `HistoricalImporter` deliberately never advances it (`advanceWatermark: false`, and correctly so), and **nothing else writes it either** — the only writer in `lib/` is `IngestWatermarkDao.advanceTo`, called from one place, `processAll`. So on a fresh install the first `runIncremental` calls `readSince(cursor: 0)`, and `SmsChannel.readSince` selects on `_ID > ?` with **no date bound at all** — the entire inbox, every year of it. Live on the human's device: 424 items in Needs Review. **AC-A3.1's "current calendar month only" was only ever enforced on the import path** (`readRange`, which *is* date-bounded), never on the incremental one, and the incremental one runs **first** in `foregroundSweepProvider`. Decision: **a one-time inbox high-water-mark seed**, taken inside `runIncremental` before its first read, with `lastProcessedSmsDate IS NULL` as the never-seeded discriminator. Rejected: **date-bounding `readSince`** (silently loses messages across every month rollover — NFR-A7), and **letting the importer advance the incremental watermark** (the exact conflation `historical_importer.dart` documents, and too late regardless, since the sweep runs before the import). **No schema change; DB stays where P5b leaves it.** **No watermark migration for affected installs** — the flood has already advanced the watermark past the whole inbox, so it is accidentally already correct, and `advanceTo`'s monotonic `WHERE` would refuse to move it back anyway. What remains is the **rows**, and auto-deleting user-visible financial rows on an app update is rejected; item (E) offers a user-triggered, date-bounded discard instead. **No interaction with KHA-133** — `RescanCoordinator` never calls `readSince`, reads only `importFromDate`, and moves neither cursor. |
+| **1.8** | 2026-07-30 | **ADR-007 extended — canonical SMS field taxonomy proposed, re-derived against SAMA Circular 42023876, approved.** Rules are currently written per bank from a blank page: 15+ message shapes across 7 banks in one day of device testing, each its own one-off regex. This records a **fixed slot vocabulary** — Tier 0 rule-declared (`intent`, `messageType`, `sign`, `affectsSpend`), Tier 1 universal (`amount`, `currency`, `instrumentRef`, `occurredAt`), Tier 2 conditional (counterparty in its three roles, `referenceNumber`, fee/FX, `settlementRef`, biller fields, balance-after), Tier 3 explicitly **not** slotted (branch, loyalty points, credit limit, IBAN). The evidence that the slot set is not arbitrary: a transaction SMS is a lossy rendering of an ISO 20022 `camt.054` notification, and three independent open-source parsers across India, Thailand and MENA converge on the same list. **No schema change and no rule change** — `MessageRule`/`FieldExtraction` already express every slot, and the six shipping banks already conform, so this is methodology plus one safety net. **The one real defect it exposes:** `rule_pack_loader.dart` `_parseExtract` validates `transform`, `maskPolicy`, `kind` and `timezone` but **never the field name**, and `RulePackMessageParser._extract` reads a hardcoded name list — so a typo'd `extract` key loads cleanly, is never read, and yields nothing. A **silent no-op**, which is exactly what `field_transforms.dart` makes fatal for a typo'd *transform* name. Not a live bug today (all packs use the correct names); closed by validating both `extract` keys and `requiredFields` against the vocabulary at load time. **Recommendation: apply forward, do not retrofit** the in-flight six-bank set — pattern churn is the risky operation (R-4, KHA-128) and there is nothing to retrofit at the field level. One zero-work carve-out for the reviewer of that dispatch, and one open question on `remainingBalance` serving two different quantities. |
+| **1.7** | 2026-07-30 | **ADR-017 amended — KHA-137 decided, approved.** D1's content hash **drops `receivedAt` entirely**: `contentHmac = HMAC-SHA256(k, scheme ‖ normalisedBody ‖ normalisedSender)`. Folding the delivery instant in at millisecond precision meant a carrier redelivery — which by definition arrives at a *different* instant — hashed differently, D1 missed, and a second transaction was written; QA reproduced this on a device, doubling a real total. The AC-A5.1 test missed it because it varied the provider id and held `receivedAt` fixed, i.e. it varied the one thing a redelivery does not control. **AC-A5.3 is not weakened**, verified in code rather than assumed: every transaction rule in `sa-core.json` requires an in-body `occurredAt` captured to the minute, so two genuinely separate purchases differ in the body itself; and AC-A5.2's flag path is `DuplicatePolicy.decide`'s D2/D3 tiers over parsed *fields*, never the content hash. Coarse timestamp buckets and a "same-hash-within-window" variant are both **rejected**, and for the same arithmetic: identical bodies imply the same in-body minute, so the genuine pair is co-located in time and lands in any bucket/window together — the timestamp discriminates nothing it is asked to discriminate, while every boundary silently reproduces KHA-137. One **irreducible residual** is recorded: two real purchases, same card, merchant, amount **and minute** are byte-identical and the second is suppressed; recovery is US-B4 manual entry. **Forward-only, no backfill, no schema change (DB stays 7)** — but every stored digest becomes stale, which makes ADR-006 KHA-133 item **(F)** (the `sms_provider_id` pre-check in `_withDedupGuard`) live rather than latent, so it **must ship in the same PR** under (G).1's own rule. |
+| **1.6** | 2026-07-30 | **ADR-006 extended — KHA-133 decided, approved.** A rule-pack fix is currently **forward-only**: the `NotFinancialSender` branch advances the watermark for a discarded message, `runIncremental` only reads `_id >` the watermark, and `importState == completed` is terminal — so KHA-128's corrected sender patterns cannot recover a single message already swept. Decision: **a user-triggered, bank-scoped re-scan, which is AC-A6.10's existing "check again" capability pointed at banks that were configured with wrong patterns rather than at a newly linked sender.** KHA-133 is therefore **not a new mechanism and rides with US-A6**. Both alternatives are rejected: an **automatic re-scan on pack change** re-walks the month on every APK install and silently back-dates transactions, and **recording the swept pack version in the watermark** buys a worse version of that at the price of a schema migration — unnecessary, because `advanceWatermark: false` plus D1 already make a bounded re-scan idempotent and cursor-neutral. **No schema change; DB stays where P5b leaves it.** Dedup safety is confirmed by code, not assumed: a `NotFinancialSender` discard leaves **no row at all**, so the re-scan's write is a *first* write with nothing to double-count, while already-stored messages are suppressed on `content_hmac`. **One real hole found:** `contentHmac` is computed over text sanitised with the pack's per-bank `redact[]`, so it is a function of the pack — change a `redact[]` and the hmac pre-check misses, the insert hits the `sms_provider_id` `UNIQUE` constraint, and a benign duplicate is reported as `failedWithError`, stalling the watermark. Latent today (all `redact` arrays are `[]`); closed by pre-checking `sms_provider_id` in `_withDedupGuard`. Privacy is settled **explicitly**: re-reading is not re-retaining, on the same ground ADR-007 v1.5 already used, and a bank-scoped re-scan reads *strictly less* than the sweep the app runs every 15 minutes. New **H-17**. Two prohibitions bind the in-flight KHA-128 PR (no `redact[]` changes, no `importState` reset) but add no work to it. |
 | **1.5** | 2026-07-30 | **ADR-007 amended — KHA-127/KHA-128 decided.** The **hard sender gate stays**, and **NFR-P4's "retain nothing" is upheld unamended** — because nothing was ever lost: the message stays in the Android SMS provider, which the app holds `READ_SMS` on and can re-read at will. The defect was **non-observability of a derived fact**, and a derived fact is fixed by deriving it, not by persisting it. Three options were weighed. **Option 1 (loosen gate 1 on body-shape heuristics → needs-review) is REJECTED as a gate**, because routing on a body guess means persisting the *content* of messages from senders never confirmed to be banks — precisely the harm NFR-P4/NFR-P4a exist to prevent — and because it infers what the user can simply be asked. **Option 2 (on-device classifier) is REJECTED for v1**, decisively on grounds of *evidence*, not effort: NFR-M3 forbids training on the user's real SMS, NFR-S6/R-10 mean we could never measure its precision in the field, and a weight blob has no `ruleId` to record (NFR-A1) and no reviewable diff (NFR-M2). **Option 3 (user sender-linking, PRD Addendum A) is the actual fix**, and it is upgraded from "complementary" to primary. Option 1's heuristic **survives, relocated**: as an in-memory, per-sender-aggregated, **advisory ranking signal on the sender-recognition screen only** — never a gate, never persisted — where a false positive costs one row of screen position instead of a database row. Two additions the options list missed and which carry most of the value: **(i) sender-name suggestion from the pack's own `aliases`/`displayName`** — the string needed to recognise `Jazira Bank` was *already shipped* in `sa-core.json` (`aliases: ["ALJAZIRA","BAJ","الجزيرة"]`) and the gate never consulted it; **(ii) a proactive unrecognised-sender health signal**, because Addendum A only links the screen from *empty* states and the silent-sender-ID-change case has a non-empty home screen. NFR-P4 gains one clarification, not a relaxation: **a content-free, sender-free aggregate count is not retention of a message** and may be surfaced and logged (ADR-015). |
 | **1.4** | 2026-07-29 | **ADR-008 amended again — KHA-106/KHA-107 decided together.** v1.3's trailing-digit **corroboration signal (ii) (“≥4 digits, no other corroboration”) is WITHDRAWN**; adjacency to a structural marker is now the *only* corroborator, because no length threshold can be made residue-safe — for any N, two strings sharing a prefix and carrying different N-digit runs always reduce to the same key (KHA-106). `CategorizationConfig.referenceDigitRunMinLength` is **deleted**, not retuned. The strip is redefined on **the last digit run that is trailing modulo structural noise**, with adjacency read on **either side** of the run, so `PANDA STORE 1234` and `PANDA 1234 STORE` produce one key (KHA-107); swapping steps 6 and 7 is rejected because it would destroy the only surviving corroborator. Withdrawing signal (ii) also makes `MerchantKey.of` genuinely **idempotent**, so the doc comment's claimed invariant becomes true rather than being corrected away. Cost, disclosed: `PANDA 1234` no longer equals `PANDA` — it is flagged, not merged. Docs-only here; the code change rides R-16's window. |
 | **1.3** | 2026-07-29 | **ADR-008 amended — KHA-98/99/100/102 decided.** A **corroboration rule** is stated normatively: a token may be stripped only if it is *type-level* incapable of distinguishing two businesses. Consequences, all settled: **city names are dropped from the noise list entirely** (option (b) — KHA-98); the **trailing-digit strip is bounded and corroborated** (at most one run, adjacency or ≥4 digits — KHA-99); the **all-noise fallback key is removed**, so a string that tokenises to nothing yields *no merchant identity* rather than a placeholder identity (KHA-102, going deliberately further than QA's stated fix direction); **T3 is redefined over the token multiset**, not the token set (KHA-100). A clean-migration posture is claimed with an explicit premise and an explicit expiry (new risk **R-16**). **P4b must ship a "these are two different shops" affordance** — new **H-15**, and a `/revise-design` round. No other ADR is touched. |
@@ -453,11 +463,17 @@ v1.0 got wrong is the **assumption, never stated, that the worker can open the d
 cannot while the app is locked (ADR-005). ADR-018 resolves that and **replaces the latency table
 in this ADR** — the table below is superseded and retained only so the correction is legible.
 **Extended by the KHA-133 decision (v1.6, 2026-07-30)** — the dated subsection at the end of this
-ADR, currently **DRAFT, awaiting the human**. The watermark and `importState` semantics below are
+ADR, **APPROVED**. The watermark and `importState` semantics below are
 upheld unchanged; what v1.0 never provided is a way to **re-scan history after the rules change**,
 which makes every rule-pack fix forward-only. Read that subsection before touching
 `_processOne`'s `NotFinancialSender` branch, `HistoricalImporter.runOrResume`, `_withDedupGuard`,
 or any `redact[]` array in a rule pack.
+**Extended again by the KHA-157 decision (v1.9, 2026-07-30)** — the second dated subsection at the
+end of this ADR, **APPROVED**. Step 3 of Layer 1 below says the pipeline reads rows with
+`date > lastProcessedSmsDate OR _id > lastProcessedSmsProviderId`. **The shipped code reads only
+the `_id` half, and that watermark is never seeded**, so on a fresh install the "incremental" read
+is the whole inbox. Read that subsection before touching `runIncremental`, `SmsSource`, or
+`SmsChannel.readSince`.
 
 **Context.** `android.provider.Telephony.SMS_RECEIVED` is on Android's implicit-broadcast
 exemption list, so a manifest-registered receiver is delivered even when the app process is
@@ -688,6 +704,139 @@ to offer the re-check at the end of ADR-007's existing imported-pack activation 
 where the user is already standing and no state is needed. Re-open trigger: if a second pack
 correction ships after US-A6 and the user does not notice it, add the stored version and the
 prompt. See **H-17**.
+
+#### KHA-157 decision — **the incremental watermark is seeded once, from the inbox's high-water mark, before the first sweep ever reads.** Decided 2026-07-30.
+
+> **STATUS: APPROVED (2026-07-30).** Scoped to this subsection, per the house style established by
+> v1.1–v1.8: the document's own `APPROVED` line stays as it is, because flipping the whole
+> architecture to `DRAFT` would block `/build` on every unrelated in-flight phase for one decision.
+> The rest of ADR-006 is unchanged and remains in force. **Item (E)'s open question is resolved:
+> ship the user-triggered, date-bounded discard.** 424 rows is too many to dismiss by hand, the
+> mechanism is safe by construction (still-pending items only, audit-logged, cannot re-flood per
+> (E)'s own argument), and leaving it undone converts a fixed ingestion bug into a standing UI
+> chore for the human. Implement (A)–(G) together, in one PR.
+
+**What is broken, and it is live.** On the human's real device, 424 items flooded Needs Review.
+Three facts compose:
+
+1. `lastProcessedSmsProviderId` is `.withDefault(const Constant(0))` — a fresh install starts at 0.
+2. `SmsChannel.readSince` selects on `"${Telephony.Sms._ID} > ?"` and **nothing else**. There is no
+   date bound on this path. (`readRange`, the *import* path, does have one: `DATE >= ? AND _ID > ?`.
+   That path is correct and is not being changed.) `IngestCursor.lastProcessedDate` is carried
+   across the boundary and then **never used** by `AndroidSmsSource` — ADR-006 Layer 1 step 3
+   promises `date > lastProcessedSmsDate OR _id > lastProcessedSmsProviderId`; only the second
+   disjunct was ever implemented.
+3. **Nothing seeds the watermark away from 0.** Verified rather than assumed: the only writer of
+   `last_processed_sms_provider_id` anywhere in `lib/` is `IngestWatermarkDao.advanceTo`, and its
+   only caller is `IngestionPipeline.processAll` under `advanceWatermark: true`.
+   `HistoricalImporter._walk` passes `advanceWatermark: false` **deliberately and correctly** — the
+   two cursors track different things and conflating them would skip messages that arrive
+   mid-import.
+
+So whichever incremental trigger fires first on a fresh install — and all four funnel into
+`runIncremental` — reads `_id > 0`: every SMS the device has ever received, fed through parse,
+classify, dedup and write-or-review. Messages from years before these banks had rules, or before a
+format existed, land in the review queue. **AC-A3.1's "from the start of the current calendar
+month" was only ever enforced on the import path.** The incremental path silently promised nothing,
+and in `foregroundSweepProvider` it runs *first*, before the importer that does honour the bound.
+
+This is also the one privacy-adjacent line in the defect: the app processes and retains sanitised
+text far outside the window AC-A3.1 documents. The fix **reduces** what is read and retained to
+what the ACs already say.
+
+**Why the test suite passed.** The incremental fakes are constructed with in-window messages and a
+watermark at 0, so "0 means the beginning of everything" is the fixture's normal, invisible state.
+The fixture cannot express the bug — the same lesson KHA-137 recorded one version ago.
+
+**The decision.** A **one-time high-water-mark seed**: the newest `_id`/`date` present in the inbox
+at the moment the app first has an incremental sweep to run. Before that point there is no
+"incremental"; after it, `runIncremental` only ever sees genuinely new messages. The current month
+remains the historical importer's job, unchanged, on its own independently date-bounded read.
+
+**Options rejected.**
+
+| Option | Assessment |
+|---|---|
+| **Date-bound `readSince` too** (`DATE >= startOfCurrentMonth AND _ID > ?`) | **Rejected — it introduces silent loss at every month rollover.** A freshly computed bound means a message that arrived on the 31st and was not swept (device off, app locked — ADR-018 makes that the *normal* case) is below the bound on the 1st and is never read again. It trades a visible flood for an invisible NFR-A7 violation, which is the wrong direction to be wrong in. A *frozen* bound would avoid that but is just the seed, expressed less precisely. |
+| **Let `HistoricalImporter` advance the incremental watermark on completion** | **Rejected twice over.** It is the exact conflation `historical_importer.dart`'s own doc comment forbids, and it is too late regardless: `foregroundSweepProvider` calls `runIncremental()` *before* `runOrResume()`, and Layers 1 and 2 may never run the importer at all. The flood happens before the seed would. |
+| **Seed from the SMS-permission grant callback** | **Rejected as the sole mechanism.** Permission can be granted from the OS Settings screen, where no app callback fires, and can be auto-revoked and re-granted (Android 11+). A hook that misses cases becomes a second code path that is wrong on the rare path — precisely what ADR-006's "all four triggers, one method" property exists to prevent. |
+| **A new `watermarkSeeded` column** | **Rejected — a schema migration to record a fact an existing column already carries.** See (B). |
+
+**Normative — what the implementation must do.**
+
+**(A) A content-free high-water-mark read.** `SmsSource` gains
+`Future<InboxHighWaterMark?> highWaterMark()` — the newest inbox row's `_id` and `date`, **ids and
+a timestamp only, never a body and never a sender**. `SmsChannel` implements it as a one-row query.
+It returns **`null` when the inbox cannot be read** (missing permission / `SecurityException`),
+which must be distinguishable from a readable but empty inbox. That distinction is load-bearing:
+seeding while permission is denied would record `0`, mark the watermark seeded, and reproduce this
+bug the moment permission is granted. An empty-but-readable inbox seeds `providerId = 0`,
+`date = clock.nowUtc()`.
+
+**(B) The discriminator is `lastProcessedSmsDate IS NULL`, and no column is added.** `advanceTo`
+writes both fields together and the date is non-nullable in that statement, so a null date means
+"never seeded and never advanced" — and one write makes it non-null forever, with no path back.
+**This is deliberately not the `idle`-means-`completed` conflation** that
+`IngestWatermarkDao.completeImport` documents: there, one value meant two different things; here,
+one write moves the row out of the initial state permanently. If any future writer ever sets the
+provider id without the date, this guarantee dies — so `advanceTo` and the seed are the only
+permitted writers of either field.
+
+**(C) The seed happens inside `runIncremental`, before its first read.** Not in a provider, not in
+a permission callback, not in the importer. All four triggers already funnel through this one
+method, so the guard cannot be bypassed by adding a fifth. Shape:
+
+```
+row = watermarkDao.current()
+if (row.lastProcessedSmsDate == null) {
+  hwm = smsSource.highWaterMark()
+  if (hwm == null) return IngestionRunResult();   // unreadable: seed nothing, sweep nothing
+  watermarkDao.seedTo(hwm)                         // reuses advanceTo's monotonic UPDATE
+  return IngestionRunResult();                     // nothing is newer than what we just read
+}
+```
+
+Read the high-water mark **first, then write it** — never re-read after the write. A message
+arriving inside that window has an `_id` *above* the value being written, so it is picked up by the
+next sweep. The opposite ordering would skip it.
+
+**(D) The importer is untouched.** `advanceWatermark: false` stays, `readRange` stays date-bounded,
+`importFromDate` stays frozen. The seed and the import bound answer different questions ("where does
+the future start" vs "how far back do we look") and must remain independent, which is the same
+reasoning ADR-006 already applies to the two cursors.
+
+**(E) Already-affected installs: no watermark migration, and no automatic deletion.** The flood has
+already advanced the watermark past the entire inbox, so on the human's device it is accidentally
+already at the high-water mark; the (C) guard sees a non-null date and does nothing. There is
+nothing to correct, and `advanceTo`'s monotonic `WHERE` would refuse a backwards correction anyway.
+What remains is the **rows**. **Auto-deleting them on upgrade is rejected** — a silent bulk deletion
+of user-visible financial rows during an app update is a worse failure than the flood, and it
+cannot tell an item the user has already acted on from one they have not. Ship instead a
+**user-triggered, date-bounded discard** in the review queue: *"N items received before
+&lt;import window start&gt; — discard them"*, acting only on **still-pending** review items, deleting the
+corresponding `raw_message` rows too (that text was never authorised by AC-A3.1), and recorded as a
+user action in the audit trail (ADR-010). Re-flooding afterwards is impossible: the watermark is
+above them and KHA-133's re-scan window is `min(importFromDate, startOfCurrentMonthUtc(now))`, which
+cannot reach them. **This is the one item that needs the human's call** — the alternative is
+dismissing 424 rows by hand.
+
+**(F) KHA-133 is unaffected, verified in code.** `RescanCoordinator` never calls `readSince` (the
+only two callers in `lib/` are `AndroidSmsSource` and `runIncremental`), reads the watermark only
+for `importFromDate`, and passes `advanceWatermark: false`. The seed moves neither its window nor
+either cursor.
+
+**(G) A test that can fail.** The regression fixture must contain messages dated **months before**
+the current window, with a fresh watermark, and assert that the first `runIncremental` examines
+**zero** of them; plus one asserting that a message arriving *after* the seed is still ingested,
+which is the property the seed must not break.
+
+**Residual, stated plainly.** `_id` is reset when the user's SMS database is restored from a backup
+— the hazard `ingest_watermark_table.dart` already names. A high seed makes it bigger: post-restore
+messages can land below the watermark and be silently skipped. Not fixed here; the recovery is
+KHA-133's re-check, which is date-bounded and does not depend on `_id`. Re-open trigger: if a
+restore is ever observed on a real device, `lastProcessedSmsDate` stops being merely a
+discriminator and must become the second half of the disjunct ADR-006 Layer 1 step 3 already
+promises.
 
 ---
 
@@ -930,9 +1079,9 @@ task or violate the rule: the rule author may *read* real samples the user delib
 must then commit a **synthetic** fixture that mimics the shape. Real message text never enters the
 repository.
 
-#### Canonical SMS field taxonomy — the fixed slot vocabulary rules are written against. Proposed 2026-07-30.
+#### Canonical SMS field taxonomy — the fixed slot vocabulary rules are written against. Proposed 2026-07-30. Re-derived against SAMA Circular 42023876, 2026-07-30. Approved 2026-07-30.
 
-**STATUS: DRAFT — awaiting human approval.** Everything above in ADR-007 stays `APPROVED` and is
+**STATUS: APPROVED.** Everything above in ADR-007 stays `APPROVED` and is
 unchanged by this subsection. It adds **no schema change, no rule change, and nothing that blocks the
 in-flight six-bank rule dispatch** — it is a vocabulary, a checklist, and one loader-validation
 recommendation. Read the recommendation at the end before anyone retrofits anything.
@@ -943,12 +1092,158 @@ bank — each written as its own regex from a blank page. That does not scale, a
 format-teaching capability being scoped in parallel: you cannot ask a user to *label* parts of a
 message unless there is a small, fixed, well-understood set of labels to label with.
 
-##### The claim, and the evidence for it
+##### The primary authority: the message shape is regulated, not emergent
 
-A bank transaction SMS is not free-form prose. It is a **lossy, human-readable rendering of a
-bank-to-customer debit/credit notification** — the thing ISO 20022 models formally as `camt.054`.
-That is why the slot set is not arbitrary, and it is why independent parsers built for completely
-different markets converge on nearly the same list:
+The slot set is not our invention and not a generalisation from samples. In Saudi Arabia **the
+content of a bank transaction notification is mandated by the regulator**, which makes this the one
+market where a parser can be written against a published specification rather than against
+guesswork.
+
+> **SAMA (Saudi Central Bank) — *Standardization of Notification Elements Sent to Financial
+> Institutions Customers*, Circular No. 42023876, dated 14/04/1442H (≈ 29/11/2020), in force.**
+> Binds **all** financial institutions in the Kingdom. Its stated purpose is customer awareness via
+> notification messages covering transactions on **accounts, card memberships, and electronic
+> wallets**. It sets a **minimum** element set per transaction category in **Table No. (1)**, and a
+> **standardised bilingual (Arabic–English) transaction-description vocabulary** in **Table No. (2)**.
+> Extended in 2021 by *The Key Elements of SMS Notifications for Newly Updated Mada Transactions*
+> (compliance due end of Q1 2022). Adjacent instruments that also constrain notification content:
+> *Instant SMS Notification Service* (SMS for **every** debit and credit on personal accounts and
+> credit-card accounts) and the *Rules of Issuance and Operation of Credit Cards*.
+
+This reframes the whole exercise. A Saudi bank SMS is not free-form prose that we hope has structure;
+it is a rendering of a **regulator-specified minimum field set**. Consequences that matter
+architecturally:
+
+- **The slot set has a floor we can rely on.** If a rule cannot find `amount`, `occurredAt` or an
+  instrument reference in a transaction-shaped message from a licensed institution, the likeliest
+  explanation is a defect in *our* pattern, not a bank that omitted the field. That flips the default
+  diagnosis for R-4/KHA-128-class losses.
+- **SAMA defines the ceiling of what *will appear*; our tiers define the floor of what we *keep*.**
+  These are different questions and the gap is deliberate. SAMA mandates that banks *send* things
+  (available credit, total amount due) that NFR-S2/NFR-P4 would rather we did not *store*. Receiving
+  and discarding a field is not a conformance failure — see Tier 3.
+- **It is a prior, not a guarantee.** The SMS is still a lossy rendering chosen by each bank's
+  template author, and observed messages deviate. The regulation tells a rule author what to *look*
+  for; only a real sample tells them what the bank actually *printed*. Rules stay sample-verified.
+
+**Both tables are now retrieved verbatim** (2026-07-30, follow-up fetch — the first pass could not
+read through the rulebook's table viewer; a direct fetch of `/en/table-no-1` and `/en/table-no-2`
+did). Full text below. Nothing in this subsection now rests on an unverified summary.
+
+*Sources:* the circular at `rulebook.sama.gov.sa/en/standardization-notification-elements-sent-financial-institutions-customers`;
+its tables at `/en/table-no-1` and `/en/table-no-2`; the 2021 extension at
+`/en/key-elements-sms-notifications-newly-updated-mada-transactions`; and the adjacent
+`/en/instant-sms-notification-service` and `/en/rules-issuance-and-operation-credit-cards`.
+
+##### Table No. (1), verbatim — minimum elements per notification category
+
+18 categories, each with its own minimum field list. Reproduced in full since this is the primary
+engineering reference for what a rule's `requiredFields`/`extract` set should expect to find.
+
+| Category | Minimum elements |
+|---|---|
+| Internal Purchases | Amount, Currency · Store Name · Card Type (Mada, Credit), Executed Through (e.g. Apple Pay, Mada Pay, Atheer) · Card Number (Last Four Digits) · Date · Time |
+| International Purchases | Amount, Currency · Store Name · Country · Card Type (Mada, Credit), Executed Through · Card Number (Last Four Digits) · Date · Time |
+| Internal Cash Withdrawal | Amount, Currency · Withdrawal Location (ATM Location or Branch/Code) · Card Type (Mada, Credit) · Card Number (Last Four Digits) · Date · Time |
+| International Cash Withdrawal | Amount, Currency · Country · Fees · Card Type (Mada, Credit) · Card Number (Last Four Digits) · Date · Time |
+| Checks | Amount, Currency · Payee Name / Cheque Holder's Account Number · Date · Time |
+| Cash Deposit | Amount, Currency · Deposit Method (e.g. Branch or ATM) · Account Number · Date · Time |
+| Domestic Transfers | Transferred Amount, Currency · Fees · Sender's Name (incoming) · Receiver's Name (outgoing) · Sender's Account Number (incoming) · Receiver's Account Number (outgoing) · Date · Time |
+| International Transfers | Transferred Amount, Currency · Fees · Sender's Name · Receiver's Name · Sender's Account Number · Receiver's Account Number · Transfer Intermediary Company Name (e.g. Western Union) · Destination Country · Date · Time |
+| Internet Purchases | Amount, Currency · Website or Store · Card Type (Mada, Credit), Executed Through · Card Number (Last Four Digits) · Account Number · Date · Time |
+| Government Bill Payments | Amount, Currency · Entity · Service · Invoice Number · Date · Time |
+| Other Bill Payments | Amount, Currency · Biller · Service · Invoice Number · Date · Time |
+| Financing / Refinancing Transactions | Financing Type · Total Amount of Financing · Monthly Installment · Account Number · Date · Time |
+| Monthly Financing Deduction | Financing Type · Due Installment · **Total Remaining** · Amount · Account Number · Date · Time |
+| Fees | Amount, Currency · Reason · Account Number · Date · Time |
+| Refund / Reversal | Amount, Currency · Country (external transactions) · Store/Website/Entity · Account Number · Date · Time |
+| Mobile App Transactions | App Name (e.g. Apple Pay) · Amount, Currency · Store Name or Website · Card Type (Mada, Credit), Card Number (Last Four Digits) · Account Number · Date · Time |
+| E-Wallet Top-Up | Wallet Name (e.g. STCPay) · Amount, Currency · Top-Up Channel (Mada, Credit, SADAD, etc.) · Card Number (Last Four Digits) · Date · Time |
+| E-Wallet Transactions | Amount, Currency · Card Type (Mada, Credit) · Card Number (Last Four Digits) · Store or Website · Date · Time |
+
+Two corrections this makes to claims below: **no category names a standalone "reference number"
+element** — transfers are identified by sender/receiver name + account number, not a reference
+code, so `referenceNumber`'s status as ADR-017 D2's dedup key is Massrofy's own design choice, not
+a SAMA mandate; and **"Refund" and "Reversal" are one category, not two** in Table No. (1) — Table
+No. (2)'s separate "Reverse Transaction" term is a *description*, not evidence of a second category
+structure. The `reversal`-aliased-to-`refund` decision below is correct for exactly this reason,
+made stronger, not weaker.
+
+##### Table No. (2), verbatim — standardised bilingual transaction-description vocabulary
+
+60 entries. This is the anchor-token reference for `messageType` regex — Arabic and English wording
+a rule's message-body pattern should key on, never `senderPatterns`.
+
+| Arabic | English |
+|---|---|
+| سداد فاتورة | Bill Payment |
+| سداد فاتورة لمرة واحدة | Bill Payment one time |
+| إصدار شيك مصدّق | Certified Cheque Issued |
+| بطاقة ائتمانية الغاء حجز مبلغ | Credit Card Cash Release |
+| بطاقة ائتمانية حجز مبلغ | Credit Card Cash Reserve |
+| بطاقة ائتمانية استرجاع نقدي | Credit Card Cashback |
+| بطاقة ائتمانية تأكيد سداد | Credit Card Credited |
+| بطاقة ائتمانية تسديد | Credit Card Payment |
+| بطاقة ائتمانية استرداد مبلغ | Credit Card Refund |
+| إيداع رسوم | Credit Transaction Fees |
+| حوالة واردة من بطاقة | Credit transfer from card |
+| حوالة واردة بين حساباتك | Credit transfer Between Your Accounts |
+| حوالة واردة حساب مواطن | Credit transfer Citizen Account |
+| سحب نقدي طارئ | Credit transfer Emergency Cash Withdrawal |
+| حوالة واردة من حسابك الجاري | Credit transfer From your Current Account |
+| حوالة واردة من حسابك الاستثماري | Credit transfer From Your Investment Account |
+| حوالة واردة حافز | Credit transfer Hafiz |
+| حوالة واردة داخلية | Credit transfer Internal |
+| حوالة واردة دولية | Credit transfer International |
+| حوالة واردة تمويل | Credit transfer Loan |
+| حوالة واردة محلية | Credit transfer Local |
+| حوالة واردة راتب | Credit transfer Salary |
+| حوالة واردة كفيل | Credit transfer Sponsor |
+| حوالة واردة مكافأة طلاب | Credit transfer Student Reward |
+| خصم رسوم | Debit Transaction Fees |
+| حوالة صادرة الى بطاقة | Debit Transfer to card |
+| حوالة صادرة بين حساباتك | Debit Transfer Between Your Account |
+| حوالة صادرة داخلية | Debit Transfer Internal |
+| حوالة صادرة دولية | Debit Transfer International |
+| خصم قسط تمويل | Debit Transfer Loan Instalment |
+| حوالة صادرة محلية | Debit Transfer Local |
+| حوالة صادرة راتب | Debit Transfer Salary |
+| حوالة صادرة مكفول | Debit Transfer Sponsored |
+| حوالة صادرة الى حسابك الجاري | Debit Transfer To Your Current Account |
+| حوالة صادرة الى حسابك الاستثماري | Debit Transfer To Your Investment account |
+| خصم شيك مصدق | Debit Certified Cheque |
+| خصم شيك ورقي | Debit Paper Cheque |
+| إيداع صراف آلي | Deposit ATM |
+| إيداع فرع | Deposit Branch |
+| إيداع شيك مصدق | Deposit Certified Cheque |
+| إيداع شيك ورقي | Deposit Paper Cheque |
+| شراء عملة أجنبية | Foreign Currency Purchase |
+| سحب صراف آلي دولي | International ATM Withdrawal |
+| مدفوعات وزارة الداخلية | MOI Payments |
+| شراء إنترنت | Online Purchase |
+| امر مستديم سداد فواتير | Permanent transfer Bill Payment |
+| امر مستديم حوالة صادرة داخلية | Permanent transfer Debit transfer Bank internal |
+| امر مستديم حوالة صادرة بين حساباتك | Permanent transfer Debit transfer Between Your Accounts |
+| امر مستديم حوالة صادرة دولية | Permanent transfer Debit transfer International |
+| امر مستديم حوالة صادرة محلية | Permanent transfer Debit transfer Local |
+| امر مستديم حوالة صادرة راتب | Permanent transfer Debit transfer Salary |
+| امر مستديم مدفوعات وزارة الداخلية | Permanent transfer MOI Payments |
+| شراء عبر نقاط البيع دولية | PoS International Purchase |
+| شراء عبر نقاط البيع | Pos Purchase |
+| شراء ونقد عبر نقاط البيع | Pos Purchase & Cashback |
+| تسوية نقطة البيع | PoS settlement |
+| حوالة واردة | Received transfer |
+| استرجاع مدفوعات وزارة الداخلية | Refunding MOI Payments |
+| حوالة عكسية | Reverse Transaction |
+| سحب صراف آلي | ATM Withdrawal |
+| سحب فرع | Branch Withdrawal |
+
+##### Secondary corroboration — the same shape is reached independently elsewhere
+
+SAMA is the authority; these remain in the record because they show the slot set is a property of the
+*domain*, not of one regulator, which is what makes it safe to fix the vocabulary rather than keep
+rediscovering it per bank. ISO 20022 `camt.054` is the formal model of exactly this artefact — a
+bank-to-customer debit/credit notification.
 
 | Source | Slots it settled on |
 |---|---|
@@ -957,8 +1252,7 @@ different markets converge on nearly the same list:
 | `pennywiseai-tracker` (Kotlin, 85+ banks across 14 countries, Arabic + English, includes Saudi) | `amount, type, merchant, reference, accountLast4, balance, creditLimit, currency, fromAccount, toAccount, isFromCard, bankName, timestamp` |
 | `transaction-parser-th` (Thai market) | provider, type, date, time, from/to account, amount, balance |
 
-Four independent derivations, three markets, one shape. That is strong enough to **fix** the
-vocabulary rather than keep rediscovering it per bank.
+One regulator and four independent derivations across three markets, one shape.
 
 ##### Tier 0 — declared by the rule, never extracted
 
@@ -970,40 +1264,96 @@ writes the rule — which is why they are auditable and why no regex should try 
 **`messageType` carries the channel dimension, and should keep carrying it.** POS vs ecommerce vs ATM
 vs wallet is the one "field" that is frequently *not* present as a span at all — it is implied by
 which template the bank chose. Encoding it as `pos_purchase` / `online_purchase` / `withdrawal`
-rather than as an extracted `channel` slot is correct and stays. Recommended vocabulary, shaped
-`<event>` optionally suffixed `_<channel>`:
+rather than as an extracted `channel` slot is correct and stays. SAMA's own structure agrees: it
+organises the mandate by *transaction category*, and category, not a separate channel field, is what
+selects the required elements.
+
+**SAMA's categories, mapped.** Table No. (1), now retrieved verbatim above, has exactly 18: Internal
+Purchases, International Purchases, Internal/International Cash Withdrawal, Checks, Cash Deposit,
+Domestic/International Transfers, Internet Purchases, Government/Other Bill Payments,
+Financing/Refinancing, Monthly Financing Deduction, Fees, Refund/Reversal, Mobile App Transactions,
+E-Wallet Top-Up, E-Wallet Transactions. Mapping those against the shipped vocabulary is what this
+re-derivation was for, and it found **four genuine gaps and four false ones.**
+
+Vocabulary, shaped `<event>` optionally suffixed `_<channel>`. **Bold entries are added by this
+revision;** the rest are unchanged and already shipping in `sa-core.json`:
 
 `pos_purchase` · `online_purchase` · `withdrawal` · `refund` · `transfer_out` · `transfer_in` ·
-`salary_income` · `bill_payment` · `card_repayment` · `installment` · `fee` · `account_debit` ·
-`account_credit`, plus the `intent: ignore` set `otp` · `marketing` · `balance_info`.
+`salary_income` · `bill_payment` · `card_repayment` · `installment` · `fee` · **`deposit`** ·
+**`cheque`** · **`wallet_topup`** · **`reversal`** · `account_debit` · `account_credit`, plus the
+`intent: ignore` set `otp` · `marketing` · `balance_info`.
+
+| Added | Why the gap is real |
+|---|---|
+| `deposit` | SAMA treats deposits as their own category. Today a cash or salary-unrelated deposit can only be `account_credit`, which is the fallback bucket — it parses, but the user sees an unlabelled credit. |
+| `cheque` | Its own SAMA category, and it carries a cheque number that belongs in `referenceNumber`. Nothing in the current vocabulary names it. |
+| `wallet_topup` | **The highest-value addition.** Loading STC Pay / urpay / an Apple Pay balance is a SAMA category and is common in this market. Today it lands as `transfer_out` or `account_debit`. It is structurally a `card_repayment`-shaped event — *money moving between the user's own instruments* — and mislabelling it hides that from anyone reasoning about double counting. See the `affectsSpend` note below; the type must exist before that judgement can even be expressed. |
+| `reversal` | SAMA distinguishes reversals from refunds. Arithmetically both are credits back, so **aliasing `reversal` to `refund` in v1 is acceptable and loses no money** — the reason to name it is that a reversal cancels a specific prior authorisation and is the correct future hook for matching-and-cancelling rather than posting income. Lowest priority of the four. |
+
+**Considered and deliberately *not* added** — recording these matters as much as the additions,
+because each is a plausible-looking mistake:
+
+- *International purchase / withdrawal as separate types.* The international-ness is already carried,
+  and carried better, by the presence of `convertedAmount` / `exchangeRate` / `feeAmount`. A type
+  suffix would duplicate state that can then disagree with itself.
+- *Apple Pay / mada Pay / Atheer / mobile-app as types.* SAMA mandates an **"Executed Through"**
+  element naming the wallet or channel, so this *will* appear in real messages. It is a channel, not
+  an event, and it changes no number — Tier 3. If it ever earns representation it is a `_<channel>`
+  suffix, not a new event.
+- *Financing disbursement.* A drawdown is a credit; `account_credit` carries it. Adding a type for a
+  once-a-year event is vocabulary bloat at `TIER: personal`.
+- *Government payment as distinct from bill payment.* SADAD-shaped and already served by
+  `bill_payment` + `billerCode`.
+
+**`affectsSpend` for `wallet_topup` is a deliberate per-rule call, not a default.** Massrofy ingests
+bank SMS, so a top-up is normally the *only* visible event and should count as spend (`true`). If the
+wallet's own notifications are also being ingested, counting both double-counts — the identical trap
+`card_repayment` already documents. Rule authors must decide it explicitly and say why.
 
 This stays **recommended, not enforced.** §5.2's forward-compatibility rule — an unrecognised
 `messageType` routes to the review queue and is never discarded — is load-bearing and must not be
 traded for a closed enum. A list a human checks against beats an enum that rejects a newer pack.
+That property is now doing more work than before: the four new types must be able to appear in a pack
+without an engine change, and under §5.2 they can.
+
+**Table No. (2) is the anchor-token reference for whoever writes the discriminating regex**, now
+reproduced in full above — 60 Arabic/English term pairs, e.g. `سداد فاتورة` / "Bill Payment". Two
+cautions: it is a *description* vocabulary, not a sender-identity one, so it informs message-body
+patterns and **not** `senderPatterns` — sender identity stays resolved per ADR-007 step 2 and
+AC-B12.3 — and a bank that words a message differently is still a bank whose message we must parse,
+so the list is a starting point for patterns, never a filter on them.
 
 ##### Tier 1 — universal slots
 
-Present in essentially every transaction-shaped message, in every bank and both languages.
+Present in essentially every transaction-shaped message, in every bank and both languages. **All four
+correspond to elements SAMA mandates as a minimum across categories** — amount and currency, date and
+time, and card details given as *type* plus *last four digits*.
 
 | Slot | Note |
 |---|---|
 | *(bank identity)* | **Not a slot.** Resolved from the sender, never from the body (ADR-007 step 2, AC-B12.3). Listed only so nobody adds a `bankName` extract. |
-| `amount` | The movement's value. |
-| `currency` | Satellite of `amount`. Frequently absent as a span and supplied by `literal: "SAR"` — that is exactly what `literal` is for. |
-| `instrumentRef` (+ `…Network`, `…Type`) | Which card or account. `kind` is rule-declared, never guessed from digit count (AC-B13.1/2). |
-| `occurredAt` | Universal as a *concept*, not as a span — `received_at_fallback` covers its absence. |
+| `amount` | The movement's value. SAMA-mandated. |
+| `currency` | Satellite of `amount`. SAMA mandates it alongside the amount, but banks routinely omit it from the SAR-domestic template because it is implied — so it stays frequently absent as a span and supplied by `literal: "SAR"`. That is exactly what `literal` is for. |
+| `instrumentRef` (+ `…Network`, `…Type`) | Which card or account. **SAMA corroborates the split we already enforce:** it mandates *card type* (mada, credit) and *card number — last four digits* as two separate elements. That is the regulator independently confirming AC-B13.1/2 — `kind` is rule-declared, never guessed from digit count. Guessing was already banned; it is now also contrary to how the source data is specified. |
+| `occurredAt` | SAMA mandates date **and time**, which strengthens this slot's status: a missing timestamp span is a template quirk or a pattern defect, not the norm. `received_at_fallback` stays the correct safety net but should be the exception, and a rule relying on it habitually is worth a second look. |
 
 ##### Tier 2 — conditional slots, determined by `messageType`
 
+SAMA's remaining mandated element families — reference/account numbers, transaction location or
+entity name, and the FX and fee elements required for international and credit-card transactions —
+land here. Every one already has a slot; **the re-derivation added no Tier 2 slot.** What it changed
+is the confidence level: several of these are now known to be *required to be present*, not merely
+observed sometimes.
+
 | Slot | Appears on |
 |---|---|
-| `merchant` | purchases, refunds, bill payments (biller as merchant), ATM (location as merchant) |
+| `merchant` | purchases, refunds, bill payments (biller as merchant), ATM (location as merchant). SAMA's "transaction location or entity name" element |
 | `counterpartyName` | transfers in/out, salary |
 | `counterpartyBankName` | interbank transfers. This is the **other** bank; confusing it with the sending bank is the easiest wrong answer in the whole taxonomy |
-| `referenceNumber` | transfers, some bill payments. Where present it is the reliable dedup key (ADR-017 D2) |
-| `remainingBalance` (+ `…Currency`) | installments, and any bank that prints a balance-after |
-| `feeAmount` (+ `…Currency`) | FX purchases, some transfers |
-| `convertedAmount` (+ `…Currency`), `exchangeRate` | foreign-currency purchases |
+| `referenceNumber` | transfers, cheques (the cheque number), some bill payments. **SAMA mandates a reference or account number for several categories**, which materially strengthens ADR-017 D2 — the dedup key we prefer is one the regulator requires to be there |
+| `remainingBalance` (+ `…Currency`) | financing/installment messages — Table No. (1)'s "Total Remaining". **Not** a plain account balance-after; see the open question at the end for why |
+| `feeAmount` (+ `…Currency`) | FX purchases, some transfers. SAMA-mandated for international card transactions |
+| `convertedAmount` (+ `…Currency`), `exchangeRate` | foreign-currency purchases. `exchangeRate` is SAMA-mandated for these |
 | `settlementRef` (+ `…Network`, `…Type`) | card repayment — the **second** instrument (AC-B14.1) |
 | `billerCode`, `invoiceNumber` | bill payments (SADAD-shaped) |
 
@@ -1014,16 +1364,27 @@ learning loop nothing to attach to and is permanently uncategorisable. This is w
 maps an ATM location into `merchant`, and maps a biller name into both `merchant` and `billerCode`.
 Those read like smells and are not — they are this rule, correctly applied.
 
-##### Tier 3 — observed in real messages and deliberately **not** given slots
+##### Tier 3 — present in real messages and deliberately **not** given slots
 
-Branch name · ATM city as its own field · loyalty/points balance · credit limit and available credit ·
+Branch name · ATM city as its own field · loyalty/points balance · **credit limit and available
+credit** · **"total amount due"** · **"Executed Through" (Apple Pay / mada Pay / Atheer / app)** ·
 IBAN · the bank's service phone number · promotional tails · "available" vs "outstanding" balance as
 two distinct figures.
 
-Each is either bank-specific, or (IBAN, full credit limit) something NFR-S2/NFR-P4 would rather we
-did not hold at all. **Adding a slot is a schema decision and the default answer is no.** The bar: a
-field earns a slot when it changes a number the user sees or resolves an identity — not when it
-merely appears.
+**Three of these are now known to be SAMA-mandated, and that changes nothing about the decision — but
+it does change how the decision must be justified.** Available credit and total amount due are
+required elements of a credit-card notification; "Executed Through" is a required element of a mada
+notification. They will therefore appear reliably, not occasionally, and a rule author will be
+tempted to catch them. The answer is still no, for the reason stated at the top: **SAMA governs what
+the bank must send; NFR-S2/NFR-P4 govern what we choose to keep.** Declining to extract a mandated
+element is data minimisation, not non-conformance — we are the recipient, not the issuer. Say this
+out loud in review, because "but the regulator requires it" reads like an argument for a slot and is
+not one.
+
+Each entry is either bank-specific, or (IBAN, full credit limit, available credit) something
+NFR-S2/NFR-P4 would rather we did not hold at all. **Adding a slot is a schema decision and the
+default answer is no.** The bar: a field earns a slot when it changes a number the user sees or
+resolves an identity — not when it merely appears, and not merely because it is mandated upstream.
 
 ##### Does the existing schema support this? Yes — the gap is validation, not structure
 
@@ -1058,7 +1419,8 @@ that are already broken.
 Not duplicating their PRD work. Three observations from the architecture side:
 
 1. **A fixed label palette is what makes the feature buildable at all.** With Tier 1 + Tier 2 the
-   palette is ~14 chips, each carrying a *type* — money · currency · datetime · masked-identifier ·
+   palette is ~14 chips — unchanged by the SAMA re-derivation, which added four `messageType` values
+   but no new extractable slot — each carrying a *type* — money · currency · datetime · masked-identifier ·
    reference · free text. Typed labels let the app reject a bad selection **at teach time** ("that
    span doesn't look like an amount") instead of at parse time, months later, inside someone's
    totals. Free-form labels make that check impossible: there is nothing to check against.
@@ -1096,12 +1458,31 @@ Not duplicating their PRD work. Three observations from the architecture side:
 cheap to correct before anything is persisted from it and expensive after — and nothing currently
 catches it.
 
-**Open question for the human (the only one here).** `remainingBalance` serves two different
-real-world quantities: a loan's remaining principal (PRD §3.4) and an account's balance-after. They
-are not the same thing. Keeping one informational, never-arithmetic slot is the simpler and safer
-option and is what I recommend at `TIER: personal` — but it means the app can never truthfully label
-that figure without also reading `messageType`. Say so if you want them split before more banks are
-written.
+**The four new `messageType` values are additive and need no engine change** (§5.2), so they are
+strictly forward-looking too: use them when a cheque, deposit, wallet top-up or reversal template is
+first written for a bank. Do not reclassify existing rules to reach them.
+
+##### Open questions for the human
+
+**1. `remainingBalance` — narrowed by Table No. (1), not fully closed.** Now that Table No. (1) is
+verbatim (above), it names exactly **one** "remaining" element, in exactly one category: **"Total
+Remaining"**, under *Monthly Financing Deduction*, alongside "Financing Type" and "Due Installment".
+That is unambiguously the loan/financing **remaining-principal** sense (PRD §3.4) — Table No. (1) has
+**no "account balance-after" field in any of its 18 categories**, so that sense is not a regulator
+mandate at all, just something a bank may print beyond the minimum. The third sense, a card's
+**available credit**, comes from a *different* document (the Credit Card Issuance Rules, not Table
+No. (1)) and was already ruled Tier 3 below — excluded, not stored.
+
+Net effect: the regulator's own primary table treats "remaining balance" as **one thing** —
+financing remaining-principal — which is the strongest evidence yet for keeping `remainingBalance`
+a single slot, now with a tighter, SAMA-anchored meaning: *populate it for financing/installment
+messages only; a bank that separately prints a balance-after on a plain debit notification is
+printing something SAMA doesn't require, treat it as Tier 3 unless a future need justifies a slot.*
+**Approved 2026-07-30** — `remainingBalance` stays single, scoped to financing/installment only.
+
+**2. Obtain the two SAMA tables verbatim — done, 2026-07-30.** Both retrieved and reproduced in full
+above via a direct fetch of `/en/table-no-1` and `/en/table-no-2`. No remaining
+**[unverified detail]** markers in this subsection.
 
 ---
 
@@ -2226,8 +2607,7 @@ prefer the auditable, recoverable error.
 > judged unavoidable and rare). Scoped to this subsection, per the house style established by
 > v1.1–v1.6: the document's own `APPROVED` line above stays as it is, because
 > flipping the whole architecture to `DRAFT` would block every unrelated in-flight phase for one
-> decision. **No engineer implements this subsection until a human changes this line to
-> `APPROVED`.** The rest of ADR-017 is unchanged and remains in force.
+> decision. The rest of ADR-017 is unchanged and remains in force.
 
 **What is broken.** `ContentHmac.compute` folds `smsTimestampUtc` — the SMS's `receivedAt`,
 at **millisecond** precision — into the digest. A carrier redelivery arrives at a *different
@@ -2755,6 +3135,11 @@ AC-A3.1)
 > **No column is added for re-scan.** A re-scan is transient: it runs with
 > `advanceWatermark: false` and writes none of these fields. Recording *which rule pack the
 > watermark was last swept under* was considered and rejected — see that subsection, Q3 option (2).
+> **Correction, v1.9 (approved):** `lastProcessedSmsDate` is **nullable, and its nullness is
+> load-bearing** — a null date means the incremental watermark has never been seeded, which is the
+> state that made the first sweep read the entire inbox (ADR-006's KHA-157 subsection). It is
+> written only by `advanceTo` and by the one-time seed, always together with the provider id.
+> **No column is added for seeding either.**
 
 **`AppSettings`** (single row)
 `baseCurrency` (default `SAR`) · `locale` · `lockGraceSeconds` · `autoApplyThreshold` ·
