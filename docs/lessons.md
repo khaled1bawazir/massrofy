@@ -216,3 +216,26 @@ Format per entry:
   reporting as a problem. Re-fetch rather than trust a read from more than a minute or two ago.
   Extends [[massrofy_dont_call_ci_hung_without_baseline_check]] (memory), which now also has
   this update.
+
+## Don't trust recorded gate results from an interrupted/resumed agent run without re-running them
+
+An agent interrupted mid-task (e.g. by an account spend-limit error) can leave behind an
+in-progress artifact whose *recorded* evidence (test pass counts, "format clean") no longer
+matches what's actually on disk when a fresh agent picks the work back up. On PR #44's P5b
+re-gate, the interrupted run's notes claimed 1745 tests passed and clean format; the resuming
+QA agent found the actual probe test file was missing imports (did not compile) and had drifted
+out of format — the numbers were stale claims, not a live result. Two files' bidi test constants
+had also silently degraded to a wrong ASCII string during tooling round-trips.
+
+**Why this happened:** an interruption can land between "wrote the assertion" and "actually ran
+the full gate and recorded a real result" — the recorded numbers may describe an *intended*
+state, not a verified one, and nothing marks the difference.
+
+**How to apply:** when resuming or picking up after any other agent's interrupted work — not just
+after a spend-limit error, this applies to any handoff of an in-progress artifact — re-run the
+actual gates (`flutter analyze`, `dart format --set-exit-if-changed`, `flutter test`) yourself
+before citing or forwarding any pass/fail numbers, even if the prior notes say they already
+passed. Cheap to do, and the cost of forwarding a false-green is a merge built on evidence that
+was never real. Separately confirm which files the claim was actually about exist at the PR's
+real head commit — an in-progress QA/evidence branch can be dirty in ways the reviewed code
+never was.
