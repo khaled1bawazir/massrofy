@@ -60,6 +60,7 @@ footer{text-align:center;padding:24px;color:var(--ink-500);font-size:13px;}
 <symbol id="i-cloud_sync" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.5-9 5.5 5.5 0 0 1 10.7-1.7A4 4 0 0 1 17 15"/><path d="M10 15a3 3 0 0 1 5-2.2M15 12.8V15h-2.2M15 18a3 3 0 0 1-5 2.2M10 20.2V18h2.2"/></symbol>
 <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/></symbol>
 <symbol id="i-history" viewBox="0 0 24 24"><path d="M4.5 9.5A8 8 0 1 1 4 14"/><path d="M4.5 5v4.5H9"/><path d="M12 8v4.5l3 2"/></symbol>
+<symbol id="i-inbox" viewBox="0 0 24 24"><path d="M4 12h4.5l1.5 3h4l1.5-3H20"/><path d="M4 12 6 5h12l2 7v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-6z"/></symbol>
 </svg>
 <header>
   <div class="status-pill">DRAFT — awaiting human approval</div>
@@ -68,11 +69,12 @@ footer{text-align:center;padding:24px;color:var(--ink-500);font-size:13px;}
 </header>
 <main>
   <div class="legend">
-    <span>19 ملف HTML مستقل</span>
+    <span>21 ملف HTML مستقل</span>
     <span>عربي RTL أساسي + نموذج إنجليزي LTR واحد للمقارنة</span>
     <span>خطوط Tajawal + Manrope، أرقام غربية داخل عزل اتجاه (bidi isolation)</span>
     <span>أيقونات SVG مضمّنة — بلا اعتماد على خط خارجي</span>
     <span>لا لون بمفرده — أيقونة + نص دائماً (NFR-U4)</span>
+    <span style="border-color:var(--secondary);color:var(--secondary-text);">+2 جديد — Addendum A (US-A6, US-B16)</span>
   </div>
 
   <div class="group">
@@ -153,8 +155,8 @@ footer{text-align:center;padding:24px;color:var(--ink-500);font-size:13px;}
       <a class="card" href="banks.html">
         <div class="icn"><svg class="icon"><use href="#i-account_balance"></use></svg></div>
         <h3>البنوك ← الحسابات/البطاقات</h3>
-        <p>قائمة البنوك، تفاصيل بنك مع تبويب حسابات/بطاقات منفصل، تفاصيل بطاقة مرتبطة وغير مرتبطة، إعادة التسمية، ومدخل "+" للإضافة اليدوية.</p>
-        <div class="ids">S-21 · S-22 · S-23 · S-24 · S-25</div>
+        <p>قائمة البنوك، تفاصيل بنك مع تبويب حسابات/بطاقات منفصل، تفاصيل بطاقة مرتبطة وغير مرتبطة، إعادة تسمية حساب/بطاقة/بنك، ومدخل "+" للإضافة اليدوية.</p>
+        <div class="ids">S-21 · S-22 · S-23 · S-24 · S-25 · S-25b</div>
       </a>
       <a class="card" href="add-account.html">
         <div class="icn"><svg class="icon"><use href="#i-account_balance_wallet"></use></svg></div>
@@ -167,6 +169,12 @@ footer{text-align:center;padding:24px;color:var(--ink-500);font-size:13px;}
         <h3>إضافة بطاقة يدوياً</h3>
         <p>اختيار البنك، اسم مألوف، نوع البطاقة (ائتمان/خصم)، آخر 4 أرقام، وربط اختياري بحساب تسوية (US-B14). فارغة، خطأ تحقّق، ونجاح.</p>
         <div class="ids new-badge">New — extends US-B15, see design.md decision log</div>
+      </a>
+      <a class="card" href="banks-senders.html">
+        <div class="icn"><svg class="icon"><use href="#i-inbox"></use></svg></div>
+        <h3>البنوك والمرسلون</h3>
+        <p>مرسلون معروفون مقابل غير معروفين، معاينة مُعتِّمة لأحدث رسالة، ربط باسم فقط بلا قواعد (X18)، اقتراح مطابقة غير مُلزم، وحالة "لم تُقرأ بعد" لكل بنك مرتبط مع "التحقق مجدداً".</p>
+        <div class="ids new-badge">Addendum A — NEW — US-A6, AC-A6.1-11</div>
       </a>
     </div>
   </div>
@@ -233,6 +241,12 @@ footer{text-align:center;padding:24px;color:var(--ink-500);font-size:13px;}
         <h3>سجل التغييرات (تدقيق)</h3>
         <p>سجل للقراءة فقط تماماً — كل تعديل وتصنيف وحذف واستعادة، مع تمييز الفاعل (مستخدم مقابل قاعدة نظام).</p>
         <div class="ids">S-45</div>
+      </a>
+      <a class="card" href="diagnostics.html">
+        <div class="icn"><svg class="icon"><use href="#i-bar_chart"></use></svg></div>
+        <h3>التشخيص وصحة المحلِّل</h3>
+        <p>عدّادات مُحلَّلة/بحاجة مراجعة/متجاهلة (ADR-015)، بالإضافة إلى الصف الثابت "مرسلون غير معروفون" — يظهر دائماً، لا يرتبط بحالة فارغة (AC-A6.11).</p>
+        <div class="ids new-badge">Addendum A — NEW — S-54, AC-A6.11</div>
       </a>
     </div>
   </div>
