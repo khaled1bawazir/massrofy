@@ -2033,8 +2033,11 @@ prefer the auditable, recoverable error.
 
 #### KHA-137 decision — **D1's content hash drops `receivedAt` entirely.** Decided 2026-07-30.
 
-> **STATUS: DRAFT — awaiting human approval.** Scoped to this subsection, per the house style
-> established by v1.1–v1.6: the document's own `APPROVED` line above stays as it is, because
+> **STATUS: APPROVED (2026-07-30).** The human approved the fix and explicitly accepted the
+> disclosed same-minute residual (two genuinely separate purchases at the same merchant, same
+> amount, within the same in-body minute, would collide and the second would need manual entry —
+> judged unavoidable and rare). Scoped to this subsection, per the house style established by
+> v1.1–v1.6: the document's own `APPROVED` line above stays as it is, because
 > flipping the whole architecture to `DRAFT` would block every unrelated in-flight phase for one
 > decision. **No engineer implements this subsection until a human changes this line to
 > `APPROVED`.** The rest of ADR-017 is unchanged and remains in force.
