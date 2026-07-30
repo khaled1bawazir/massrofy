@@ -533,13 +533,14 @@ rather than silently capturing nothing.
 
 #### KHA-133 decision — **re-scanning history after the rules change: a user-triggered, bank-scoped re-scan that moves neither cursor.** Decided 2026-07-30.
 
-> **STATUS: DRAFT — awaiting human approval.** The document's own status line above stays
-> `APPROVED`, per the house style established by v1.1–v1.5: flipping the whole architecture to
-> `DRAFT` would block `/build` on every unrelated in-flight phase, which is a far larger blast
-> radius than this one decision warrants. So the gate is applied to **this subsection only**.
-> No engineer may build the mechanism below until the human changes this line. **The two
-> constraints on the in-flight KHA-128 PR (item (G)) are prohibitions, not new work, and are
-> safe to honour immediately.**
+> **STATUS: APPROVED (2026-07-30).** The document's own status line above stays `APPROVED`, per
+> the house style established by v1.1–v1.5: flipping the whole architecture to `DRAFT` would
+> block `/build` on every unrelated in-flight phase, which is a far larger blast radius than this
+> one decision warrants — the gate was applied to this subsection only, and the human has now
+> cleared it. **Human decision on shipping timing:** land this as a small standalone PR
+> immediately after KHA-128 (a plain "check my banks again" action in Settings → Diagnostics),
+> rather than waiting for the full US-A6 self-service screen — it is a genuine subset of what
+> US-A6 must build regardless, so nothing here is thrown away when US-A6 lands.
 
 **What is broken.** KHA-128 ships correct `senderPatterns` for the user's banks. It recovers
 nothing already received, because three deliberate design choices compose into a trap:
