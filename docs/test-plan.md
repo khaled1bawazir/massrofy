@@ -1554,7 +1554,7 @@ two areas the brief named: NFR-A6 reconciliation and KHA-122's race safety.
 |---|---|
 | `flutter test --exclude-tags=release_mode_guard` | **1540 passed, 3 skipped, 0 failed** — matches the PR body |
 | `flutter analyze --fatal-infos` | **No issues found** |
-| `dart format --set-exit-if-changed .` | **clean (exit 0)** |
+| `dart format --set-exit-if-changed lib test` | **clean, 254 files, 0 changed** |
 | GitHub `ci` aggregate check | **success**, 6/6 jobs green on `4308d7a` (run 30503458998) |
 | Merge candidate vs current `main` (`7f000e4`) | **zero file overlap**, clean merge, **1688 passed / 3 skipped / 0 failed** on the merged tree |
 

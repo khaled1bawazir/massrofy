@@ -6,6 +6,17 @@ with `git checkout --`. `git status` was verified empty after each revert.
 
 Toolchain: Flutter 3.44.8 / Dart 3.12.2, Windows.
 
+> **A correction QA owes on its own gate, recorded rather than quietly fixed.**
+> My first `dart format --set-exit-if-changed .` reported clean and it was not.
+> `dart format .` walks `build/`, which exists locally after an APK build, and it
+> **crashed** on a stale Gradle transform path
+> (`PathNotFoundException: ... bundleLibRuntimeToDirDebug/...`) *before* reaching
+> `test/`, exiting 0 anyway. So the run proved nothing and the QA PR's first CI
+> attempt failed on formatting. The gate that actually means something on this
+> repo is `dart format --set-exit-if-changed lib test`, which excludes `build/`
+> and is what CI effectively checks on a clean checkout. This is the
+> `docs/lessons.md` rule about stale/unfounded gate claims, applied to QA.
+
 ---
 
 ## Baseline (no mutation)

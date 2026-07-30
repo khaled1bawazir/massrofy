@@ -216,9 +216,8 @@ void main() {
 
     test('with a shared reference the detector rates the pair INTERNAL — the '
         'state the reconciliation arithmetic actually depends on', () {
-      final InternalTransferAnalysis analysis = InternalTransferDetector.analyze(
-        ledger(sharedReference: true),
-      );
+      final InternalTransferAnalysis analysis =
+          InternalTransferDetector.analyze(ledger(sharedReference: true));
       final LedgerTransaction outgoing = ledger(
         sharedReference: true,
       ).firstWhere((LedgerTransaction t) => t.id == 2);
@@ -541,7 +540,12 @@ void main() {
         instrumentIds: <int>{mada.id},
       );
       final String rendered = filter.toString();
-      for (final String secret in <String>['QANDA', '300', '2026-07-03', '41']) {
+      for (final String secret in <String>[
+        'QANDA',
+        '300',
+        '2026-07-03',
+        '41',
+      ]) {
         expect(
           rendered.contains(secret),
           isFalse,
