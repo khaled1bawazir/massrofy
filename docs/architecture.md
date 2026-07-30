@@ -930,9 +930,9 @@ task or violate the rule: the rule author may *read* real samples the user delib
 must then commit a **synthetic** fixture that mimics the shape. Real message text never enters the
 repository.
 
-#### Canonical SMS field taxonomy — the fixed slot vocabulary rules are written against. Proposed 2026-07-30, approved 2026-07-30.
+#### Canonical SMS field taxonomy — the fixed slot vocabulary rules are written against. Proposed 2026-07-30.
 
-**STATUS: APPROVED.** Everything above in ADR-007 stays `APPROVED` and is
+**STATUS: DRAFT — awaiting human approval.** Everything above in ADR-007 stays `APPROVED` and is
 unchanged by this subsection. It adds **no schema change, no rule change, and nothing that blocks the
 in-flight six-bank rule dispatch** — it is a vocabulary, a checklist, and one loader-validation
 recommendation. Read the recommendation at the end before anyone retrofits anything.
@@ -1096,17 +1096,12 @@ Not duplicating their PRD work. Three observations from the architecture side:
 cheap to correct before anything is persisted from it and expensive after — and nothing currently
 catches it.
 
-**Open question — resolved 2026-07-30.** `remainingBalance` stays a single, never-arithmetic
-informational slot — not split. Human call: in practice this field only ever shows up in a
-credit-card context (installment / card-repayment messages), never on a plain debit-account
-balance-after, so the two-quantities ambiguity raised above doesn't actually occur on real
-messages. `messageType` (`installment`, `card_repayment`) is what marks that context, per Tier 0.
-
-**Which instrument it belongs to is not a new problem.** `remainingBalance` attaches to whatever
-`instrumentRef` the same message resolves — same masked-identifier match against the card the user
-has already added (or auto-creates on first sighting) that every other slot already uses (AC-B13.2).
-No separate disambiguation path is needed; the existing create/match-by-`instrumentRef` mechanism
-is the answer.
+**Open question for the human (the only one here).** `remainingBalance` serves two different
+real-world quantities: a loan's remaining principal (PRD §3.4) and an account's balance-after. They
+are not the same thing. Keeping one informational, never-arithmetic slot is the simpler and safer
+option and is what I recommend at `TIER: personal` — but it means the app can never truthfully label
+that figure without also reading `messageType`. Say so if you want them split before more banks are
+written.
 
 ---
 
