@@ -66,6 +66,7 @@ import 'package:massrofy/features/parsing/rule_pack_message_parser.dart';
 
 import '../support/fake_sms_source.dart';
 import '../support/plain_test_database.dart';
+import '../support/watermark_seed.dart';
 
 final List<int> _testChainKey = List<int>.generate(32, (int i) => i);
 
@@ -158,13 +159,17 @@ void main() {
   late IngestWatermarkDao watermarkDao;
   late SafeLogger logger;
 
-  setUp(() {
+  setUp(() async {
     db = openPlainTestDatabase();
     auditLogDao = AuditLogDao(db, auditChainKey: _testChainKey);
     rawMessageDao = RawMessageDao(db);
     transactionDao = TransactionDao(db, auditLogDao);
     watermarkDao = IngestWatermarkDao(db);
     logger = SafeLogger(DiagnosticRingBuffer());
+    // KHA-157: these probes exercise the KHA-133 re-scan, which never moves
+    // the incremental watermark. Seeding at the beginning keeps the ordinary
+    // sweep each probe runs first behaving as it did.
+    await seedWatermarkAtBeginning(watermarkDao);
   });
 
   tearDown(() async => db.close());

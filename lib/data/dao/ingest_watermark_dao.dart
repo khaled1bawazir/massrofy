@@ -83,6 +83,38 @@ class IngestWatermarkDao extends DatabaseAccessor<AppDatabase>
     );
   }
 
+  /// **KHA-157 (C) — the one-time seed.** Plants the incremental watermark at
+  /// the inbox's high-water mark, so "incremental" starts meaning *new* rather
+  /// than *everything the phone has ever received*.
+  ///
+  /// ## Why this delegates to [advanceTo] instead of writing its own UPDATE
+  ///
+  /// KHA-157 (B) makes `last_processed_sms_date IS NULL` the discriminator for
+  /// "never seeded", and that only holds while **every** writer sets both
+  /// columns together. One writer is easier to keep honest than two: this
+  /// method is a name and a doc comment over [advanceTo], so there is exactly
+  /// one statement in the app that can move either column, and it is monotonic.
+  ///
+  /// The monotonic `WHERE` also makes a double seed harmless. Two sweeps can
+  /// genuinely overlap (the expedited worker and the periodic sweep), so both
+  /// can read a null date and both can call this; the higher id wins and the
+  /// lower one is a no-op, which is exactly what should happen.
+  ///
+  /// ## The caller owns the guard, deliberately
+  ///
+  /// There is no `WHERE last_processed_sms_date IS NULL` here. The decision
+  /// *whether* to seed belongs with the read of the high-water mark, because
+  /// the two must happen in that order — read the mark, then write it, never
+  /// re-read after writing. See `IngestionPipeline.runIncremental`, which is
+  /// this method's only caller.
+  ///
+  /// Takes two scalars rather than the `InboxHighWaterMark` the caller holds,
+  /// so that `data/` never imports `features/` — architecture §3's dependency
+  /// direction is one-way, and `features/ingestion` already imports this file.
+  Future<void> seedTo({required int smsProviderId, required DateTime smsDate}) {
+    return advanceTo(smsProviderId: smsProviderId, smsDate: smsDate);
+  }
+
   /// Records the start of a historical import (US-A3).
   ///
   /// [fromDate] is frozen here rather than recomputed on each resume, so an

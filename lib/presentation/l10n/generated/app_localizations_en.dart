@@ -831,6 +831,60 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String reviewOutOfWindowTitle(String since) {
+    return 'Messages from before $since';
+  }
+
+  @override
+  String reviewOutOfWindowBody(int count, String since) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count messages that arrived before $since were read by mistake. Massrofy only tracks from that date onwards, so they are not part of your spending.',
+      one:
+          '1 message that arrived before $since was read by mistake. Massrofy only tracks from that date onwards, so it is not part of your spending.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get reviewOutOfWindowAction => 'Discard them';
+
+  @override
+  String reviewOutOfWindowConfirmTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Discard $count old messages?',
+      one: 'Discard 1 old message?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String reviewOutOfWindowConfirmBody(String since) {
+    return 'These messages arrived before $since, so they were never part of what Massrofy tracks. Their stored text will be deleted and they will not come back. Your recorded transactions are not affected.';
+  }
+
+  @override
+  String get reviewOutOfWindowConfirmCancel => 'Keep them';
+
+  @override
+  String get reviewOutOfWindowConfirmAccept => 'Discard';
+
+  @override
+  String reviewOutOfWindowDone(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count old messages discarded',
+      one: '1 old message discarded',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String needsReviewTabTransfers(int count) {
     return 'Transfers ($count)';
   }

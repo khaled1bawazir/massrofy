@@ -21,6 +21,7 @@ library;
 
 import 'package:flutter/services.dart';
 
+import '../../core/time/clock.dart';
 import '../../features/ingestion/sms_source.dart';
 
 /// Shared channel name. Must match `SmsChannel.CHANNEL` in Kotlin — a
@@ -32,8 +33,71 @@ const String smsMethodChannelName = 'massrofy/sms_channel';
 final class AndroidSmsSource implements SmsSource {
   final MethodChannel _channel;
 
-  AndroidSmsSource({MethodChannel? channel})
-    : _channel = channel ?? const MethodChannel(smsMethodChannelName);
+  /// Supplies the timestamp for the **empty-but-readable** inbox case in
+  /// [highWaterMark], and is used for nothing else.
+  ///
+  /// Injected rather than calling `DateTime.now()` because architecture §7.4
+  /// forbids an un-substitutable clock anywhere in the app — a test that
+  /// cannot pin "now" cannot assert what an empty inbox seeds.
+  final Clock _clock;
+
+  AndroidSmsSource({MethodChannel? channel, Clock clock = const SystemClock()})
+    : _channel = channel ?? const MethodChannel(smsMethodChannelName),
+      _clock = clock;
+
+  /// **KHA-157 (A).** One row, two columns, no body and no sender.
+  ///
+  /// ## Reading the three-way result off the wire
+  ///
+  /// The Kotlin side answers with one of three shapes, and this method's job
+  /// is to keep them three rather than two:
+  ///
+  ///  - **`null`** — `SecurityException`, or the provider returned no cursor.
+  ///    The inbox is unreadable; the pipeline seeds nothing (see
+  ///    [SmsSource.highWaterMark] for why collapsing this into "empty" is the
+  ///    original bug).
+  ///  - **`{'empty': true}`** — read successfully, zero rows. Seeds
+  ///    `providerId = 0` with **now** as the date, because the date is what
+  ///    marks the watermark seeded (KHA-157 (B)) and it must not be left null.
+  ///  - **`{'id': …, 'date': …}`** — the newest row.
+  ///
+  /// A `MissingPluginException` — a unit test, or any non-Android host — is
+  /// also `null`, i.e. "unreadable". That is the safe direction: a host with
+  /// no SMS provider seeds no watermark and sweeps nothing, rather than
+  /// recording a fabricated position.
+  @override
+  Future<InboxHighWaterMark?> highWaterMark() async {
+    final Map<Object?, Object?>? row;
+    try {
+      row = await _channel.invokeMethod<Map<Object?, Object?>>('highWaterMark');
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      return null;
+    }
+
+    if (row == null) {
+      return null;
+    }
+    if (row['empty'] == true) {
+      return InboxHighWaterMark(providerId: 0, dateUtc: _clock.nowUtc());
+    }
+
+    final Object? id = row['id'];
+    final Object? date = row['date'];
+    if (id is! num || date is! num) {
+      // A malformed reply is treated as unreadable rather than as a position.
+      // Guessing here would write a watermark the device never actually
+      // reported, and the watermark is monotonic — a wrong high value can
+      // never be corrected downwards.
+      return null;
+    }
+
+    return InboxHighWaterMark(
+      providerId: id.toInt(),
+      dateUtc: DateTime.fromMillisecondsSinceEpoch(date.toInt(), isUtc: true),
+    );
+  }
 
   @override
   Future<List<RawSmsRecord>> readSince(

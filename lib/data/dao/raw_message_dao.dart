@@ -76,15 +76,75 @@ class RawMessageDao extends DatabaseAccessor<AppDatabase>
   /// the provider is swept.
   Stream<List<RawMessageRow>> watchReviewQueue() {
     return (select(rawMessages)
-          ..where(
-            (RawMessages t) =>
-                t.classification.equals('financial_unparsed') &
-                t.dismissedAsNotTransaction.equals(false),
-          )
+          ..where(_isPendingReviewItem)
           ..orderBy(<OrderClauseGenerator<RawMessages>>[
             (RawMessages t) => OrderingTerm.desc(t.receivedAt),
           ]))
         .watch();
+  }
+
+  /// **"Still pending in the Needs Review inbox"**, as one expression rather
+  /// than as a `WHERE` clause copied per query.
+  ///
+  /// KHA-157 (E) adds a *destructive* query keyed on exactly this predicate,
+  /// and a second hand-written copy of it is the obvious way for "what the
+  /// user is looking at" and "what the button deletes" to drift apart — which
+  /// on a delete means removing a row the user was never shown. One
+  /// definition, used by the queue stream, the count and the delete.
+  Expression<bool> _isPendingReviewItem(RawMessages t) =>
+      t.classification.equals('financial_unparsed') &
+      t.dismissedAsNotTransaction.equals(false);
+
+  /// **KHA-157 (E)** — still-pending review items that arrived *before*
+  /// [cutoffUtc], the lower bound of the window AC-A3.1 authorised.
+  ///
+  /// A count, for the banner. Content never leaves this method.
+  ///
+  /// Strictly `<`, matching [deletePendingReviewReceivedBefore] exactly: a
+  /// message received at the very instant the window opens is **inside** it
+  /// and is not the flood's.
+  Future<int> countPendingReviewReceivedBefore(DateTime cutoffUtc) async {
+    final Expression<int> rows = rawMessages.id.count();
+    final JoinedSelectStatement<HasResultSet, dynamic> query =
+        (selectOnly(rawMessages)..addColumns(<Expression<Object>>[rows]))
+          ..where(
+            _isPendingReviewItem(rawMessages) &
+                rawMessages.receivedAt.isSmallerThanValue(cutoffUtc),
+          );
+    return await query.map((TypedResult r) => r.read(rows)).getSingle() ?? 0;
+  }
+
+  /// **KHA-157 (E)** — the user-triggered, date-bounded discard.
+  ///
+  /// Returns how many rows were removed.
+  ///
+  /// ## This one really does delete, and that is not a contradiction
+  ///
+  /// Every other exit from this queue is an update — see
+  /// [dismissAsNotTransaction] for the two reasons deleting is normally wrong.
+  /// Both of them are answered here, and only here:
+  ///
+  ///  1. *"Deleting loses the content HMAC, so the next sweep re-adds it."*
+  ///     It cannot. These rows are, by the definition of [cutoffUtc], older
+  ///     than every window the app will ever read again: the incremental
+  ///     watermark is above them (that is how they got here), and KHA-133's
+  ///     re-scan window is `min(importFromDate, startOfCurrentMonthUtc(now))`,
+  ///     which is the very bound being passed in. Nothing reaches back past
+  ///     it, so there is nothing for a dedup key to protect against.
+  ///  2. *"The user said 'not a transaction', not 'forget this'."* Here they
+  ///     said exactly the second thing. AC-A3.1 never authorised retaining
+  ///     this text at all — it was read by the KHA-157 defect — so deleting it
+  ///     **reduces** what the app holds to what the ACs already promised.
+  ///
+  /// The action is recorded in the ADR-010 audit trail by the caller, which is
+  /// what keeps "424 rows vanished" answerable afterwards.
+  Future<int> deletePendingReviewReceivedBefore(DateTime cutoffUtc) {
+    return (delete(rawMessages)..where(
+          (RawMessages t) =>
+              _isPendingReviewItem(t) &
+              t.receivedAt.isSmallerThanValue(cutoffUtc),
+        ))
+        .go();
   }
 
   /// US-A4's "not a transaction" dismissal.

@@ -85,8 +85,72 @@ final class IngestCursor {
   );
 }
 
+/// **KHA-157 (A)** — the newest row in the inbox, as *ids and a timestamp
+/// only*.
+///
+/// ## Why a whole type for two numbers
+///
+/// Because the two numbers must travel together and must never be joined by
+/// anything else. This is the value that seeds ADR-006's incremental
+/// watermark, and the watermark's two columns are only meaningful as a pair
+/// (see `ingest_watermark_table.dart`: `_id` is monotonic but resets on a
+/// backup restore; `date` is not unique). A method returning a bare `int`
+/// would invite a caller to seed the id and leave the date null — which is
+/// precisely the state KHA-157 (B) uses as its "never seeded" discriminator,
+/// so writing it by halves would break the discriminator permanently.
+///
+/// **Never a body and never a sender.** This type exists so that answering
+/// "where does the future start?" costs the app zero access to message
+/// content. The Kotlin side projects `_id` and `date` and nothing else.
+final class InboxHighWaterMark {
+  /// The newest `_id` present in `content://sms/inbox`, or `0` for a
+  /// **readable but empty** inbox — a device with no SMS at all, or one whose
+  /// messages have all been deleted.
+  final int providerId;
+
+  /// The newest inbox row's `date`, in UTC. For an empty inbox this is
+  /// "now" rather than the epoch: the watermark's date field is the
+  /// discriminator KHA-157 (B) relies on, and it must become non-null in the
+  /// same write that sets the id. See [SmsSource.highWaterMark].
+  final DateTime dateUtc;
+
+  const InboxHighWaterMark({required this.providerId, required this.dateUtc});
+
+  /// Ids and a timestamp only, so this is safe to log — and there is nothing
+  /// else here that *could* leak (NFR-S4, ADR-015).
+  @override
+  String toString() =>
+      'InboxHighWaterMark(#$providerId, ${dateUtc.toIso8601String()})';
+}
+
 /// Reads the device's SMS inbox.
 abstract interface class SmsSource {
+  /// **KHA-157 (A)** — the newest inbox row's `_id` and `date`, and nothing
+  /// else.
+  ///
+  /// ## What the return value means, and why `null` is not "empty"
+  ///
+  /// | Return | Meaning |
+  /// |---|---|
+  /// | `null` | **The inbox could not be read.** `READ_SMS` is missing, the OS threw `SecurityException`, or the provider handed back no cursor. |
+  /// | `InboxHighWaterMark(providerId: 0, dateUtc: now)` | The inbox was read successfully and is **empty**. |
+  /// | anything else | The inbox was read and this is its newest row. |
+  ///
+  /// **That first distinction is the whole reason this method returns a
+  /// nullable type**, and getting it wrong reintroduces the defect this was
+  /// written to fix. Collapsing "unreadable" into "empty" would seed the
+  /// watermark at `0` *with a non-null date* while permission was denied —
+  /// marking it seeded forever — and then the moment the user granted
+  /// permission, `readSince(_id > 0)` would sweep the device's entire SMS
+  /// history into the review queue. That is exactly the 424-item flood of
+  /// KHA-157.
+  ///
+  /// So: an unreadable inbox seeds **nothing** and sweeps **nothing**. It is
+  /// retried on the next sweep, of which there is one every fifteen minutes
+  /// and one on every foreground (ADR-006 Layer 2), so no permission grant
+  /// can be missed for long and none needs a callback to notice it.
+  Future<InboxHighWaterMark?> highWaterMark();
+
   /// Messages newer than [cursor], oldest first.
   ///
   /// Oldest-first ordering is required, not incidental: the pipeline advances

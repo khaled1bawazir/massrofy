@@ -38,6 +38,7 @@ import 'package:massrofy/features/parsing/rule_pack_message_parser.dart';
 import '../../fixtures/synthetic_sms_corpus.dart';
 import '../../support/fake_sms_source.dart';
 import '../../support/plain_test_database.dart';
+import '../../support/watermark_seed.dart';
 import '../ingestion/support/load_bundled_pack.dart';
 
 final List<int> _testChainKey = List<int>.generate(32, (int i) => i);
@@ -49,8 +50,12 @@ void main() {
   late InstrumentDao instrumentDao;
   late IngestionPipeline pipeline;
 
-  setUp(() {
+  setUp(() async {
     db = openPlainTestDatabase();
+    // KHA-157: this file's subject is the ledger rows a message produces, not
+    // where the incremental sweep starts. Seeding at the beginning keeps the
+    // whole fixture inbox readable by `runIncremental`.
+    await seedWatermarkAtBeginning(IngestWatermarkDao(db));
     final AuditLogDao auditLogDao = AuditLogDao(
       db,
       auditChainKey: _testChainKey,

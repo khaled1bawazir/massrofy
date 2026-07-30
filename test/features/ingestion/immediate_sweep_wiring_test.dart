@@ -84,6 +84,28 @@ final class GrowableSmsSource implements SmsSource {
 
   void add(RawSmsRecord record) => messages.add(record);
 
+  /// KHA-157 (A). Modelled honestly rather than stubbed: this inbox starts
+  /// **empty and readable**, which seeds `providerId = 0` — so every message
+  /// [add]ed afterwards is above the seed and is still swept, which is exactly
+  /// the property these tests exist to pin and exactly the property the seed
+  /// must not break.
+  @override
+  Future<InboxHighWaterMark?> highWaterMark() async {
+    if (messages.isEmpty) {
+      return InboxHighWaterMark(
+        providerId: 0,
+        dateUtc: DateTime.utc(2026, 7, 15),
+      );
+    }
+    final RawSmsRecord newest = messages.reduce(
+      (RawSmsRecord a, RawSmsRecord b) => a.providerId >= b.providerId ? a : b,
+    );
+    return InboxHighWaterMark(
+      providerId: newest.providerId,
+      dateUtc: newest.receivedAt,
+    );
+  }
+
   @override
   Future<List<RawSmsRecord>> readSince(
     IngestCursor cursor, {
