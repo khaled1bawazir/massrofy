@@ -16,9 +16,19 @@
 ///
 /// Renders all four of design.md §3.4's states: loading (a spinner, not a "0"
 /// the user would believe), error (an honest message, again not a zero),
-/// locked/empty (the reassuring state — while locked `reviewCountsProvider`
-/// yields `ReviewCounts.empty`, which is the truthful value: with no key there
-/// is no database to count).
+/// locked/empty (the reassuring state — while locked every source
+/// `reviewCountsProvider` composes yields nothing, which is the truthful value:
+/// with no key there is no database to count).
+///
+/// ## KHA-144 — the state this widget was *wrongly* rendering
+///
+/// Nothing changed in this file's structure for KHA-144; the defect was in the
+/// number handed to it. It is recorded here anyway because this widget is where
+/// the damage showed: with 833 real messages waiting in the Needs Review queue,
+/// `counts.total` was 0, so the card took its `clear` branch — the reassuring
+/// tone, the success icon, *"All caught up"*, and `onTap: null`. The one screen
+/// meant to answer "what is going on?" said "nothing", and could not even be
+/// tapped to prove otherwise. See `categorization_providers.dart` for the fix.
 library;
 
 import 'package:flutter/material.dart';
@@ -87,6 +97,7 @@ class ReviewCountCard extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
+                        key: const Key('home.reviewCount.headline'),
                         clear
                             ? l10n.reviewCountAllClear
                             : l10n.reviewCountNeedsReview(counts.total),
@@ -100,13 +111,20 @@ class ReviewCountCard extends ConsumerWidget {
                       if (!clear) ...<Widget>[
                         const SizedBox(height: 2),
                         // The breakdown, because "9 items" with no explanation
-                        // is a number the user cannot act on. AC-C1.2 counts
-                        // uncategorized rows in this queue, and a user who did
-                        // not know that would be looking for nine *problems*.
+                        // is a number the user cannot act on.
+                        //
+                        // **KHA-144.** The two figures are an exact partition
+                        // of the headline — `unparsed + needingAttention ==
+                        // total`, with no overlap — so a user can add them up
+                        // and get the number above. The previous breakdown
+                        // showed two *overlapping* figures that never summed to
+                        // the headline, and omitted the unparsed queue entirely
+                        // (which on the reporting device was all 833 of them).
                         Text(
+                          key: const Key('home.reviewCount.breakdown'),
                           l10n.reviewCountBreakdown(
-                            counts.uncategorized,
-                            counts.flagged,
+                            counts.unparsed,
+                            counts.needingAttention,
                           ),
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(color: AppColors.ink700),
