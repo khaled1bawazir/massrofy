@@ -1,0 +1,11 @@
+﻿# flutter test --exclude-tags=release_mode_guard on b93250f (KHA-128 / PR #43)
+# Full compact output trimmed to its tail; QA verdict cites the summary below.
+
+1489 ~3: C:/Users/aasb2/OneDrive/Desktop/Massrofy/.claude/worktrees/agent-a004a
+1489 ~3: C:/Users/aasb2/OneDrive/Desktop/Massrofy/.claude/worktrees/agent-a004a
+1489 ~3: C:/Users/aasb2/OneDrive/Desktop/Massrofy/.claude/worktrees/agent-a004a
+1490 ~3: C:/Users/aasb2/OneDrive/Desktop/Massrofy/.claude/worktrees/agent-a004a
+1490 ~3: 3 skipped tests.                                                      
+1490 ~3: All other tests passed!                                               
+
+EXIT=0

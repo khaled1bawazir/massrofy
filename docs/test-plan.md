@@ -1362,6 +1362,160 @@ completed too fast to observe; AC-A3.2 stays test-verified only).
 
 ---
 
+## 7h. Tenth pass — KHA-128, PR #43 (`fix/kha-128-sender-patterns`, head `b93250f`)
+
+**Scope:** the sender gate for all seven banks the reporting human actually
+receives SMS from. Widened `senderPatterns` for `bank-aljazira` and `d360` to the
+confirmed display strings; five new `BankRule` entries (`nera`, `al-rajhi`,
+`stc-bank`, `saib`, `sab`) with confirmed senders and deliberately empty
+`messageRules: []`. Data + tests only — **zero `lib/` diff**, verified by tree
+hash (`git rev-parse 'HEAD^{tree}:lib'` = `f0b8531c…` on both `b93250f` and the
+QA branch).
+
+### 7h.0 Calibration
+
+`TIER: personal`, and this is a moderate-risk **data** change, not engine work —
+so the pass is focused rather than exhaustive: **101 probes**, not 30+ suites,
+weighted onto the two places a bug here could actually hurt (a wrongly-matched
+sender persists a private message body; a matched-but-templateless message
+crashing or vanishing loses money data). What was NOT trimmed is
+**mutation-testing every claim** — this build's recurring failure mode is a test
+that passes without testing what it says, and one of the five things this PR was
+asked to prove is exactly "the corpus-test fix is real, not suppression". See
+`docs/evidence/kha-128/mutation-log.md` for the full mutation table (M1–M6).
+
+This fix is also the first one in the build that a human can verify on their own
+hardware, so the sender strings were checked as *values* against the confirmed
+list, one by one, not as "a test exists".
+
+### 7h.1 Gates re-measured on `b93250f` itself
+
+Per `docs/lessons.md`: a gate result is evidence only for the tree it measured.
+
+| Gate | Engineer claimed | QA measured on `b93250f` | Verdict |
+|---|---|---|---|
+| `dart format --output=none --set-exit-if-changed .` | clean, 240 files, 0 changed | **240 files, 0 changed**, exit 0 | reproduced exactly |
+| `flutter analyze` | clean | **No issues found!** (6.0s) | reproduced |
+| `flutter test --exclude-tags=release_mode_guard` | 1490 / 3 skip / 0 fail | **1490 / 3 skip / 0 fail**, exit 0 | reproduced exactly |
+| Same, with QA's 101 probes added | n/a | **1591 / 3 skip / 0 fail** | — |
+
+Toolchain: Flutter 3.44.8 stable, Dart 3.12.2.
+
+### 7h.2 Traceability — the five things this pass was asked to prove
+
+| # | Claim under test | How QA verified it (independently) | Status |
+|---|---|---|---|
+| 1 | All seven confirmed sender strings match, case-insensitively | QA-P1, 21 probes. **Different oracle from the PR's own tests**: the PR's helper re-walks `pack.banks`/`senderPatterns` — a reimplementation of `_resolveBank` — so QA instead reads `bankId` back out of the real `ParseOutcome` the production `parse()` returns, which is the only value the pipeline stores. Also probed alternating case (not just UPPER/lower) and provider-supplied padding | **PASS** |
+| 1b | The old guessed patterns still ALSO match (additive, not a silent narrowing) | QA-P2, all 7 pre-existing strings. Then mutation **M3** deliberately narrowed `d360` to the new pattern only: both the PR's suite and QA's went red (`"D360" → Actual: <null>`). The additive property is enforced, not just intended | **PASS** |
+| 2 | The "matched sender, no template" path is safe end to end | QA-P6, five per-bank pipeline tests through the real `IngestionPipeline` + a real DB, using **QA's own fabricated bodies**, different text from the engineer's. Each: `routedToReviewQueue` 1, `discardedNonFinancialSender` 0, `failedWithError` 0, `transactionsWritten` 0, `isFullyAccountedFor` true, row `financial_unparsed` / `no_rule_matched` / `unparsedRuleId` NULL, watermark advanced to the message's provider id. Plus a six-message sweep with a control non-bank sender (counter proven able to move: exactly 1) | **PASS** |
+| 2b | **Business oracle on the retained text.** "Text retained" is not enough — the row must be *completable* | QA-P6 extracts the amount from each fabricated body by an independent regex and asserts the stored `sanitizedBody` still contains that exact literal (e.g. `3,000.00`, `1,204.35`). A review item whose amount was redacted away would satisfy `isNotNull` and still make AC-A6.5's argument false | **PASS** |
+| 2c | A re-ingested duplicate does not create two review items | QA-P7, both D1 keys: same provider row reprocessed (`suppressedAsExactDuplicate` 1, queue length 1) **and** carrier redelivery with a new provider id and identical content (`suppressedAsExactDuplicate` 1, queue length 1). Previously only proven for the *parsed* path | **PASS** |
+| 3 | Lookalikes do not match | QA-P4, **33** near-misses — the engineer's list plus QA's own: `STCPay`, `STC Pay`, `STC KSA`, `STC-Bank-Offers`, `D360 Rewards`, `Jazira Bank Offers`, `SABB Bank`, `SAB Bank`, `SAB2`, `AB`, `SAIBB`, `MYSAIB`, `AlRajhi` (no "Bank"), `Rajhi Bank`, `AlRajhi Capital`, `nera bank`, `SAIB Bank`, `nera Bank`, `anera`, the empty sender. All `null`. **`SABB` is a different real bank**, so a match there would misattribute one bank's messages to another | **PASS** |
+| 4 | The corpus-test fix is real, not suppression | **Mutation M1**: emptied `bank-aljazira.messageRules` → the new assertion fails first and clearly (`Expected: contains all of Set:['bank-aljazira','d360'] / Actual: Set:['d360']`). **Mutation M1b**: the same break run against only the three *filtered* whole-pack assertions → **"All tests passed!"**, which empirically confirms the escape hatch the new assertion closes. The engineer's stated rationale is correct, and now demonstrated rather than argued | **PASS** |
+| 5 | Format / analyze / test on the CURRENT head | §7h.1, all three re-run on `b93250f`, all reproduced exactly | **PASS** |
+
+### 7h.3 Attacks attempted, including the ones that failed (audit evidence)
+
+The SMS `address` field is attacker-influenced — anyone can send SMS with a
+chosen alphanumeric sender id — and `^…$` anchoring is the *entire* gate. A false
+positive is not a mislabel: a matched sender means the body is sanitised and
+**persisted** to the review queue, so a successful spoof would let an attacker
+choose what this app stores and shows the user as a bank message. QA-P5, 28
+probes, **all rejected, none threw**:
+
+| Attack | Example | Result |
+|---|---|---|
+| Anchor bypass via embedded newline (would work if Dart `$` used Perl's before-final-newline rule) | `SAB\nDROP TABLE transactions`, `nera\nSAB`, `SAIB\r\nx` | no match |
+| Regex metacharacters as the sender | `^SAB$`, `.*`, `SA.`, `SAB|nera`, `(SAB)`, `SAB.*` | no match |
+| SQL injection in the sender | `SAB'; DROP TABLE raw_message;--`, `SAB" OR "1"="1` | no match (gate rejects; DAO parameterisation is the second line, not the first) |
+| Command / JNDI injection | `SAB; rm -rf /`, `SAB${jndi:ldap://x/y}` | no match |
+| Invisible characters beside a real brand | U+200B inside/leading/trailing, U+202E appended, `D360<ZWSP>Bank` | no match |
+| Homoglyph digits | `D٣٦٠ Bank` (Arabic-Indic) | no match |
+| NUL bytes | leading / trailing / embedded U+0000 | no match, no exception |
+| Unanchored-pattern probe | a real bank id buried in a 63-char sender | no match |
+| Bank-vs-bank misattribution | `SABB`, `SABB Bank` vs `SAB` | no match |
+| Cross-bank shadowing in the name index (found by following the data, not the diff) | see 7h.4 | not present; now guarded |
+
+Also re-proved as a side effect: **AC-A2.3** — the control "friend" message in
+QA-P6 contains the token `SAR` and still leaves **no row at all**, because the
+sender gate, not the body, decides.
+
+### 7h.4 One invariant QA went looking for that nothing tested
+
+`bankDirectoryProvider` turns **every** bank in the pack into a `BankProfile`,
+and `BankDirectory._byNormalizedName` is built as a **map literal** over each
+profile's `canonicalKey` + both display names + every alias. A map literal is
+last-write-wins, so two banks normalising to the same key would silently shadow
+one another and `resolveByName` (AC-B12.3) would return the wrong bank — no
+error, no existing test. This PR is the first change that could plausibly trip
+it: 2 banks became 7, each with display names and aliases, including a new alias
+(`"Jazira Bank"`) added to an existing bank.
+
+**It does not trip it.** QA-P9 asserts the index is collision-free *and*
+that every bank is actually resolvable by its own English display name and
+`bankId` (an empty index would be trivially collision-free). Mutation **M6**
+added `"S A B"` to `saib.aliases` — which `normalizeBankName` folds to `sab` by
+stripping whitespace — and QA-P9 failed with
+`Actual: {'sab': Set:['saib', 'sab']}`, so the guard is not vacuous. Kept as a
+regression guard because **KHA-136 adds more banks to the same index**.
+
+### 7h.5 Runtime verification — what was and was not run
+
+**Not run on a device or emulator, and no coverage is claimed for it.**
+`flutter devices` reported only Windows / Chrome / Edge, `adb devices` was empty,
+`flutter emulators` listed none; the app is Android-only (ADR-001, there is no
+`windows/` runner), so `integration_test` could not execute. Release-mode
+on-device behaviour remains covered by **KHA-127** and the unrun **KHA-7** spike
+(risk **R-12**) — unchanged by this PR.
+
+**What QA did run instead, to close the one runtime link no other rule-pack test
+covers.** Every existing rule-pack test — including both the PR adds — reads the
+asset with a plain `File` read. That is fast and does exercise the shipped bytes,
+but it passes even if the asset were never declared in `pubspec.yaml`, in which
+case the shipped app would throw on first ingestion and all seven banks would be
+lost again — the exact class of failure KHA-128 exists to close.
+`test/qa/kha_128_bundled_asset_runtime_test.dart` loads the pack through the
+production symbol (`rootBundle.loadString(bundledRulePackAsset)`) under the test
+binding, and asserts it parses to exactly the seven expected `bankId`s and that
+`packVersion` was bumped to `2026.07.30` (so per-transaction provenance can
+distinguish pre-fix from post-fix output). Mutation **M5** commented the asset
+out of `pubspec.yaml` and the probe failed with
+`Unable to load asset: "assets/rule_packs/sa-core.json"`, so it is load-bearing.
+
+**The honest limit on what this PR can be said to fix:** gate 1 only. Whether
+Jazira/D360 messages then *parse* into transactions depends on body templates
+that have never been checked against a real device. A message from those two
+landing in Needs Review rather than the ledger after this ships is **this fix
+working as designed**, not a second bug — and would additionally tell us the
+templates are wrong. The engineer disclosed exactly this; QA confirms the
+disclosure is accurate and complete.
+
+### 7h.6 Tracking check
+
+- **KHA-136** (parsing templates for the five sender-only banks) is correctly
+  scoped and **does not block this PR**: it names the right owner, labels,
+  project, the human precondition (structurally-described or synthetic-ified
+  samples, never real text — NFR-M3), states plainly that a partial delivery is
+  shippable, and warns its implementer that `rule_pack_corpus_test.dart` filters
+  on *"has message rules"* so the first rule added to any of the five
+  automatically subjects it to the full nine-message-type bar. It correctly
+  separates itself from KHA-129 (US-A6) and KHA-127. QA agrees with its framing
+  that the five banks **work today** and this is an automation improvement, not a
+  functional gap — QA-P6 is the evidence for that claim.
+- **KHA-128's own done-check is deliberately not fully met** (it asked for a
+  parsed *transaction* per new bank; scope was narrowed to gate 1 by human
+  agreement in the issue's comments, and the parse half is now KHA-136). The
+  engineer flagged this rather than quietly redefining the check — which is the
+  2026-07-28 KHA-22 lesson being applied correctly. QA verified the narrowing
+  against the PRD rather than the issue: **AC-A6.5** (Addendum A, APPROVED) makes
+  gate-1-only a complete, shippable state, and QA-P6 asserts that AC end to end.
+- **KHA-128 has no project set** — flagged by the engineer, still true at the
+  time of this pass. Manager reconciliation item, not a merge blocker.
+- No new defect issues were filed by this pass; see `docs/defects.md` pass 10 for
+  the two low-severity observations recorded for audit.
+
+---
+
 ## 8. Untestable-as-written criteria
 
 None found in Epic 0, Epic A, or the Epic B slice built by P3a. Every AC in the
@@ -1389,7 +1543,22 @@ already does.
 | B — **P3b-2 mutation surface** (KHA-26/64/66/74/78/79/80 + KHA-69) | 25 AC/invariant rows | 17 | 6 | 1 not tested (AC-B8.3, disclosed → KHA-86) | Merged (PR #20) — verified against head `61efd7b` |
 | B — **P3b-3 merge-safety gate** (KHA-87/88/89 + KHA-90 O-QA-5/7/8) | 22 AC/invariant rows | 16 | 5 | 0 | **PR #24 open** — verified against head `8761e3e` |
 | **C + D — the P4a categorization spine** (KHA-30, KHA-31) | 27 AC/invariant rows | 15 | 9 (each waiting on KHA-32/33/34/97, not on P4a) | 2 FAIL (AC-D2.3, AC-C4.3 — both non-blocking, both ticketed) | **PR #27 open** — verified against head `10df548` |
+| **A — the sender gate for all 7 real banks** (KHA-128) | 7 claim rows + AC-A6.5, AC-A4.2, AC-A4.4, AC-A5.1, AC-A2.3, NFR-A7, NFR-P4 | 7 | 0 | 0 | **PR #43 open** — verified against head `b93250f` |
 | B — remainder + C–I remainder | ~110 ACs | — | — | — | Not yet built |
+
+**Overall (pass 10, PR #43): `QA: PASS 43`.** All three engineer-claimed gates
+re-measured on `b93250f` and reproduced exactly (format 240/0, analyze clean,
+**1490 pass / 3 skip / 0 fail**). **101 QA probes** added (`test/qa/`, zero
+production diff, `1591 / 3 / 0` with them) verified all seven confirmed sender
+strings through a *different* oracle than the PR's own tests, 33 lookalikes and
+28 sender-spoofing attacks rejected with no exception, the
+matched-sender-no-template path proven end to end for all five new banks with a
+business oracle on the retained amount, and duplicate re-ingestion proven not to
+grow the review queue on both D1 keys. **Six mutations** (M1–M6) prove the tests
+fire, including the specific one this pass was asked about: the corpus-test
+change is a real fix, and the escape hatch it closes is demonstrably real (M1b).
+No merge-blocking defects, no new Linear issues, two low-severity observations
+(O-QA-12/13). **No device or emulator run — explicitly not claimed** (§7h.5).
 
 **Overall (pass 6, PR #27): `QA: PASS 27`.** Every gate re-run by QA on head
 `10df548` itself (§7d): analyze clean, format clean at **207** files, **1190
