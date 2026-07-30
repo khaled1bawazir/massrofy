@@ -82,10 +82,11 @@ body{background:#DDE2E7;font-family:'Tajawal','Manrope',sans-serif;color:var(--i
 <symbol id="i-shopping_bag" viewBox="0 0 24 24"><path d="M6 8h12l1 12H5z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/></symbol>
 <symbol id="i-receipt_long" viewBox="0 0 24 24"><path d="M6 3h12v18l-2.5-1.6L13 21l-1.5-1.6L10 21l-1.5-1.6L6 21V3z"/><path d="M9 8h6M9 12h6M9 16h3.5"/></symbol>
 <symbol id="i-add" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L18.5 9.5a2 2 0 0 0 0-2.8L17.3 5.5a2 2 0 0 0-2.8 0L4 16v4z"/><path d="M13.5 7 17 10.5"/></symbol>
 </svg>
 <div class="backlink"><a href="index.html">‹ العودة إلى الفهرس / Back to index</a></div>
-<h1 class="page-title">S-21..25 — البنوك ← الحسابات/البطاقات (Bank → Account/Card Hierarchy)</h1>
-<p class="page-note">يعرض كل بنك ككيان مستقل (US-B12) مع فصل واضح بين نشاط الحسابات ونشاط البطاقات (AC-B13.3)، وربط البطاقة بحساب التسوية إن وُجد (US-B14). كل شاشة حسابات/بطاقات فيها الآن مدخل صريح لإضافة حساب أو بطاقة يدوياً (زر "+"), يفتح <a href="add-account.html">add-account.html</a> أو <a href="add-card.html">add-card.html</a> — إضافة على النطاق بطلب من المراجعة البشرية، تُوسّع US-B15 (انظر سجل القرارات في docs/design.md).</p>
+<h1 class="page-title">S-21..25b — البنوك ← الحسابات/البطاقات (Bank → Account/Card Hierarchy)</h1>
+<p class="page-note">يعرض كل بنك ككيان مستقل (US-B12) مع فصل واضح بين نشاط الحسابات ونشاط البطاقات (AC-B13.3)، وربط البطاقة بحساب التسوية إن وُجد (US-B14). كل شاشة حسابات/بطاقات فيها الآن مدخل صريح لإضافة حساب أو بطاقة يدوياً (زر "+"), يفتح <a href="add-account.html">add-account.html</a> أو <a href="add-card.html">add-card.html</a> — إضافة على النطاق بطلب من المراجعة البشرية، تُوسّع US-B15 (انظر سجل القرارات في docs/design.md). <b>Addendum A — NEW:</b> S-22 يحمل الآن قلم إعادة تسمية بجانب اسم البنك نفسه (S-25b، US-B16) — النظير على مستوى البنك لإعادة تسمية الحساب/البطاقة الموجودة أصلاً. لإضافة بنك جديد عبر مرسل غير معروف بلا انتظار تحديث للتطبيق، راجع <a href="banks-senders.html">البنوك والمرسلين</a> (US-A6).</p>
 
 <div class="gallery">
 
@@ -119,9 +120,9 @@ body{background:#DDE2E7;font-family:'Tajawal','Manrope',sans-serif;color:var(--i
 </div>
 
 <div class="unit">
-<div class="caption">S-22 — تفاصيل البنك (Bank Detail)<span>AC-B12.2, AC-B13.3 — segmented Accounts/Cards</span></div>
+<div class="caption">S-22 — تفاصيل البنك (Bank Detail)<span>AC-B12.2, AC-B13.3 — segmented Accounts/Cards · قلم إعادة التسمية جديد (Addendum A)</span></div>
 <div class="screen">
-  <div class="appbar"><svg class="icon" style="transform:scaleX(-1);display:inline-block;"><use href="#i-arrow_back"></use></svg><h1>بنك الجزيرة</h1></div>
+  <div class="appbar"><svg class="icon" style="transform:scaleX(-1);display:inline-block;"><use href="#i-arrow_back"></use></svg><h1 style="display:flex;align-items:center;gap:2px;">بنك الجزيرة <span style="display:inline-flex;align-items:center;justify-content:center;width:48px;height:48px;margin-inline-start:-6px;cursor:pointer;" title="إعادة تسمية البنك — منطقة لمس 48×48dp"><svg class="icon" style="font-size:24px;color:var(--ink-700);"><use href="#i-edit"></use></svg></span></h1></div>
   <div class="content">
     <div class="total-hero"><div class="lbl">الإجمالي هذا الشهر</div><div class="amt num">− 2,140.00 SAR</div></div>
     <div class="segmented"><span class="active">حسابات (1)</span><span>بطاقات (2)</span></div>
@@ -176,6 +177,19 @@ body{background:#DDE2E7;font-family:'Tajawal','Manrope',sans-serif;color:var(--i
     <p style="color:var(--ink-500);font-size:13px;margin:0 0 16px;">أعطِ هذه البطاقة اسماً مألوفاً بدلاً من الرقم المُقنَّع.</p>
     <div class="field"><label>الاسم المألوف</label><input placeholder="مثال: بطاقة التسوق اليومي" value="بطاقة مدى الثانية"></div>
     <button class="btn">حفظ الاسم</button>
+  </div>
+</div>
+</div>
+
+<div class="unit">
+<div class="caption">S-25b — إعادة تسمية بنك (Rename a bank) — Addendum A — NEW<span>US-B16, AC-B16.1/2 — من قلم عنوان S-22 أعلاه</span></div>
+<div class="screen">
+  <div class="appbar"><svg class="icon" style="transform:scaleX(-1);display:inline-block;"><use href="#i-arrow_back"></use></svg><h1>إعادة تسمية البنك</h1></div>
+  <div class="content">
+    <p style="color:var(--ink-500);font-size:13px;margin:0 0 16px;">أعطِ هذا البنك الاسم الذي تناديه به فعلاً. الاسم الجديد يظهر في كل مكان يُشار فيه إلى هذا البنك — حساباته وبطاقاته وإجمالياته وسجل معاملاته تبقى مرتبطة به دون تغيير (AC-B16.1).</p>
+    <div class="field"><label>اسم البنك</label><input placeholder="مثال: الجزيرة" value="بنك الجزيرة"></div>
+    <button class="btn">حفظ الاسم</button>
+    <p style="color:var(--ink-500);font-size:12px;margin:14px 0 0;line-height:1.6;">إذا زوّدت حزمة قواعد لاحقة أو رسالة جديدة اسماً مختلفاً لهذا البنك، يبقى اسمك هو المعتمد ولا يُستبدل تلقائياً (AC-B16.2).</p>
   </div>
 </div>
 </div>

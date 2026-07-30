@@ -2473,6 +2473,96 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count, plural, =0{No transactions} =1{1 transaction} other{{count} transactions}}'**
   String txnListResultCount(int count);
+
+  /// KHA-133. Title of the re-scan screen and its More-menu row. Plain language on purpose: the user is not being asked to understand watermarks or rule packs.
+  ///
+  /// In en, this message translates to:
+  /// **'Check my banks again'**
+  String get recheckBanksTitle;
+
+  /// KHA-133 explanation heading. Names the user's actual problem ('I got the SMS but no transaction appeared') rather than the mechanism.
+  ///
+  /// In en, this message translates to:
+  /// **'Messages that were missed'**
+  String get recheckBanksIntroTitle;
+
+  /// KHA-133 explanation body. States the trap ADR-006 documents — a rule-pack fix is forward-only — without using the words watermark or rule pack.
+  ///
+  /// In en, this message translates to:
+  /// **'If a bank\'s messages were not recognised before, they were skipped and never come back on their own. This reads them again and records anything that was missed.'**
+  String get recheckBanksIntroBody;
+
+  /// Two facts ADR-006 requires the user be told: the re-scan is dedup-safe (D1's UNIQUE keys), and item (C)'s window is the import's ground, NOT full history. 'Nobody should read check again as full history.'
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing is counted twice, and only messages from the same date range as the first import are read.'**
+  String get recheckBanksSafeNote;
+
+  /// KHA-133 primary action label.
+  ///
+  /// In en, this message translates to:
+  /// **'Check my banks again'**
+  String get recheckBanksAction;
+
+  /// KHA-133 secondary action, shown on the result and error cards. Re-running is safe by design.
+  ///
+  /// In en, this message translates to:
+  /// **'Check again'**
+  String get recheckBanksAgain;
+
+  /// KHA-133 loading state. Indeterminate — the re-scan persists no cursor and so has no honest percentage to report.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading your bank messages again…'**
+  String get recheckBanksRunning;
+
+  /// KHA-133 empty result. The re-check ran and everything it saw was already recorded — an outcome, not a failure.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing new found'**
+  String get recheckBanksNothingNew;
+
+  /// KHA-133 non-empty result headline. ICU plural rather than a bare placeholder: this is the sentence the user reads first, and 'Found 1 new transactions' is exactly the kind of sloppiness that costs trust in a screen whose whole job is explaining retroactive numbers.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Found 1 new transaction} other{Found {count} new transactions}}'**
+  String recheckBanksFound(int count);
+
+  /// KHA-133 result detail. 'count' is messages actually re-read (bank senders only); 'since' names item (C)'s window so an empty result is unambiguous about what ground was covered. The =0 case is real: a window with no bank messages at all.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{No bank messages to re-check, back to {since}.} =1{1 bank message re-checked, back to {since}.} other{{count} bank messages re-checked, back to {since}.}}'**
+  String recheckBanksExamined(int count, String since);
+
+  /// KHA-133 result detail. A recovered message from a bank whose rules cannot parse it lands in Needs Review — still a success, but the user must be told where it went.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 of them needs review before it can be recorded.} other{{count} of them need review before they can be recorded.}}'**
+  String recheckBanksNeedReview(int count);
+
+  /// KHA-133 partial-failure detail. Shown rather than hidden: a run that hit errors covered less than it appears to have, and a silently incomplete recovery looks complete.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 message could not be read this time. Try again later.} other{{count} messages could not be read this time. Try again later.}}'**
+  String recheckBanksSomeFailed(int count);
+
+  /// KHA-133 locked state. ADR-005 makes the lock cryptographic — with no unwrapped key there is no database to write to, so this is an expected state and not an error.
+  ///
+  /// In en, this message translates to:
+  /// **'The app locked before this could run. Unlock and try again.'**
+  String get recheckBanksLocked;
+
+  /// KHA-133 unauthorized state (AC-A1.3). Android 11+ can auto-revoke READ_SMS on an unused app, so this is live rather than theoretical.
+  ///
+  /// In en, this message translates to:
+  /// **'Massrofy cannot read your messages right now, so there is nothing to re-check. Grant SMS access and try again.'**
+  String get recheckBanksNoPermission;
+
+  /// KHA-133 error state. The second sentence matters: the user's first fear on seeing an error from a button that rewrites history is that it broke something.
+  ///
+  /// In en, this message translates to:
+  /// **'Something went wrong while re-checking. Your existing transactions are unaffected.'**
+  String get recheckBanksError;
 }
 
 class _AppLocalizationsDelegate

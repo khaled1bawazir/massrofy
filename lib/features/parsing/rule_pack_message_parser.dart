@@ -88,6 +88,15 @@ final class RulePackMessageParser implements MessageParser {
     ];
   }
 
+  /// KHA-133 / AC-A6.1 — sender resolution on its own, with no body involved.
+  ///
+  /// Delegates to the same [_resolveBank] that [parse] step 2 uses, so a
+  /// caller can never be told "this sender belongs to bank X" by one path and
+  /// something different by the other. See [MessageParser.bankIdForSender] for
+  /// why the port needs this at all.
+  @override
+  String? bankIdForSender(String sender) => _resolveBank(sender)?.bank.bankId;
+
   @override
   ParseOutcome parse({
     required SanitizedSmsText sanitized,

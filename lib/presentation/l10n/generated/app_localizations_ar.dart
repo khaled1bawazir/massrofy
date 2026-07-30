@@ -1583,4 +1583,99 @@ class AppLocalizationsAr extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get recheckBanksTitle => 'افحص بنوكي مرة أخرى';
+
+  @override
+  String get recheckBanksIntroTitle => 'رسائل لم يتم التعرف عليها';
+
+  @override
+  String get recheckBanksIntroBody =>
+      'إذا لم يتم التعرف على رسائل أحد البنوك سابقًا، فقد تم تخطيها ولن تعود من تلقاء نفسها. هذا الإجراء يقرأها من جديد ويسجّل ما فاته.';
+
+  @override
+  String get recheckBanksSafeNote =>
+      'لن يُحتسب أي مبلغ مرتين، ولن تُقرأ إلا الرسائل ضمن نفس الفترة الزمنية للاستيراد الأول.';
+
+  @override
+  String get recheckBanksAction => 'افحص بنوكي مرة أخرى';
+
+  @override
+  String get recheckBanksAgain => 'افحص مرة أخرى';
+
+  @override
+  String get recheckBanksRunning => 'جارٍ إعادة قراءة رسائل بنوكك…';
+
+  @override
+  String get recheckBanksNothingNew => 'لا يوجد جديد';
+
+  @override
+  String recheckBanksFound(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'تم العثور على $count عملية جديدة',
+      many: 'تم العثور على $count عملية جديدة',
+      few: 'تم العثور على $count عمليات جديدة',
+      two: 'تم العثور على عمليتين جديدتين',
+      one: 'تم العثور على عملية جديدة واحدة',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String recheckBanksExamined(int count, String since) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'تمت إعادة فحص $count رسالة بنكية، حتى $since.',
+      many: 'تمت إعادة فحص $count رسالة بنكية، حتى $since.',
+      few: 'تمت إعادة فحص $count رسائل بنكية، حتى $since.',
+      two: 'تمت إعادة فحص رسالتين بنكيتين، حتى $since.',
+      one: 'تمت إعادة فحص رسالة بنكية واحدة، حتى $since.',
+      zero: 'لا توجد رسائل بنكية لإعادة فحصها، حتى $since.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String recheckBanksNeedReview(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count منها تحتاج إلى مراجعة قبل تسجيلها.',
+      many: '$count منها تحتاج إلى مراجعة قبل تسجيلها.',
+      few: '$count منها تحتاج إلى مراجعة قبل تسجيلها.',
+      two: 'اثنتان منها تحتاجان إلى مراجعة قبل تسجيلهما.',
+      one: 'واحدة منها تحتاج إلى مراجعة قبل تسجيلها.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String recheckBanksSomeFailed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'تعذّرت قراءة $count رسالة هذه المرة. حاول مرة أخرى لاحقًا.',
+      many: 'تعذّرت قراءة $count رسالة هذه المرة. حاول مرة أخرى لاحقًا.',
+      few: 'تعذّرت قراءة $count رسائل هذه المرة. حاول مرة أخرى لاحقًا.',
+      two: 'تعذّرت قراءة رسالتين هذه المرة. حاول مرة أخرى لاحقًا.',
+      one: 'تعذّرت قراءة رسالة واحدة هذه المرة. حاول مرة أخرى لاحقًا.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get recheckBanksLocked =>
+      'تم قفل التطبيق قبل تنفيذ العملية. افتح القفل وحاول مرة أخرى.';
+
+  @override
+  String get recheckBanksNoPermission =>
+      'لا يستطيع مصروفي قراءة رسائلك حاليًا، لذا لا يوجد ما يمكن إعادة فحصه. امنح صلاحية الرسائل وحاول مرة أخرى.';
+
+  @override
+  String get recheckBanksError =>
+      'حدث خطأ أثناء إعادة الفحص. عملياتك المسجّلة لم تتأثر.';
 }

@@ -29,6 +29,32 @@ import 'package:massrofy/features/parsing/rule_pack_message_parser.dart';
 
 import '../../fixtures/synthetic_sms_corpus.dart';
 
+/// The banks whose **message templates** were sampled in PRD §3.4, and which
+/// therefore owe a full set of `messageRules`.
+///
+/// KHA-128 added five more banks to the pack with a confirmed `senderPatterns`
+/// and a deliberately empty `messageRules: []` — a recognised sender with no
+/// template is a complete, shippable state per AC-A6.5, because the message
+/// still reaches the review queue. So the "all nine message types" and
+/// "recognises OTP/marketing/balance noise" expectations below apply to the
+/// banks that *have* templates, not to `pack.banks` as a whole.
+///
+/// This set is not the filter itself — the filter is "has any `messageRules`",
+/// so an eighth templated bank is held to the same bar automatically. This set
+/// is the *floor*: it is asserted to be a subset of the templated banks, so
+/// emptying a sampled bank's rules fails the suite instead of silently
+/// reclassifying it as sender-only and skipping every check.
+const Set<String> _fullyTemplatedBanks = <String>{'bank-aljazira', 'd360'};
+
+/// The banks KHA-128 added with a confirmed sender and no templates yet.
+const Set<String> _senderOnlyBanks = <String>{
+  'nera',
+  'al-rajhi',
+  'stc-bank',
+  'saib',
+  'sab',
+};
+
 /// The nine message types PRD §3.4 observed. Named here as a constant so the
 /// "all nine, for both banks" claim in the exit check is asserted rather than
 /// eyeballed.
@@ -77,18 +103,36 @@ void main() {
     );
   }
 
+  /// Every bank that declares at least one message rule. See
+  /// [_fullyTemplatedBanks] for why the filter is the data, not a name list.
+  Iterable<BankRule> templatedBanks() =>
+      pack.banks.where((BankRule b) => b.messageRules.isNotEmpty);
+
   group('bundled rule pack', () {
-    test('loads, and declares both sampled banks', () {
-      expect(pack.packId, 'sa-core');
-      expect(pack.schemaVersion, RulePackLoader.supportedSchemaVersion);
-      expect(pack.banks.map((BankRule b) => b.bankId).toSet(), <String>{
-        'bank-aljazira',
-        'd360',
-      });
+    test('the sampled banks still have templates — emptying one must not '
+        'silently opt it out of every check below', () {
+      expect(
+        templatedBanks().map((BankRule b) => b.bankId).toSet(),
+        containsAll(_fullyTemplatedBanks),
+      );
     });
 
-    test('every bank covers all nine observed message types (PRD §3.4)', () {
-      for (final BankRule bank in pack.banks) {
+    test('loads, and declares every configured bank', () {
+      expect(pack.packId, 'sa-core');
+      expect(pack.schemaVersion, RulePackLoader.supportedSchemaVersion);
+      expect(
+        pack.banks.map((BankRule b) => b.bankId).toSet(),
+        _fullyTemplatedBanks.union(_senderOnlyBanks),
+        reason:
+            'the pack must declare all seven banks the reporting user '
+            'actually receives SMS from (KHA-128) — two with full templates, '
+            'five recognised at the sender gate only',
+      );
+    });
+
+    test('every sampled bank covers all nine observed message types '
+        '(PRD §3.4)', () {
+      for (final BankRule bank in templatedBanks()) {
         final Set<String> covered = bank.messageRules
             .where((MessageRule r) => r.intent == RuleIntent.transaction)
             .map((MessageRule r) => r.messageType)
@@ -103,8 +147,9 @@ void main() {
       }
     });
 
-    test('every bank can recognise OTP, marketing and balance noise', () {
-      for (final BankRule bank in pack.banks) {
+    test('every sampled bank can recognise OTP, marketing and balance '
+        'noise', () {
+      for (final BankRule bank in templatedBanks()) {
         final Set<String> ignored = bank.messageRules
             .where((MessageRule r) => r.intent == RuleIntent.ignore)
             .map((MessageRule r) => r.messageType)
@@ -123,7 +168,13 @@ void main() {
       // keyword being turned into a transaction. Rules are pre-sorted by
       // the loader, so asserting the *minimum* ignore priority exceeds the
       // *maximum* transaction priority proves no reordering can produce it.
-      for (final BankRule bank in pack.banks) {
+      //
+      // Scoped to the templated banks because `reduce` throws on an empty
+      // iterable, and a sender-only bank has neither kind of rule — there is
+      // no ordering to get wrong when there is nothing to order. The
+      // subset assertion above is what keeps that from becoming an escape
+      // hatch.
+      for (final BankRule bank in templatedBanks()) {
         final Iterable<int> ignorePriorities = bank.messageRules
             .where((MessageRule r) => r.intent == RuleIntent.ignore)
             .map((MessageRule r) => r.priority);
