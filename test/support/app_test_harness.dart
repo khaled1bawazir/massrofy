@@ -23,6 +23,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:massrofy/core/time/clock.dart';
 import 'package:massrofy/data/dao/app_settings_dao.dart';
 import 'package:massrofy/data/dao/audit_log_dao.dart';
 import 'package:massrofy/data/dao/raw_message_dao.dart';
@@ -155,6 +156,8 @@ class TestSession {
 /// `Override` type, so a helper cannot name it in a return signature. Inside a
 /// literal the parameter's context infers it, which is why the list below has
 /// no explicit element type while the rest of this codebase does.
+///
+/// [clock] pins the ambient "now" — see the parameter's own note below.
 Widget hostScope({
   required TestSession session,
   required SmsPermissionService permissions,
@@ -163,8 +166,29 @@ Widget hostScope({
   String locale = 'en',
   double textScale = 1.0,
   SmsBroadcastSignal? smsSignal,
+
+  /// **KHA-161** — the wall clock, which is a device dependency like any other.
+  ///
+  /// Everything else this harness overrides is a platform channel; the clock is
+  /// the one ambient input it left real. That is fine for a test whose subject
+  /// has no calendar arithmetic in it, and a latent time bomb for one whose
+  /// subject does: several of this product's rules are *defined* against the
+  /// Riyadh month boundary (AC-A3.1, AC-E1.4), so a test with hard-dated
+  /// fixtures and a live clock passes until the month it was written in ends.
+  ///
+  /// **Pass a [FixedClock] from any host test whose fixtures carry absolute
+  /// dates.** Left `null` the real [SystemClock] stays in place, so no existing
+  /// caller changes behaviour — this is opt-in on purpose rather than a
+  /// harness-wide default, because a shared default instant would silently
+  /// re-date fixtures in files nobody was looking at.
+  Clock? clock,
 }) => ProviderScope(
   overrides: [
+    // A conditional element inside a collection literal (`if (x) value,`) —
+    // Dart's way of building a list with an optional entry, and the reason the
+    // override is simply absent rather than present-but-neutral when no clock
+    // is supplied.
+    if (clock != null) clockProvider.overrideWithValue(clock),
     appLockControllerProvider.overrideWith(
       () => FakeAppLockController(lockState),
     ),

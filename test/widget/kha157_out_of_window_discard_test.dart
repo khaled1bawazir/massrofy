@@ -23,6 +23,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:massrofy/core/text/sms_sanitizer.dart';
+import 'package:massrofy/core/time/clock.dart';
 import 'package:massrofy/data/dao/raw_message_dao.dart';
 import 'package:massrofy/features/ingestion/review_queue.dart';
 import 'package:massrofy/features/ingestion/sms_permission_service.dart';
@@ -41,6 +42,31 @@ final DateTime _alsoLongAgo = DateTime.utc(2026, 2, 17, 13);
 /// Riyadh. Chosen precisely because the two differ: a label built from the raw
 /// UTC instant would say 30 June, and the assertions below can tell.
 final DateTime _windowStart = DateTime.utc(2026, 6, 30, 21);
+
+/// What the journey group below pretends "now" is — **KHA-161**.
+///
+/// Mid-July 2026. This instant and every fixture date in this file form one
+/// contract:
+///
+///  * it is inside the same Riyadh calendar month as [_windowStart], so the
+///    window the real code computes is the window the fixtures were written
+///    against;
+///  * it is *after* [_inWindow], so the scenario is physically coherent — a
+///    device holds messages that have already arrived, not future ones;
+///  * [_longAgo] and [_alsoLongAgo] stay far below the window, which is the
+///    whole point of the feature under test.
+///
+/// All three are asserted by the last test in this file ("the pinned clock,
+/// the window and the in-window fixture agree"), so re-dating any one of them
+/// fails loudly there instead of quietly re-classifying a fixture inside a
+/// journey test.
+final DateTime _pinnedNowUtc = DateTime.utc(2026, 7, 15, 12);
+
+/// A message that arrived *inside* the current window: the control row that
+/// must survive the discard, and the sole occupant of the "healthy install"
+/// case. Named rather than repeated so it cannot drift away from
+/// [_pinnedNowUtc] at one of its two call sites.
+final DateTime _inWindow = DateTime.utc(2026, 7, 12, 10);
 
 OutOfWindowReviewSummary _summary(int count) =>
     OutOfWindowReviewSummary(itemCount: count, windowStartUtc: _windowStart);
@@ -229,6 +255,34 @@ void main() {
     setUp(() => session = TestSession.open());
     tearDown(() async => session.close());
 
+    /// **KHA-161: these tests must not depend on today's date.**
+    ///
+    /// Unlike the leaf-widget group above — which hands the screen a summary it
+    /// built itself — this group renders the *real* `NeedsReviewHost`, so the
+    /// cutoff is computed by the code under test from
+    /// `RiyadhCalendar.startOfCurrentMonthUtc(clock.nowUtc())`. With the real
+    /// `SystemClock` that cutoff advances every month while the fixtures below
+    /// stay hard-dated July 2026, so from 1 August in Riyadh
+    /// (`2026-07-31T21:00Z`) [_inWindow] falls *below* the window: the healthy
+    /// install grows a banner it asserts is absent, and the cleanup journey's
+    /// surviving control row is deleted along with the rest.
+    ///
+    /// Pinning the clock is the whole fix. Nothing else about these tests —
+    /// their subject, their fixtures, their assertions — changes.
+    Widget host({
+      AppLockState lockState = const AppLockState(
+        status: AppLockStatus.unlocked,
+      ),
+    }) => hostScope(
+      session: session,
+      permissions: FakeSmsPermissionService(
+        current: SmsPermissionStatus.granted,
+      ),
+      lockState: lockState,
+      clock: FixedClock(_pinnedNowUtc),
+      child: const NeedsReviewHost(autoConfirmDelay: Duration.zero),
+    );
+
     /// One pending review row, exactly as the flood produced them.
     Future<void> flooded(RawMessageDao dao, int n, DateTime at) => dao.insert(
       smsProviderId: 'p$n',
@@ -256,18 +310,10 @@ void main() {
           await flooded(dao, 1, _longAgo);
           await flooded(dao, 2, _alsoLongAgo);
           await flooded(dao, 3, DateTime.utc(2026, 3, 9, 7));
-          await flooded(dao, 4, DateTime.utc(2026, 7, 12, 10));
+          await flooded(dao, 4, _inWindow);
         });
 
-        await tester.pumpWidget(
-          hostScope(
-            session: session,
-            permissions: FakeSmsPermissionService(
-              current: SmsPermissionStatus.granted,
-            ),
-            child: const NeedsReviewHost(autoConfirmDelay: Duration.zero),
-          ),
-        );
+        await tester.pumpWidget(host());
         await pumpHostFrames(tester);
 
         expect(
@@ -316,22 +362,10 @@ void main() {
       (WidgetTester tester) async {
         useTallSurface(tester);
         await tester.runAsync(
-          () => flooded(
-            session.session.rawMessageDao,
-            9,
-            DateTime.utc(2026, 7, 12, 10),
-          ),
+          () => flooded(session.session.rawMessageDao, 9, _inWindow),
         );
 
-        await tester.pumpWidget(
-          hostScope(
-            session: session,
-            permissions: FakeSmsPermissionService(
-              current: SmsPermissionStatus.granted,
-            ),
-            child: const NeedsReviewHost(autoConfirmDelay: Duration.zero),
-          ),
-        );
+        await tester.pumpWidget(host());
         await pumpHostFrames(tester);
 
         expect(find.byKey(const Key('needsReview.outOfWindow')), findsNothing);
@@ -347,14 +381,7 @@ void main() {
       useTallSurface(tester);
 
       await tester.pumpWidget(
-        hostScope(
-          session: session,
-          permissions: FakeSmsPermissionService(
-            current: SmsPermissionStatus.granted,
-          ),
-          lockState: const AppLockState(status: AppLockStatus.locked),
-          child: const NeedsReviewHost(autoConfirmDelay: Duration.zero),
-        ),
+        host(lockState: const AppLockState(status: AppLockStatus.locked)),
       );
       await pumpHostFrames(tester);
 
@@ -365,5 +392,42 @@ void main() {
 
       await disposeHost(tester);
     });
+  });
+
+  // =========================================================================
+  // The fixture contract itself — KHA-161
+  // =========================================================================
+
+  /// Guards the arithmetic the group above now depends on, so that a future
+  /// re-dating fails *here*, with a one-line explanation, instead of surfacing
+  /// as "the banner appeared and I don't know why" in a journey test.
+  ///
+  /// This asserts nothing about the app's behaviour; it asserts that the
+  /// fixtures still describe the situation their names claim. That is worth a
+  /// test rather than a comment because the original defect was precisely a
+  /// prose assumption ("these dates are in the current window") that no
+  /// assertion held to account.
+  test('the pinned clock, the window and the in-window fixture agree', () {
+    expect(
+      RiyadhCalendar.startOfCurrentMonthUtc(_pinnedNowUtc),
+      _windowStart,
+      reason:
+          'the pinned "now" must sit in the same Riyadh calendar month the '
+          'banner fixtures name, or the real cutoff and _windowStart diverge',
+    );
+    expect(
+      _inWindow.isAfter(_windowStart) && _inWindow.isBefore(_pinnedNowUtc),
+      isTrue,
+      reason:
+          'the surviving control row must be inside the window AND already '
+          'have arrived by the pinned instant',
+    );
+    for (final DateTime old in <DateTime>[_longAgo, _alsoLongAgo]) {
+      expect(
+        old.isBefore(_windowStart),
+        isTrue,
+        reason: 'the flood fixtures are the ones the offer exists to remove',
+      );
+    }
   });
 }
