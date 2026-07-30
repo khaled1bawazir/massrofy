@@ -73,11 +73,18 @@ void main() {
       'pre-fix output from post-fix output', () async {
     // `rulePackVersion` is stored on every transaction and in the audit
     // `actorDetail`. If the version had not moved, rows produced before and
-    // after this fix would be indistinguishable — which matters here because
-    // the fix changes WHICH messages get ingested at all.
+    // after a pack change would be indistinguishable — which matters
+    // especially for changes like KHA-128's and KHA-136's, which alter WHICH
+    // messages get ingested at all.
+    //
+    // Pinned rather than merely "not the old value" so that a pack edit
+    // cannot land without the version moving: the failure message here is
+    // what tells the next author to bump it. KHA-128 shipped `2026.07.30`;
+    // KHA-136/145 added templates for four more banks on the same day, hence
+    // the within-day suffix.
     final RulePack pack = RulePackLoader.parse(
       await rootBundle.loadString(bundledRulePackAsset),
     );
-    expect(pack.packVersion, '2026.07.30');
+    expect(pack.packVersion, '2026.07.30.1');
   });
 }

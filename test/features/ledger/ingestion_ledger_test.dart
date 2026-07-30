@@ -126,18 +126,29 @@ void main() {
   }
 
   group('the whole corpus, through the real pipeline', () {
-    test('AC-B12.3 — exactly two banks, despite four distinct sender strings '
-        'and both Arabic and Latin naming', () async {
+    test('AC-B12.3 — one row per bank, despite several sender strings per '
+        'bank and both Arabic and Latin naming', () async {
       await pipeline.runIncremental();
 
       final List<BankRow> banks = await bankDao.all();
       expect(
         banks.map((BankRow b) => b.canonicalKey).toList(),
-        <String>['bank-aljazira', 'd360'],
+        // KHA-136 widened the corpus from two templated banks to five that
+        // produce transactions. The property under test is unchanged and is
+        // now tested harder: Aljazira arrives from `BAJ`, `Aljazira` AND
+        // `Jazira Bank`, and D360 from both `D360` and `D360 Bank` — a
+        // seventh or eighth row here would mean identity had leaked from the
+        // canonical key onto the sender string.
+        //
+        // `al-rajhi` and `saib` are absent on purpose: their fixtures produce
+        // no transaction (an OTP that is ignored, and a message with no
+        // template), and a bank row is created by resolving a transaction,
+        // not by recognising a sender.
+        <String>['bank-aljazira', 'd360', 'nera', 'stc-bank', 'sab'],
         reason:
-            'the corpus sends Aljazira messages from both `BAJ` and '
-            '`Aljazira`; two rows here would mean identity had leaked from '
-            'the canonical key onto the sender string',
+            'the corpus sends Aljazira messages from three different sender '
+            'strings; a duplicate row here would mean identity had leaked '
+            'from the canonical key onto the sender string',
       );
     });
 
@@ -241,7 +252,9 @@ void main() {
       await pipeline.runIncremental();
       final List<BankTreeNode> tree = await buildTree();
 
-      expect(tree.length, 2);
+      // One node per bank that produced a transaction — see the AC-B12.3 test
+      // above for why that is five and not seven.
+      expect(tree.length, 5);
       for (final BankTreeNode node in tree) {
         for (final InstrumentSummary summary in <InstrumentSummary>[
           ...node.accounts,

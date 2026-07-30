@@ -21,6 +21,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:massrofy/core/text/sms_sanitizer.dart';
 import 'package:massrofy/core/text/sms_text_normalizer.dart';
+import 'package:massrofy/features/ledger/transaction_types.dart';
 import 'package:massrofy/features/parsing/parse_outcome.dart';
 import 'package:massrofy/features/parsing/parsed_fields.dart';
 import 'package:massrofy/features/parsing/rule_pack.dart';
@@ -30,30 +31,66 @@ import 'package:massrofy/features/parsing/rule_pack_message_parser.dart';
 import '../../fixtures/synthetic_sms_corpus.dart';
 
 /// The banks whose **message templates** were sampled in PRD §3.4, and which
-/// therefore owe a full set of `messageRules`.
-///
-/// KHA-128 added five more banks to the pack with a confirmed `senderPatterns`
-/// and a deliberately empty `messageRules: []` — a recognised sender with no
-/// template is a complete, shippable state per AC-A6.5, because the message
-/// still reaches the review queue. So the "all nine message types" and
-/// "recognises OTP/marketing/balance noise" expectations below apply to the
-/// banks that *have* templates, not to `pack.banks` as a whole.
-///
-/// This set is not the filter itself — the filter is "has any `messageRules`",
-/// so an eighth templated bank is held to the same bar automatically. This set
-/// is the *floor*: it is asserted to be a subset of the templated banks, so
-/// emptying a sampled bank's rules fails the suite instead of silently
-/// reclassifying it as sender-only and skipping every check.
+/// therefore owe a full set of `messageRules` — all nine observed transaction
+/// types and all three noise types.
 const Set<String> _fullyTemplatedBanks = <String>{'bank-aljazira', 'd360'};
 
-/// The banks KHA-128 added with a confirmed sender and no templates yet.
-const Set<String> _senderOnlyBanks = <String>{
-  'nera',
-  'al-rajhi',
-  'stc-bank',
-  'saib',
-  'sab',
-};
+/// The banks KHA-136 templated from a **live structural sampling round**, and
+/// what each one is held to.
+///
+/// ## Why this set exists rather than "everything with rules owes nine types"
+///
+/// The filter this suite used to apply was "has any `messageRules`", which
+/// meant the first rule a bank gained immediately put it on the hook for all
+/// nine PRD §3.4 message types. That is the right bar for a bank whose whole
+/// template set was sampled, and the wrong bar for these four: on 2026-07-30
+/// the human described the shapes of the messages **they actually had**, which
+/// was one type for `nera`, three for `stc-bank`, two for `sab`, and — for
+/// `al-rajhi` — an OTP and no transaction at all.
+///
+/// Meeting a nine-type bar for those banks would mean inventing seven
+/// templates from imagination, and a guessed *extraction* regex is the single
+/// most dangerous thing in this repository: it silently writes a **wrong
+/// amount**, where a missing rule merely produces a review item the user can
+/// see and complete (AC-A6.5). KHA-136 exists precisely to stop that.
+///
+/// So the bar is per-bank and exact — not "at least these", but **these and
+/// nothing else**. Adding a type without recording it here fails; quietly
+/// dropping one fails too. That keeps this an assertion rather than an
+/// exemption.
+const Map<String, ({Set<String> transactionTypes, Set<String> ignoreTypes})>
+_partiallyTemplatedBanks =
+    <String, ({Set<String> transactionTypes, Set<String> ignoreTypes})>{
+      // One card-purchase type observed. No noise sample at all, so no ignore
+      // rule: keywords guessed for an ignore rule either never fire, or fire
+      // on something that should have been a transaction.
+      'nera': (
+        transactionTypes: <String>{'pos_purchase'},
+        ignoreTypes: <String>{},
+      ),
+      // An OTP and nothing else. The transaction gap is deliberate and is the
+      // reason this map is a map rather than a list of names.
+      'al-rajhi': (transactionTypes: <String>{}, ignoreTypes: <String>{'otp'}),
+      // Inward SARIE transfer, transfer out, and the P2P "Pay X" payment
+      // (which is also a `transfer_out`), plus the two OTP shapes.
+      'stc-bank': (
+        transactionTypes: <String>{'transfer_in', 'transfer_out'},
+        ignoreTypes: <String>{'otp'},
+      ),
+      // The bilingual bank: one purchase type in two languages, plus an
+      // incoming-transfer deposit and a biometric-login notification.
+      'sab': (
+        transactionTypes: <String>{'pos_purchase', 'transfer_in'},
+        ignoreTypes: <String>{'security_notification'},
+      ),
+    };
+
+/// The banks that still have a confirmed sender and **no templates at all**.
+///
+/// That is a complete, shippable state per AC-A6.5 — the message still reaches
+/// the review queue with its sanitised text — not a stub. `saib` is here
+/// because no message of any kind was observed for it.
+const Set<String> _senderOnlyBanks = <String>{'saib'};
 
 /// The nine message types PRD §3.4 observed. Named here as a constant so the
 /// "all nine, for both banks" claim in the exit check is asserted rather than
@@ -103,18 +140,43 @@ void main() {
     );
   }
 
-  /// Every bank that declares at least one message rule. See
-  /// [_fullyTemplatedBanks] for why the filter is the data, not a name list.
+  /// Every bank that declares at least one message rule.
   Iterable<BankRule> templatedBanks() =>
       pack.banks.where((BankRule b) => b.messageRules.isNotEmpty);
 
+  Set<String> typesOf(BankRule bank, RuleIntent intent) => bank.messageRules
+      .where((MessageRule r) => r.intent == intent)
+      .map((MessageRule r) => r.messageType)
+      .toSet();
+
+  BankRule bankById(String bankId) =>
+      pack.banks.firstWhere((BankRule b) => b.bankId == bankId);
+
   group('bundled rule pack', () {
-    test('the sampled banks still have templates — emptying one must not '
-        'silently opt it out of every check below', () {
+    test('every bank is deliberately classified as fully templated, partially '
+        'templated, or sender-only', () {
+      // The point of this assertion: a bank cannot drift between categories
+      // unnoticed. Emptying a sampled bank's rules, or giving a sender-only
+      // bank its first rule, must be a decision recorded in this file rather
+      // than something that silently changes which checks below apply.
       expect(
         templatedBanks().map((BankRule b) => b.bankId).toSet(),
-        containsAll(_fullyTemplatedBanks),
+        _fullyTemplatedBanks.union(_partiallyTemplatedBanks.keys.toSet()),
+        reason:
+            'a bank gained or lost its templates without being reclassified '
+            'here — which would silently change the bar it is held to',
       );
+      for (final String bankId in _senderOnlyBanks) {
+        expect(
+          bankById(bankId).messageRules,
+          isEmpty,
+          reason:
+              'no message sample exists for "$bankId". Zero rules is the '
+              'correct state (AC-A6.5): the message still reaches Needs '
+              'Review. A guessed template would silently write a wrong '
+              'amount instead.',
+        );
+      }
     });
 
     test('loads, and declares every configured bank', () {
@@ -122,26 +184,27 @@ void main() {
       expect(pack.schemaVersion, RulePackLoader.supportedSchemaVersion);
       expect(
         pack.banks.map((BankRule b) => b.bankId).toSet(),
-        _fullyTemplatedBanks.union(_senderOnlyBanks),
+        _fullyTemplatedBanks
+            .union(_partiallyTemplatedBanks.keys.toSet())
+            .union(_senderOnlyBanks),
         reason:
             'the pack must declare all seven banks the reporting user '
-            'actually receives SMS from (KHA-128) — two with full templates, '
-            'five recognised at the sender gate only',
+            'actually receives SMS from (KHA-128)',
       );
     });
 
     test('every sampled bank covers all nine observed message types '
         '(PRD §3.4)', () {
-      for (final BankRule bank in templatedBanks()) {
-        final Set<String> covered = bank.messageRules
-            .where((MessageRule r) => r.intent == RuleIntent.transaction)
-            .map((MessageRule r) => r.messageType)
-            .toSet();
+      for (final String bankId in _fullyTemplatedBanks) {
+        final Set<String> covered = typesOf(
+          bankById(bankId),
+          RuleIntent.transaction,
+        );
         expect(
           covered,
           containsAll(_nineObservedMessageTypes),
           reason:
-              'bank "${bank.bankId}" is missing rules for '
+              'bank "$bankId" is missing rules for '
               '${_nineObservedMessageTypes.difference(covered)}',
         );
       }
@@ -149,17 +212,40 @@ void main() {
 
     test('every sampled bank can recognise OTP, marketing and balance '
         'noise', () {
-      for (final BankRule bank in templatedBanks()) {
-        final Set<String> ignored = bank.messageRules
-            .where((MessageRule r) => r.intent == RuleIntent.ignore)
-            .map((MessageRule r) => r.messageType)
-            .toSet();
+      for (final String bankId in _fullyTemplatedBanks) {
         expect(
-          ignored,
+          typesOf(bankById(bankId), RuleIntent.ignore),
           containsAll(<String>{'otp', 'marketing', 'balance_info'}),
-          reason: 'bank "${bank.bankId}" cannot classify all noise types',
+          reason: 'bank "$bankId" cannot classify all noise types',
         );
       }
+    });
+
+    test('each KHA-136 bank covers exactly the message types that were '
+        'actually observed for it — no more, no fewer', () {
+      // Exact set equality in both directions, deliberately. `containsAll`
+      // would let a template invented from imagination slip in beside the
+      // observed ones, which is the failure mode KHA-136 was opened to
+      // prevent; and it would let an observed one be deleted.
+      _partiallyTemplatedBanks.forEach((
+        String bankId,
+        ({Set<String> transactionTypes, Set<String> ignoreTypes}) expected,
+      ) {
+        final BankRule bank = bankById(bankId);
+        expect(
+          typesOf(bank, RuleIntent.transaction),
+          expected.transactionTypes,
+          reason:
+              '"$bankId" transaction coverage changed. If a real sample '
+              'arrived, update the map and add a pinned fixture; if not, the '
+              'new rule is a guess and must not ship.',
+        );
+        expect(
+          typesOf(bank, RuleIntent.ignore),
+          expected.ignoreTypes,
+          reason: '"$bankId" ignore coverage changed',
+        );
+      });
     });
 
     test('ignore rules outrank every transaction rule (AC-A2.1 ordering)', () {
@@ -169,24 +255,79 @@ void main() {
       // the loader, so asserting the *minimum* ignore priority exceeds the
       // *maximum* transaction priority proves no reordering can produce it.
       //
-      // Scoped to the templated banks because `reduce` throws on an empty
-      // iterable, and a sender-only bank has neither kind of rule — there is
-      // no ordering to get wrong when there is nothing to order. The
-      // subset assertion above is what keeps that from becoming an escape
-      // hatch.
+      // Both lists are checked for emptiness first: a bank may legitimately
+      // have only ignore rules (`al-rajhi` — an OTP sample and no transaction
+      // sample) or only transaction rules (`nera`), and `reduce` throws on an
+      // empty iterable. There is no ordering to get wrong when there is only
+      // one kind of rule.
       for (final BankRule bank in templatedBanks()) {
-        final Iterable<int> ignorePriorities = bank.messageRules
+        final List<int> ignorePriorities = bank.messageRules
             .where((MessageRule r) => r.intent == RuleIntent.ignore)
-            .map((MessageRule r) => r.priority);
-        final Iterable<int> txPriorities = bank.messageRules
+            .map((MessageRule r) => r.priority)
+            .toList();
+        final List<int> txPriorities = bank.messageRules
             .where((MessageRule r) => r.intent == RuleIntent.transaction)
-            .map((MessageRule r) => r.priority);
+            .map((MessageRule r) => r.priority)
+            .toList();
+        if (ignorePriorities.isEmpty || txPriorities.isEmpty) continue;
         expect(
           ignorePriorities.reduce((int a, int b) => a < b ? a : b),
           greaterThan(txPriorities.reduce((int a, int b) => a > b ? a : b)),
           reason: 'bank "${bank.bankId}"',
         );
       }
+    });
+
+    test('every ignore rule sits in the high-priority band, so a bank with '
+        'no transaction rules today is still safe when it gets one', () {
+      // The per-bank ordering check above is vacuous for a bank that has only
+      // ignore rules — and that is exactly when an ignore rule written at a
+      // low priority would look fine and then be outranked by the first
+      // transaction rule someone adds later. Pinning the band closes that.
+      for (final BankRule bank in pack.banks) {
+        for (final MessageRule rule in bank.messageRules) {
+          if (rule.intent != RuleIntent.ignore) continue;
+          expect(
+            rule.priority,
+            greaterThanOrEqualTo(880),
+            reason:
+                '"${rule.ruleId}" is an ignore rule below the 880-910 band '
+                'every other one in this pack occupies',
+          );
+        }
+      }
+    });
+
+    test('every transaction rule names a type this build understands', () {
+      // A `messageType` outside the closed vocabulary is not a load error —
+      // §5.2 forward-compatibility requires an unknown type to degrade
+      // gracefully — but for a BUNDLED rule it is a typo, and a silent one:
+      // an unknown type is excluded from spend totals, so a real purchase
+      // would be recorded, listed, and invisible in the only number the
+      // product exists to show.
+      for (final BankRule bank in pack.banks) {
+        for (final MessageRule rule in bank.messageRules) {
+          if (rule.intent != RuleIntent.transaction) continue;
+          expect(
+            TransactionType.isKnown(rule.messageType),
+            isTrue,
+            reason:
+                '"${rule.ruleId}" declares messageType '
+                '"${rule.messageType}", which is not in TransactionType.all',
+          );
+        }
+      }
+    });
+
+    test('rule ids are unique across the whole pack', () {
+      // A rule id is what a review item, a stored transaction and the
+      // parser-health panel all name. Two rules sharing one makes every such
+      // report ambiguous.
+      final List<String> ids = <String>[
+        for (final BankRule bank in pack.banks)
+          for (final MessageRule rule in bank.messageRules) rule.ruleId,
+      ];
+      expect(ids.toSet(), hasLength(ids.length));
     });
   });
 
@@ -229,6 +370,36 @@ void main() {
 
   group('D360 (English templates)', () {
     for (final SmsFixture fixture in d360Fixtures) {
+      test(fixture.id, () => _assertFixture(fixture, run(fixture)));
+    }
+  });
+
+  group('nera (KHA-136, English label:value)', () {
+    for (final SmsFixture fixture in neraFixtures) {
+      test(fixture.id, () => _assertFixture(fixture, run(fixture)));
+    }
+  });
+
+  group('AlRajhi (KHA-136, OTP only — no transaction sample yet)', () {
+    for (final SmsFixture fixture in alRajhiFixtures) {
+      test(fixture.id, () => _assertFixture(fixture, run(fixture)));
+    }
+  });
+
+  group('STC Bank (KHA-136, English label-per-line)', () {
+    for (final SmsFixture fixture in stcBankFixtures) {
+      test(fixture.id, () => _assertFixture(fixture, run(fixture)));
+    }
+  });
+
+  group('SAIB (KHA-136, sender-only by design)', () {
+    for (final SmsFixture fixture in saibFixtures) {
+      test(fixture.id, () => _assertFixture(fixture, run(fixture)));
+    }
+  });
+
+  group('SAB (KHA-136, bilingual)', () {
+    for (final SmsFixture fixture in sabFixtures) {
       test(fixture.id, () => _assertFixture(fixture, run(fixture)));
     }
   });
@@ -335,6 +506,81 @@ void main() {
       },
     );
 
+    test('KHA-136 — an STC "Pay X" and its own OTP are ONE transaction, not '
+        'two', () {
+      // The defect this pins is a doubled amount, which is the worst kind
+      // this app can produce because it looks entirely plausible in a list.
+      // One logical payment arrives as two SMS; the OTP half quotes the same
+      // payee, the same amount and the same reference. Both are fed here, in
+      // the order a phone would deliver them.
+      final ParseOutcome payment = run(
+        stcBankFixtures.firstWhere(
+          (SmsFixture f) =>
+              f.id.contains('p2p-payment') && !f.id.contains('otp'),
+        ),
+      );
+      final ParseOutcome otpHalf = run(
+        stcBankFixtures.firstWhere(
+          (SmsFixture f) => f.id.contains('p2p-payment-otp'),
+        ),
+      );
+
+      expect(payment, isA<ParsedMessage>());
+      expect(
+        (payment as ParsedMessage).fields.amount!.toCanonicalString(),
+        '75',
+      );
+
+      expect(
+        otpHalf,
+        isA<IgnoredMessage>(),
+        reason:
+            'the OTP half names an amount and a payee. If it ever parses, '
+            'this payment is counted twice and the period total is wrong by '
+            'exactly its value.',
+      );
+      expect((otpHalf as IgnoredMessage).rule.ruleId, 'stc-payment-otp');
+    });
+
+    test('every rule in the pack signs and classifies its type the way the '
+        'ledger expects', () {
+      // The one kind of mistake in a rule pack that silently corrupts a real
+      // total rather than producing a visible failure: a credit written as a
+      // debit, or an incoming transfer flagged as spend.
+      //
+      // The oracle is deliberately NOT this file's own opinion and not the
+      // fixture's declared expectation either — it is
+      // `TransactionType.creditTypes` / `nonSpendTypes`, which is what the
+      // ledger layer and the manual-entry form use. If the pack and the
+      // ledger ever disagree about what a `transfer_in` is, one of them is
+      // wrong about the user's money; this makes them agree by construction.
+      //
+      // It runs over EVERY parsed fixture in the corpus, not only the new
+      // banks, so an old rule cannot drift either.
+      for (final SmsFixture fixture in allFixtures) {
+        if (fixture.expect != ExpectedOutcome.parsed) continue;
+        final ParsedMessage parsed = run(fixture) as ParsedMessage;
+        final String type = parsed.rule.messageType;
+
+        expect(
+          parsed.direction,
+          TransactionType.creditTypes.contains(type) ? 'credit' : 'debit',
+          reason: '${fixture.id}: "$type" has the wrong sign',
+        );
+        expect(
+          parsed.affectsSpend,
+          !TransactionType.nonSpendTypes.contains(type),
+          reason:
+              '${fixture.id}: "$type" disagrees with the ledger about '
+              'whether it is spend. An incoming transfer, a salary, a cash '
+              'withdrawal and a card repayment are not spend (US-B10/B11, '
+              'AC-B10.1/2); a purchase, an outgoing payment and a refund '
+              'are — a refund because it reduces the total, not because it '
+              'adds to it.',
+        );
+      }
+    });
+
     test('no rule matched at a known bank still names the bank, so the review '
         'item is attributable (R-4 diagnosability)', () {
       final UnparsedMessage outcome =
@@ -364,6 +610,12 @@ void main() {
         '4472',
         '8821',
         '1157',
+        // KHA-136: one invented suffix per newly-templated bank, so a real
+        // one pasted in later stands out here instead of blending in.
+        '6034', // nera card
+        '5566', // STC Bank account
+        '7788', // SAB card
+        '1122', // SAB account
       };
       for (final SmsFixture fixture in allFixtures) {
         if (fixture.instrumentMasked == null) continue;

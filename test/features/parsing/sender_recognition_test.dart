@@ -195,33 +195,49 @@ void main() {
     }
   });
 
-  group('the five sender-only banks are structurally complete (AC-A6.5)', () {
+  group('gate 1 stands on its own, with or without templates (AC-A6.5)', () {
+    // KHA-128 shipped these five banks as sender-only. KHA-136 then templated
+    // four of them from live structural specs, which is a change in what the
+    // app can AUTOMATE — not in what it can RECOGNISE. This group asserts the
+    // recognition half for all seven banks regardless, because that is the
+    // half that decides whether a message is kept at all.
     for (final String bankId in <String>[
+      'bank-aljazira',
+      'd360',
       'nera',
       'al-rajhi',
       'stc-bank',
       'saib',
       'sab',
     ]) {
-      test('$bankId declares a sender and, deliberately, no templates', () {
+      test('$bankId declares a sender and a display name', () {
         final BankRule bank = pack.banks.firstWhere(
           (BankRule b) => b.bankId == bankId,
         );
         expect(bank.senderPatterns, isNotEmpty);
-        expect(
-          bank.messageRules,
-          isEmpty,
-          reason:
-              'no real message-body sample exists for this bank yet, and '
-              'NFR-M3 forbids inventing one that pretends to be real. Zero '
-              'rules is the correct, shippable state: AC-A6.5 routes the '
-              'message to Needs Review instead.',
-        );
         // Display names are required by the schema and are shown to the user,
         // never used for identity (identity is `bankId` — AC-B12.3).
         expect(bank.displayNameAr, isNotEmpty);
         expect(bank.displayNameEn, isNotEmpty);
       });
     }
+
+    test('saib is still sender-only, and that remains a complete state', () {
+      // The claim AC-A6.5 rests on, kept alive by the one bank for which no
+      // message of any kind has been observed (KHA-136). Zero rules is
+      // correct here: a guessed template would silently write a wrong amount,
+      // while no template routes the message to Needs Review where the user
+      // can see and complete it.
+      //
+      // Which banks own templates is asserted in
+      // `test/features/parsing/rule_pack_corpus_test.dart`, where the
+      // per-bank coverage bar lives; this is the sender-gate suite and only
+      // pins the half that matters here.
+      final BankRule saib = pack.banks.firstWhere(
+        (BankRule b) => b.bankId == 'saib',
+      );
+      expect(saib.messageRules, isEmpty);
+      expect(parseNeutralBody('SAIB'), isNot(isA<NotFinancialSender>()));
+    });
   });
 }

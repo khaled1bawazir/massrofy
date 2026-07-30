@@ -225,10 +225,24 @@ void main() {
         await ledger(),
         period: PeriodRange.unbounded(),
       );
-      // Two salary fixtures (one per bank), 14,500.00 each, plus the two
-      // generic incoming transfers the corpus already had (14,500.00 and
-      // 9,750.00) — all four are income.
-      expect(report.income.base!.toCanonicalString(), '53250');
+      // Recomputed by hand, line by line, because this number is the whole
+      // point of the assertion:
+      //
+      //   salary_income  14,500.00  Aljazira
+      //   salary_income  14,500.00  D360
+      //   transfer_in    14,500.00  Aljazira (a salary arriving as a transfer)
+      //   transfer_in     9,750.00  D360
+      //   transfer_in     3,250.00  STC Bank  (SARIE inward)     — KHA-136
+      //   transfer_in     3,200.00  SAB       (Arabic deposit)   — KHA-136
+      //   transfer_in     1,850.00  D360      (notification)     — KHA-145
+      //                  ---------
+      //                  61,550.00
+      //
+      // The three new lines are exactly the credits KHA-136/145 added. If one
+      // of them had been given `affectsSpend: true` by mistake it would be
+      // missing here AND inflating the spend figure — which is the one error
+      // in this PR that would silently corrupt a real total.
+      expect(report.income.base!.toCanonicalString(), '61550');
     });
 
     test('AC-B10.2 — an ATM withdrawal is a withdrawal, and is in neither '
