@@ -28,6 +28,14 @@ class RawMessageDao extends DatabaseAccessor<AppDatabase>
   /// queue tell the user *why* a message was not understood, and let the
   /// parser-health panel tell "the bank changed a template" apart from "the
   /// amount was missing" (two very different maintenance signals — risk R-4).
+  ///
+  /// [partialExtractionJson] is **KHA-146**: `PartialExtraction.encode()` for a
+  /// message whose rule extracted successfully and then failed its
+  /// `requiredFields` check, so the completion form can pre-fill what the
+  /// parser already read. `null` for every other row — including every message
+  /// that matched no rule at all, where a blank form is the correct outcome.
+  /// It is unconfirmed form data, never a transaction; see
+  /// `lib/features/parsing/partial_extraction.dart`.
   Future<int> insert({
     String? smsProviderId,
     required String sender,
@@ -38,6 +46,7 @@ class RawMessageDao extends DatabaseAccessor<AppDatabase>
     required String classification,
     String? unparsedReason,
     String? unparsedRuleId,
+    String? partialExtractionJson,
   }) {
     return into(rawMessages).insert(
       RawMessagesCompanion.insert(
@@ -51,6 +60,7 @@ class RawMessageDao extends DatabaseAccessor<AppDatabase>
         panRedacted: Value<bool>(sanitizedText.panRedacted),
         unparsedReason: Value<String?>(unparsedReason),
         unparsedRuleId: Value<String?>(unparsedRuleId),
+        partialExtraction: Value<String?>(partialExtractionJson),
       ),
     );
   }
@@ -107,6 +117,13 @@ class RawMessageDao extends DatabaseAccessor<AppDatabase>
   /// The parser genuinely did fail on this message, and the parser-health
   /// panel (ADR-015) should keep counting that failure — a human filling the
   /// gap in by hand does not mean the rule pack no longer needs fixing.
+  ///
+  /// So is `partialExtraction` (KHA-146), for the same reason and one more:
+  /// it is the record of *what the app suggested* on the form the user just
+  /// confirmed, which is the only way to answer "why was that figure already
+  /// filled in?" later. It is read solely by the completion form, and this row
+  /// has just left the queue that form is reached from, so leaving it costs
+  /// nothing and removes a fact nobody can reconstruct.
   Future<void> markCompletedIntoTransaction(int id) {
     return (update(
       rawMessages,

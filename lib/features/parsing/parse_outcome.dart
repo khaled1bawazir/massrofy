@@ -35,6 +35,7 @@
 library;
 
 import 'parsed_fields.dart';
+import 'partial_extraction.dart';
 
 /// Which pack, version, and rule produced an outcome — NFR-A1 provenance.
 /// Recorded on every transaction so "why is this number what it is?" is
@@ -145,10 +146,32 @@ final class UnparsedMessage extends ParseOutcome {
   /// when no rule matched at all.
   final List<String> missingFields;
 
+  /// **KHA-146 — what the rule DID read before it gave up.**
+  ///
+  /// Non-null **only** for [UnparsedReason.requiredFieldMissing]: that is the
+  /// one reason in the vocabulary where a real extraction ran to completion
+  /// and produced values, and only the `requiredFields` gate then rejected the
+  /// result. Every other reason means nothing was ever extracted —
+  /// [UnparsedReason.noRuleMatched] never reached a regex,
+  /// [UnparsedReason.extractionRegexFailed] reached one that did not match,
+  /// [UnparsedReason.ruleTimedOut] ran out of budget — and for those the
+  /// honest value is `null`, which the completion form renders as a blank
+  /// form.
+  ///
+  /// Keeping the two cases distinguishable *in the type* is the point. If this
+  /// were, say, an always-present object with everything null, a future reader
+  /// could not tell "we read nothing" from "we read nothing useful", and the
+  /// pipeline would start writing empty rows for messages nobody parsed.
+  ///
+  /// **This is not a transaction and cannot become one on its own.** See
+  /// `partial_extraction.dart` for the full money-safety statement.
+  final PartialExtraction? partialExtraction;
+
   const UnparsedMessage({
     required this.reason,
     this.rule,
     this.missingFields = const <String>[],
+    this.partialExtraction,
   });
 }
 

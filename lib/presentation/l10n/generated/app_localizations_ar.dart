@@ -472,6 +472,15 @@ class AppLocalizationsAr extends AppLocalizations {
       'التصنيف يأتي لاحقاً — ستُحفظ المعاملة كـ«غير مصنفة» ويمكنك تصنيفها من قائمتها.';
 
   @override
+  String get completePrefilledNotice =>
+      'قرأنا بعض هذه التفاصيل من الرسالة. راجعها قبل الحفظ — لا يُسجَّل شيء حتى تفعل ذلك.';
+
+  @override
+  String completeInstrumentUnmatched(String maskedRef) {
+    return 'تذكر الرسالة $maskedRef، ولا تطابق أي حساب أو بطاقة لديك بعد — اختر واحدة أو اتركها «غير مذكور».';
+  }
+
+  @override
   String get amountMustBePositive =>
       'أدخل مبلغاً أكبر من صفر، ثم اختر «إيداع» أو «سحب»';
 

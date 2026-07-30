@@ -43,6 +43,8 @@
 ///    report honestly on what the parser missed.
 library;
 
+import '../parsing/partial_extraction.dart';
+
 /// One item in the "not understood" tab (design.md S-18).
 ///
 /// A plain value type rather than a Drift row so the widget layer never
@@ -79,6 +81,19 @@ final class ReviewQueueItem {
   /// "rule X is failing 40 times a month" is the signal a maintainer needs.
   final String? unparsedRuleId;
 
+  /// **KHA-146** — what the parser DID read, when a rule matched and extracted
+  /// but then failed its `requiredFields` check.
+  ///
+  /// `null` in the other case, and the distinction is the whole point: a
+  /// message no rule recognised has nothing to pre-fill, and S-19 correctly
+  /// shows a blank form for it. A message that failed on one field arrives
+  /// here with the other four, and S-19 pre-fills them.
+  ///
+  /// **Suggestions for a form, not a transaction.** Nothing on this type is
+  /// summed or counted anywhere; the values become money only when the user
+  /// presses "Save as transaction". See `partial_extraction.dart`.
+  final PartialExtraction? partialExtraction;
+
   const ReviewQueueItem({
     required this.rawMessageId,
     required this.sanitizedBody,
@@ -87,6 +102,7 @@ final class ReviewQueueItem {
     this.bankId,
     this.unparsedReason,
     this.unparsedRuleId,
+    this.partialExtraction,
   });
 
   /// Ids and a timestamp only. **Never the body** — this type exists to carry

@@ -87,5 +87,38 @@ class RawMessages extends Table {
   /// `NULL` when no rule matched at all.
   TextColumn get unparsedRuleId => text().nullable()();
 
+  // --- KHA-146: what the parser DID read, for the completion form ----------
+
+  /// `PartialExtraction.encode()` — the fields a rule extracted successfully
+  /// before its `requiredFields` check failed. `NULL` for every other row.
+  ///
+  /// ## Why this column exists
+  ///
+  /// Without it, a message that failed on ONE required field reached the
+  /// "Complete the details" form (S-19) carrying only its raw text, so the
+  /// user retyped an amount, a merchant and a card the parser had already read
+  /// correctly. See `lib/features/parsing/partial_extraction.dart`.
+  ///
+  /// ## Three properties worth being explicit about
+  ///
+  /// 1. **It is unconfirmed data, and it lives here rather than on
+  ///    `transactions` precisely because of that.** Nothing sums it, nothing
+  ///    counts it, no total can reach it. It becomes money only when the user
+  ///    presses "Save as transaction" on a form they can see.
+  /// 2. **It retains nothing new** (NFR-P4, ADR-013). Every value in it is
+  ///    derived from [sanitizedBody] on this same row — already redacted, with
+  ///    any card identifier already masked to last-4 (NFR-S2). It is a
+  ///    structured projection of text the app already keeps, and it is deleted
+  ///    with the row.
+  /// 3. **It is `NULL` when no rule matched at all**, which is the honest
+  ///    value: nothing was extracted, so there is nothing to pre-fill and a
+  ///    blank form is correct.
+  ///
+  /// JSON in one column rather than eight typed columns because none of it is
+  /// ever queried, filtered, indexed or aggregated — it is read back whole, by
+  /// exactly one screen, for exactly one row at a time. Typed columns would
+  /// buy query capability nothing wants and cost eight `ALTER TABLE`s.
+  TextColumn get partialExtraction => text().nullable()();
+
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
 }

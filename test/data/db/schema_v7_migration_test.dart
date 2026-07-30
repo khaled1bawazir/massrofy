@@ -30,6 +30,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:massrofy/data/db/app_database.dart';
 
 import '../../support/plain_test_database.dart';
+import 'schema_v8_migration_test.dart' show rewindPastV8;
 
 /// The columns v7 adds to `transactions`, in SQL naming.
 ///
@@ -71,6 +72,12 @@ Future<bool> _tableExists(AppDatabase db, String table) async {
 /// added. Mirrors the technique the older migration tests use: the real
 /// `onUpgrade` branch then runs, rather than a re-implementation of it.
 Future<void> rewindPastV7(AppDatabase db, {required int toVersion}) async {
+  // Everything v8 added comes off first (KHA-146). A database rewound to v5
+  // must not still carry a v8 column, or the real `onUpgrade` would try to ADD
+  // one that already exists and the test would fail for a reason unrelated to
+  // the migration under test. Chained this way rather than duplicated so there
+  // stays exactly one statement of what each version added.
+  await rewindPastV8(db, toVersion: toVersion);
   for (final String column in v7TransactionColumns) {
     await db.customStatement('ALTER TABLE transactions DROP COLUMN $column;');
   }
@@ -87,11 +94,12 @@ void main() {
     setUp(() => db = openPlainTestDatabase());
     tearDown(() async => db.close());
 
-    test('reports schemaVersion 7', () {
-      // The one place the *current* version is pinned; older migration files
-      // deliberately assert `greaterThanOrEqualTo` instead, so a new version
+    test('reports at least schemaVersion 7', () {
+      // No longer an exact number — `schema_v8_migration_test.dart` is now the
+      // one place the *current* version is pinned. Older migration files
+      // deliberately assert `greaterThanOrEqualTo` so that adding a version
       // does not break every previous test for no reason.
-      expect(db.schemaVersion, 7);
+      expect(db.schemaVersion, greaterThanOrEqualTo(7));
     });
 
     test('every v7 column is present on transactions', () async {

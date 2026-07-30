@@ -53,6 +53,7 @@ import 'field_transforms.dart';
 import 'message_parser.dart';
 import 'parse_outcome.dart';
 import 'parsed_fields.dart';
+import 'partial_extraction.dart';
 import 'rule_pack.dart';
 
 final class RulePackMessageParser implements MessageParser {
@@ -260,10 +261,26 @@ final class RulePackMessageParser implements MessageParser {
     if (missing.isNotEmpty) {
       // A half-populated transaction is never invented. AC-A4.2 promises the
       // user gets to fill in the gap themselves, from the original text.
+      //
+      // **KHA-146:** but "fill in the gap" is not "retype everything". By this
+      // line `fields` already holds every value the regex read successfully —
+      // it was computed above, before the check, and until KHA-146 it was
+      // discarded right here. Carrying it through is the whole fix: the user
+      // is asked for the field that genuinely failed, not for the four that
+      // did not. It stays explicitly unconfirmed all the way to the form (see
+      // `partial_extraction.dart`); nothing on this path writes a transaction.
       return UnparsedMessage(
         reason: UnparsedReason.requiredFieldMissing,
         rule: reference,
         missingFields: missing,
+        partialExtraction: PartialExtraction.fromParsedFields(
+          fields,
+          // The rule's declared type — the "transaction type word" the message
+          // opened with, which the form otherwise makes the user pick again
+          // from a twelve-item dropdown.
+          transactionType: rule.messageType,
+          missingFields: missing,
+        ),
       );
     }
 

@@ -475,6 +475,15 @@ class AppLocalizationsEn extends AppLocalizations {
       'Categorisation comes later — this will be saved as Uncategorised and you can categorise it from the list.';
 
   @override
+  String get completePrefilledNotice =>
+      'We read some of this from the message. Check it before saving — nothing is recorded until you do.';
+
+  @override
+  String completeInstrumentUnmatched(String maskedRef) {
+    return 'The message names $maskedRef, which doesn\'t match an account or card you have yet — pick one or leave it as Not stated.';
+  }
+
+  @override
   String get amountMustBePositive =>
       'Enter an amount greater than zero, then choose Money in or Money out';
 

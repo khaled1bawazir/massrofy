@@ -42,6 +42,7 @@ import '../../features/categorization/categorization_service.dart';
 import '../../features/categorization/category_correction.dart';
 import '../../features/categorization/learned_rules.dart';
 import '../../features/ingestion/review_queue.dart';
+import '../../features/ledger/bank_tree.dart';
 import '../../features/ledger/internal_transfer_decision.dart';
 import '../../features/ledger/ledger_mapping.dart';
 import '../../features/ledger/ledger_transaction.dart';
@@ -435,8 +436,38 @@ class _CompleteUnparsedHostState extends ConsumerState<CompleteUnparsedHost> {
   @override
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
+
+    // **KHA-146.** The instrument picker had been left with its default empty
+    // list ever since this route was written, so every message reached the
+    // form with "Not stated" as the only option — the live symptom the issue
+    // reports as *"Account/card shows Not stated, despite a card number being
+    // plainly present in the message"*. Two separate causes produced that one
+    // symptom: the partial extraction was discarded (fixed in the parser and
+    // the schema), and there was nothing to select even if it had not been.
+    //
+    // The bank tree is the app's one source of accounts and cards (S-21/S-22),
+    // so the picker is fed from it rather than from a second query that could
+    // disagree with it. Accounts and cards are flattened here **only** because
+    // the picker is one dropdown; AC-B13.3's "never merged" rule applies to
+    // the ledger views, and each entry still shows its own kind label.
+    //
+    // While the tree is loading, or when the database is locked, this is an
+    // empty list — which is exactly the pre-KHA-146 behaviour, and correct: a
+    // picker of instruments we have not read yet would be a lie. The screen
+    // rebuilds when the stream emits.
+    final List<InstrumentSummary> instruments = ref
+        .watch(bankTreeProvider)
+        .maybeWhen(
+          data: (List<BankTreeNode> nodes) => <InstrumentSummary>[
+            for (final BankTreeNode node in nodes) ...node.accounts,
+            for (final BankTreeNode node in nodes) ...node.cards,
+          ],
+          orElse: () => const <InstrumentSummary>[],
+        );
+
     return CompleteUnparsedScreen(
       item: widget.item,
+      instruments: instruments,
       rejectedFields: _rejectedFields,
       onSave: (UnparsedCompletionDraft draft) async {
         final UnparsedCompletionService? service = await ref.read(

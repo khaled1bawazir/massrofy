@@ -908,6 +908,18 @@ abstract class AppLocalizations {
   /// **'Categorisation comes later — this will be saved as Uncategorised and you can categorise it from the list.'**
   String get completeCategoryDeferred;
 
+  /// KHA-146. Shown only when S-19 pre-filled fields from a partial parse. Says out loud that the pre-filled values came from the app, not the user, and that they are not yet a transaction.
+  ///
+  /// In en, this message translates to:
+  /// **'We read some of this from the message. Check it before saving — nothing is recorded until you do.'**
+  String get completePrefilledNotice;
+
+  /// KHA-146. Shown under the S-19 instrument picker when the parser read a card/account reference that resolves to no existing instrument. The form never creates an instrument (see unparsed_completion.dart), so it says what it saw rather than silently discarding it.
+  ///
+  /// In en, this message translates to:
+  /// **'The message names {maskedRef}, which doesn\'t match an account or card you have yet — pick one or leave it as Not stated.'**
+  String completeInstrumentUnmatched(String maskedRef);
+
   /// The sign convention's user-facing contract (defect O-QA-2, lib/core/money/sign_convention.dart). A minus sign is never interpreted as 'this is a refund' — the direction control says that.
   ///
   /// In en, this message translates to:
