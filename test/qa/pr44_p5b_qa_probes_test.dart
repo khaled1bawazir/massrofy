@@ -20,9 +20,13 @@
 /// behaviour it says so loudly and names the issue that must invert it.
 library;
 
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:massrofy/core/money/money.dart';
 import 'package:massrofy/core/money/sign_convention.dart';
+import 'package:massrofy/core/text/sms_text_normalizer.dart';
 import 'package:massrofy/core/time/clock.dart';
 import 'package:massrofy/features/categorization/categories.dart';
 import 'package:massrofy/features/ingestion/content_hmac.dart';
@@ -55,101 +59,227 @@ LedgerBank _bank(int id) => LedgerBank(
 
 void main() {
   // =======================================================================
-  //  KHA-137 (HIGH) — AC-A5.1's carrier-retry dedup does not hold
+  //  KHA-137 (HIGH) — FIXED. These probes are INVERTED, as they instructed.
   // =======================================================================
   //
-  // Reproduced on a device during this gate: the byte-identical SMS delivered
-  // twice, ~43 seconds apart, produced TWO transactions and doubled the month
-  // total from −312.40 SAR to −624.80 SAR.
-  //   docs/evidence/qa-pr44/06-after-sms-5s.png  → one row, correct
-  //   docs/evidence/qa-pr44/07-redelivered.png   → two rows, doubled
+  // The first gate (`4308d7a`) reproduced this on a device: the byte-identical
+  // SMS delivered twice ~43 s apart produced TWO transactions and doubled the
+  // month total from −312.40 SAR to −624.80 SAR. The probes below then pinned
+  // the mechanism, and carried an explicit instruction — *"INVERT THIS PROBE
+  // WHEN KHA-137 IS FIXED — the two must then be equal."*
   //
-  // These probes pin the mechanism rather than the screen, because the
-  // mechanism is what the fix has to change.
-  group('KHA-137 — the D1 content HMAC is not stable across a redelivery', () {
-    test('two deliveries of the SAME body from the SAME sender produce '
-        'DIFFERENT hmacs when they arrive at different moments', () {
+  // ADR-017's "KHA-137 decision" (approved 2026-07-30) dropped `receivedAt`
+  // from the digest entirely, so that instruction is now discharged. The
+  // probes are inverted rather than deleted: a probe that recorded a real
+  // money defect is worth more as a permanent guard against its return than as
+  // a deleted file, and `docs/lessons.md` already prefers inverting a
+  // placeholder assertion to removing it.
+  //
+  // Re-verified at the re-gate (`037d810`), device AVD `massrofy_test`:
+  //   docs/evidence/qa-pr44-regate/04-unlocked-home.png  → the ORIGINAL 43,287 ms
+  //                                                        field pair, as ONE row
+  //   docs/evidence/qa-pr44-regate/06-after-redelivery.png → live 46,597 ms
+  //                                                        retry, total unchanged
+  group('KHA-137 — the D1 content HMAC is now stable across a redelivery', () {
+    test('two deliveries of the SAME body from the SAME sender produce the '
+        'SAME hmac however far apart they arrive', () {
       // A carrier retry cannot arrive at the same instant as the original —
       // Android stamps each inbox row with its own `date`. On the device the
-      // two rows were 43,287 ms apart; 40 s here is the same shape.
-      final DateTime firstDelivery = DateTime.utc(2026, 7, 15, 10, 20, 0);
-      final DateTime retry = firstDelivery.add(const Duration(seconds: 40));
-
-      String hmacAt(DateTime deliveredAt) => ContentHmac.compute(
+      // two rows were 43,287 ms apart. The digest must not care.
+      final String once = ContentHmac.compute(
         key: _probeKey,
         normalizedBody: _normalisedBody,
         sender: 'BAJ',
-        smsTimestampUtc: deliveredAt,
+      );
+      final String again = ContentHmac.compute(
+        key: _probeKey,
+        normalizedBody: _normalisedBody,
+        sender: 'BAJ',
       );
 
       expect(
-        hmacAt(firstDelivery),
-        isNot(hmacAt(retry)),
+        once,
+        again,
         reason:
-            'KHA-137. `content_hmac.dart` says the normalised body is chosen so '
-            'that "a carrier redelivery ... would hash differently and dedup '
-            'would silently fail" cannot happen — "this is the exact case D1 '
-            'exists for". Folding the delivery timestamp into the key '
-            'reintroduces that failure: the two digests differ, so '
-            '`findByContentHmac` misses and a second transaction is written. '
-            'INVERT THIS PROBE WHEN KHA-137 IS FIXED — the two must then be equal.',
+            'KHA-137, inverted. The digest is a function of the message text '
+            'and its sender and NOTHING else, so a redelivery — which differs '
+            'only in delivery instant and provider id — collides with the '
+            'stored row and `findByContentHmac` hits. This is the property '
+            'AC-A5.1 always needed and v1 never had.',
       );
     });
 
-    test('the hmac IS stable when only the provider id differs — which is why '
-        'the existing race test passes and the device does not', () {
-      // `immediate_sweep_race_test.dart`'s redelivery case builds both records
-      // through one helper with a fixed `receivedAt` and varies only the
-      // provider id. The provider id is not an input to the HMAC at all, so
-      // that fixture necessarily observes a suppression the field never gets.
-      final DateTime fixed = DateTime.utc(2026, 7, 15, 10, 20);
-      final String a = ContentHmac.compute(
-        key: _probeKey,
-        normalizedBody: _normalisedBody,
-        sender: 'BAJ',
-        smsTimestampUtc: fixed,
-      );
-      final String b = ContentHmac.compute(
-        key: _probeKey,
-        normalizedBody: _normalisedBody,
-        sender: 'BAJ',
-        smsTimestampUtc: fixed,
-      );
-      expect(
-        a,
-        b,
-        reason:
-            'not a defect — this is the (correct) behaviour the existing test '
-            'exercises. It is here so the two probes read side by side and the '
-            'unsound variable in that fixture is obvious: `receivedAt`.',
-      );
-    });
-
-    test('even a ONE-MILLISECOND difference in delivery time defeats the '
-        'dedup — so no realistic retry can ever be suppressed', () {
-      final DateTime first = DateTime.utc(2026, 7, 15, 10, 20, 0, 0);
-      final DateTime oneMsLater = DateTime.utc(2026, 7, 15, 10, 20, 0, 1);
-
+    test('the delivery instant is not an input at all — there is no signature '
+        'left to pass it through', () {
+      // ADR-017 KHA-137 (A) is explicit that `smsTimestampUtc` is *removed*
+      // from the parameter list rather than accepted-and-ignored, "because an
+      // unused parameter is an invitation to wire it back in". That is a
+      // compile-time property, so the guard is that this file compiles: any
+      // reintroduction of the parameter would have to change this call site.
+      //
+      // The behavioural half is covered by `ingestion_pipeline_test.dart`
+      // (43 s and one-hour redeliveries) and `immediate_sweep_race_test.dart`.
       expect(
         ContentHmac.compute(
           key: _probeKey,
           normalizedBody: _normalisedBody,
           sender: 'BAJ',
-          smsTimestampUtc: first,
         ),
-        isNot(
-          ContentHmac.compute(
-            key: _probeKey,
-            normalizedBody: _normalisedBody,
-            sender: 'BAJ',
-            smsTimestampUtc: oneMsLater,
-          ),
-        ),
-        reason:
-            'KHA-137. `ContentHmac.compute` folds the timestamp at millisecond '
-            'precision, so the tolerance for "the same message" is zero. There '
-            'is no delivery-timing window in which D1 fires.',
+        isA<String>().having((String h) => h.length, 'hex sha256 length', 64),
       );
+    });
+
+    test('the scheme tag leads the material, so a v1 digest can never equal a '
+        'v2 digest (ADR-017 KHA-137 (C) — forward-only, no backfill)', () {
+      // This is what lets stale v1 digests and new v2 digests coexist in the
+      // same UNIQUE column with no migration and no FALSE suppression. If the
+      // two formats could collide, an unrelated pre-fix message could suppress
+      // a genuine new one — silently deleting real spend.
+      final String v2 = ContentHmac.compute(
+        key: _probeKey,
+        normalizedBody: _normalisedBody,
+        sender: 'BAJ',
+      );
+
+      // The v1 material, reconstructed by hand: body ‖ sender ‖ millis, with
+      // no scheme tag. Recomputed here rather than imported, because the v1
+      // code is gone — which is the point.
+      final String v1 = Hmac(sha256, _probeKey)
+          .convert(
+            utf8.encode(
+              <String>[
+                _normalisedBody,
+                'BAJ',
+                DateTime.utc(
+                  2026,
+                  7,
+                  15,
+                  10,
+                  20,
+                ).millisecondsSinceEpoch.toString(),
+              ].join('\x00'),
+            ),
+          )
+          .toString();
+
+      expect(v1, isNot(v2));
+    });
+
+    test('the sender is canonicalised, so case cannot split one message into '
+        'two (KHA-137 (A), second half)', () {
+      // `senderPatterns` compile with `caseSensitive: false`, so the PARSER
+      // reads `D360` and `d360` as one bank. Before the fix the digest read
+      // them as two messages — the same class of defect as the timestamp, one
+      // level down. Mutation-verified at the re-gate: dropping the
+      // canonicalisation turns exactly one test red.
+      expect(
+        ContentHmac.compute(
+          key: _probeKey,
+          normalizedBody: _normalisedBody,
+          sender: 'D360',
+        ),
+        ContentHmac.compute(
+          key: _probeKey,
+          normalizedBody: _normalisedBody,
+          sender: 'd360',
+        ),
+      );
+    });
+  });
+
+  // =======================================================================
+  //  KHA-151 (MEDIUM) — CHARACTERISATION of a defect that is still OPEN
+  // =======================================================================
+  //
+  // These probes assert the CURRENT, WRONG behaviour on purpose, exactly as
+  // the KHA-137 probes above did before their fix landed. They document a real
+  // failure surface and will go red — deliberately — when KHA-151 is fixed, at
+  // which point they should be inverted the same way.
+  //
+  // `RulePackMessageParser._resolveBank` canonicalises the sender with
+  // `String.trim()`, which strips Unicode *whitespace* but not Unicode *format*
+  // characters (category Cf). Every shipped `senderPattern` is anchored, so one
+  // invisible directional mark defeats the anchor and the message is discarded
+  // as a non-financial sender — retaining nothing at all (NFR-P4). That is
+  // KHA-128's failure mode (user sees 0.00 SAR, empty review queue, no
+  // diagnostic) reached through a different door.
+  //
+  // NOT blocking PR #44: such a sender never reaches the content hash, so this
+  // can neither mask nor be masked by the KHA-137 change.
+  group('KHA-151 — invisible marks in the sender id (OPEN, characterisation)', () {
+    // The shipped pattern for Bank Aljazira, per assets/rule_packs/sa-core.json.
+    final RegExp jaziraPattern = RegExp(
+      r'^Jazira\s*Bank$',
+      caseSensitive: false,
+    );
+
+    // Built from code points rather than written as literal marks: a literal
+    // U+202B/U+202C in source makes the file render differently from how the
+    // compiler reads it, which the analyzer flags
+    // (`text_direction_code_point_in_literal`) for good reason — it is a
+    // code-review-spoofing vector. Keeping the source pure ASCII also means
+    // these constants survive a copy-paste through a tool that strips or
+    // normalises invisible characters, which is exactly how the first attempt
+    // at this file silently lost them.
+    final String rlm = String.fromCharCode(0x200F); // RIGHT-TO-LEFT MARK
+    final String lrm = String.fromCharCode(0x200E); // LEFT-TO-RIGHT MARK
+    final String rle = String.fromCharCode(0x202B); // RIGHT-TO-LEFT EMBEDDING
+    final String pdf = String.fromCharCode(
+      0x202C,
+    ); // POP DIRECTIONAL FORMATTING
+    final String zwsp = String.fromCharCode(0x200B); // ZERO WIDTH SPACE
+    final String bom = String.fromCharCode(0xFEFF); // ZWNBSP, BOM
+
+    test('the clean sender id matches — the control', () {
+      expect(jaziraPattern.hasMatch('Jazira Bank'.trim()), isTrue);
+    });
+
+    test('a leading or trailing bidi mark makes a REAL bank message look like '
+        'a non-financial sender', () {
+      for (final String sender in <String>[
+        '${rlm}Jazira Bank',
+        'Jazira Bank$rlm',
+        '${lrm}Jazira Bank',
+        '${rle}Jazira Bank$pdf',
+        '${zwsp}Jazira Bank',
+      ]) {
+        expect(
+          jaziraPattern.hasMatch(sender.trim()),
+          isFalse,
+          reason:
+              'KHA-151, characterising the CURRENT behaviour. `trim()` does not '
+              'remove format characters, and the pattern is anchored, so this '
+              'legitimate message is discarded with nothing retained (NFR-P4). '
+              'INVERT THIS PROBE WHEN KHA-151 IS FIXED — these must then match.',
+        );
+      }
+    });
+
+    test('U+FEFF is trimmed while the others are not, so the behaviour is '
+        'inconsistent as well as wrong', () {
+      // Worth pinning separately: a reader who tested only with a BOM would
+      // conclude the sender path is mark-tolerant, and it is not.
+      expect(jaziraPattern.hasMatch('${bom}Jazira Bank'.trim()), isTrue);
+    });
+
+    test('`SmsTextNormalizer.normalize` already strips these — the fix is one '
+        'line, and it makes the parser agree with ContentHmac', () {
+      // ContentHmac (as of the KHA-137 fix) runs the sender through exactly
+      // this normaliser; `_resolveBank` does not. That disagreement IS the
+      // defect, and this probe shows the remedy already exists in the codebase.
+      for (final String sender in <String>[
+        '${rlm}Jazira Bank',
+        'Jazira Bank$rlm',
+        '${rle}Jazira Bank$pdf',
+      ]) {
+        expect(
+          jaziraPattern.hasMatch(SmsTextNormalizer.normalize(sender)),
+          isTrue,
+          reason:
+              'the normaliser strips U+200E/200F/202A-202E, so routing the '
+              'sender through it closes KHA-151 without touching any pattern',
+        );
+      }
     });
   });
 

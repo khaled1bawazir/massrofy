@@ -1870,7 +1870,126 @@ Recorded whether they succeeded or not, per the audit rule.
 | P8 | Force a transaction into the 00:00-03:00 Riyadh boundary of a date filter | Repelled by the shipped code (the self-review fix works); the UTC-midnight counterfactual is now pinned as a regression guard |
 | P9 | Make `TransactionFilter.toString` leak a query, amount, date or instrument id | Repelled — facet shapes only |
 
-## 3. Verdict
+## 3. Verdict (first gate, `4308d7a`)
 
 `QA: FAIL 44` — see `docs/defects.md` for the blocking item and the full
 non-blocking list.
+
+---
+
+# PR #44 RE-GATE — `037d810` (2026-07-30)
+
+Second gate, after mobile-engineer's fixes for KHA-137/138/139 and the merge of
+`main` (bringing KHA-133). **Nothing is cited from the first gate** — every gate,
+mutation and journey below was re-run on `037d810`, per `docs/lessons.md`'s rule
+that a result is only evidence for the tree it was measured on.
+
+## R1. Gates, re-measured
+
+| Gate | Result | SHA |
+|---|---|---|
+| `dart format --set-exit-if-changed lib test docs` | exit 0, 0 changed | `037d810` + QA artifacts |
+| `flutter analyze --fatal-infos` | **No issues found!** | `037d810` + QA artifacts |
+| `flutter test --exclude-tags=release_mode_guard` | **1763 passed / 3 skipped / 0 failed** | `037d810` + QA artifacts |
+| PR #44 aggregate `ci` check run | **completed / success** ([run 30549701298](https://github.com/khaled1bawazir/massrofy/actions/runs/30549701298)) | `037d810` |
+| …and all five constituent jobs (build & test, ADR-001, ADR-002, on-device emulator, dep/security scan) | all **success** | `037d810` |
+
+### R1a. Correction to this section's first draft — read this before citing R1
+
+This re-gate was interrupted mid-run (account spend limit) and resumed. The
+first draft of the table above recorded `dart format` exit 0, `flutter analyze`
+"No issues found!" and **1745 passed**. **Those three numbers were not
+reproducible on the tree that was actually left behind**, and are corrected
+above rather than quietly restated:
+
+| Claimed in the interrupted draft | Actually measured on resume | Cause |
+|---|---|---|
+| `dart format` exit 0 | **exit 1** — `test/qa/pr44_p5b_qa_probes_test.dart` unformatted | the resumed edits to the probe file were never re-formatted |
+| `flutter analyze` clean | **6 errors + 3 warnings** — the probe file did not compile (`Hmac`, `sha256`, `utf8`, `SmsTextNormalizer` all undefined; missing imports) and `docs/evidence/qa-pr44-regate/bidi_sender_probe.dart` tripped `text_direction_code_point_in_literal` + `avoid_print` | new probe code added without its imports |
+| 1745 passed | **1763 passed** | the 1745 figure predates the KHA-151 group; and a suite containing a non-compiling file cannot have been run at all |
+
+All of these were defects in **QA's own artifacts**, not in PR #44: none of the
+affected files exist at `037d810` (verified with `git cat-file -e
+037d810:test/qa/pr44_p5b_qa_probes_test.dart` → *"exists on disk, but not in
+037d810"*). **PR #44's own code was never format- or analyze-dirty** — the only
+file `dart format` rewrote was the QA probe. They are recorded here anyway
+because the evidence rule applies to QA's work first: this is the second time
+this exact file has broken its own format gate (see `48ae7d4`, *"correct QA's
+own format-gate claim"*), which is now a lesson rather than a coincidence.
+
+Fixed in this commit: imports added; the bidi constants rebuilt with
+`String.fromCharCode` so the source stays pure ASCII (the previous literal marks
+did not survive the tooling round-trip and silently degraded to the ASCII string
+`'200F'` at one point — a mutation that would have made the probe assert nothing);
+`ignore_for_file` with a written justification on the evidence script.
+
+## R2. Fix traceability — criterion → how it was re-verified → status
+
+| Criterion / defect | Re-verification | Status |
+|---|---|---|
+| **AC-A5.1** carrier redelivery ⇒ exactly one transaction (KHA-137) | Mutation 1 (4 red); device replay of the original 43,287 ms field pair; live redelivery at 46,597 ms | **RUNTIME-VERIFIED PASS** |
+| ADR-017 KHA-137 **(A)** signature | `smsTimestampUtc` removed from the parameter list, `_scheme` leads the material | PASS (code-read) |
+| ADR-017 KHA-137 **(B)** key label unchanged | `keyDerivationLabel` still `massrofy/dedup-content-hmac/v1` | PASS |
+| ADR-017 KHA-137 **(C)** forward-only, DB stays 7 | no migration; v1 and v2 digests cannot collide (scheme tag leads) | PASS |
+| ADR-017 KHA-137 **(D)** `sms_provider_id` pre-check ships together | `5e93ea6` merges `main`→`086ba77`; `findBySmsProviderId` at `raw_message_dao.dart:192`, wired at `ingestion_pipeline.dart:606`; **Mutation 3 = 3 red** | **PASS — verified, not trusted** |
+| ADR-017 KHA-137 **(E)** regression tests | all four present: differing `receivedAt` (43 s), one-hour gap, sender case, stale-v1-digest re-scan | PASS |
+| ADR-017 KHA-137 **(F)** doc comments corrected | `content_hmac.dart`, `raw_message_table.dart`, `domain_separated_key.dart`, `_withDedupGuard` all updated | PASS |
+| **AC-A5.3** genuinely separate purchases retained | `ingestion_pipeline_test.dart:446` — same merchant, same amount, same card, same day, **40 min apart**: both retained. Green within the 1763. | PASS (residual disclosed + human-approved) |
+| **The disclosed residual is the shipped residual, not something worse** | Re-derived from the code rather than taken from the doc comment. D1 suppresses **iff** `(normalizedBody, lowercased normalized sender)` collide. So the residual is exactly "byte-identical normalised body" = same merchant, amount, card **and in-body minute**. Checked that `SmsTextNormalizer.normalize` cannot widen it: it removes only invisibles/diacritics/tatweel, collapses whitespace, and folds Arabic-Indic→ASCII digits (**amount-preserving**, so two different amounts can never normalise together). Nothing semantic is discarded. | **PASS — residual is as narrow as disclosed** |
+| KHA-138 — `app.dart` call site guarded | Mutations 4, 5, 6 | **PASS** |
+| KHA-139 — corpus pair is genuinely internal | Mutation 7 | **PASS** |
+| **AC-A1.1** ingest with no user action (KHA-122) | device: SMS → row in 12 s, app never left foreground | **RUNTIME-VERIFIED PASS** |
+| **AC-A1.4** locked/backgrounded unchanged | device: background ⇒ re-lock ⇒ BiometricPrompt; resume sweep added nothing | **RUNTIME-VERIFIED PASS** |
+| **AC-E3.2** card breakdown reconciles (NFR-A6) | device + independent recompute: 511.90 + 600.00 = 1111.90 == Home | **RUNTIME-VERIFIED PASS** |
+| **AC-C1.3** category totals reconcile | device: Uncategorized 1111.90 == period total | **RUNTIME-VERIFIED PASS** |
+| **AC-E5.2** filtered-total invariant | device + independent recompute: 660.00 − 60.00 = 600.00, label changes to "Filtered total" | **RUNTIME-VERIFIED PASS** |
+| **AC-E4.2** under two months ⇒ no chart, no delta | device: "Not enough history yet" | **RUNTIME-VERIFIED PASS** |
+| Immediate-sweep race safety | `immediate_sweep_race_test.dart` re-run green + device resume sweep | PASS |
+
+## R3. Mutations run this round (all applied alone, then reverted)
+
+Each mutation was applied to a clean `037d810` tree and reverted immediately
+after; `git diff --stat lib/` was checked back to empty after every one, so no
+mutation leaked into the artifacts commit.
+
+| # | Mutation | Result |
+|---|---|---|
+| 1 | fold `receivedAt` back into the digest material | **4 red**, and they are the right four: the 43 s redelivery, the one-hour redelivery, the sender-case redelivery, and `immediate_sweep_race_test`'s redelivery-after-immediate-sweep. (A 5th, `kha133_rescan_probes`' redact-drift probe, also fires — incidental, the mutation reshapes the material.) |
+| 2 | drop sender canonicalisation | **1 red** — the sender-case test |
+| 3 | remove the `findBySmsProviderId` pre-check | **3 red** — KHA-137 (D)'s stale-v1-digest migration test plus two of KHA-133's own |
+| 4 | **delete** `ref.watch(foregroundSmsSignalProvider)` from the unlocked branch | **1 red**, intended message |
+| 4b | **comment out** that exact line (`// ref.watch(foregroundSmsSignalProvider);`) — the case the comment-stripping exists for | **1 red.** This is the one that proves `codeOnly()` is load-bearing: a naive `contains` over the raw file would have **passed** here, because the string is still present verbatim in a comment. |
+| 5 | move that watch outside the branch | **2 red** |
+| 6 | duplicate it (one inside, one hoisted above `if (unlocked)`) | **exactly `Expected: <1>, Actual: <2>`**, with the AC-A1.4 reason string |
+| 7 | restore KHA-139's inert fixture (`affectsSpend: false`, reference dropped) | **exactly `Expected: <200>, Actual: <0>`**, message *"every run must contain a cross-bank pair that the ANALYSIS rates internal — not merely a pair that was planted"* — and **only that one test went red: all 11 reconciliation assertions stayed green.** That is the proof of the KHA-139 claim in both directions at once: the old fixture really was inert, and the reconciliation assertions alone could never have detected it. |
+
+Mutations 1, 4, 4b, 5, 6 and 7 were re-run from scratch on the resumed session
+(not carried over from the interrupted one); 2 and 3 are cited from the
+interrupted run's log, which was measured on this same `037d810` tree.
+
+## R4. Attack probes this round (recorded whether or not they succeeded)
+
+| # | Attack | Result |
+|---|---|---|
+| R-P1 | Replay the exact original field data (two byte-identical BAJ rows, 43,287 ms apart) through the fixed build | **Repelled** — one transaction |
+| R-P2 | Live carrier-retry redelivery, 46,597 ms gap, app open and idle | **Repelled** — total unchanged |
+| R-P3 | Redelivery an hour later (defeats any window-based mitigation) | **Repelled** — one transaction |
+| R-P4 | Sender differing only in case | **Repelled** — suppressed as duplicate |
+| R-P5 | Re-scan a pre-fix row carrying a stale v1 digest (the migration hazard) | **Repelled** — counted duplicate, not a `failedWithError` stall |
+| R-P6 | Bidi/invisible control character (U+200F/200E/202A/202C/200B) in the sender id | **ATTACK SUCCEEDED** → **KHA-151 (Medium)**, non-blocking |
+| R-P7 | Re-lock/re-auth cycle, then resume sweep — can it double-count? | **Repelled** — total unchanged, 4 items |
+
+## R5. Verdict (re-gate, `037d810`)
+
+`QA: PASS 44`. All three fix items verified by independent mutation; the
+money-correctness fix verified on a device against the original field data. PR
+#44's aggregate `ci` check run is **success** on this exact head. One new Medium
+(KHA-151) filed, explicitly non-blocking. KHA-140 remains open and non-blocking.
+
+**Honesty note carried into the verdict:** the only gate failures found on
+resume were in QA's own artifacts (§R1a), not in PR #44. Correcting them did not
+change the verdict, but the first-draft numbers should not be cited — cite R1 as
+it now stands.
+
+`QA: RUNTIME PASS` — every PRD journey exercised in this gate was walked on a real
+emulator against the real build, with screenshots in `docs/evidence/qa-pr44-regate/`.
