@@ -271,6 +271,11 @@ void main() {
       'more.needsReview',
       'more.categories',
       'more.rules',
+      // KHA-133's re-scan action. Added to this list, not just to its own
+      // test, because this list is the thing a human greps to answer "what can
+      // be reached from the More menu" — a destination missing from it is
+      // invisible in exactly the way KHA-113 was.
+      'more.recheckBanks',
       'more.lockNow',
     ]) {
       expect(find.byKey(Key(key)), findsOneWidget, reason: key);

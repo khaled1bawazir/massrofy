@@ -1307,4 +1307,87 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get moreReportsComingSoon => 'Reports arrive in the next release';
+
+  @override
+  String get recheckBanksTitle => 'Check my banks again';
+
+  @override
+  String get recheckBanksIntroTitle => 'Messages that were missed';
+
+  @override
+  String get recheckBanksIntroBody =>
+      'If a bank\'s messages were not recognised before, they were skipped and never come back on their own. This reads them again and records anything that was missed.';
+
+  @override
+  String get recheckBanksSafeNote =>
+      'Nothing is counted twice, and only messages from the same date range as the first import are read.';
+
+  @override
+  String get recheckBanksAction => 'Check my banks again';
+
+  @override
+  String get recheckBanksAgain => 'Check again';
+
+  @override
+  String get recheckBanksRunning => 'Reading your bank messages again…';
+
+  @override
+  String get recheckBanksNothingNew => 'Nothing new found';
+
+  @override
+  String recheckBanksFound(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Found $count new transactions',
+      one: 'Found 1 new transaction',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String recheckBanksExamined(int count, String since) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count bank messages re-checked, back to $since.',
+      one: '1 bank message re-checked, back to $since.',
+      zero: 'No bank messages to re-check, back to $since.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String recheckBanksNeedReview(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count of them need review before they can be recorded.',
+      one: '1 of them needs review before it can be recorded.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String recheckBanksSomeFailed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count messages could not be read this time. Try again later.',
+      one: '1 message could not be read this time. Try again later.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get recheckBanksLocked =>
+      'The app locked before this could run. Unlock and try again.';
+
+  @override
+  String get recheckBanksNoPermission =>
+      'Massrofy cannot read your messages right now, so there is nothing to re-check. Grant SMS access and try again.';
+
+  @override
+  String get recheckBanksError =>
+      'Something went wrong while re-checking. Your existing transactions are unaffected.';
 }

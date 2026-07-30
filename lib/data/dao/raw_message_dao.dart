@@ -158,5 +158,42 @@ class RawMessageDao extends DatabaseAccessor<AppDatabase>
         .getSingleOrNull();
   }
 
+  /// Looks up a message by the **inbox row** it came from — D1's *other*
+  /// UNIQUE key (ADR-017), and the one that makes a re-scan of already-swept
+  /// ground safe (AC-A3.3).
+  ///
+  /// ## Why this exists at all, given [findByContentHmac] already deduped
+  ///
+  /// Because the two keys genuinely catch different things, and until KHA-133
+  /// only one of them was ever *pre-checked*:
+  ///
+  ///  - `content_hmac` catches a **carrier redelivery** — the same text
+  ///    arriving as a brand-new provider row (AC-A5.1);
+  ///  - `sms_provider_id` catches **the same inbox row read twice**, which is
+  ///    exactly what the historical import and the KHA-133 re-scan do.
+  ///
+  /// Those overlap in the happy case, so the missing pre-check was invisible.
+  /// It stops being invisible the moment a rule pack changes a bank's
+  /// `redact[]` array: `contentHmac` is computed over text sanitised with
+  /// those patterns, so the recomputed hmac for an already-stored message no
+  /// longer matches, [findByContentHmac] misses, and the insert slams into the
+  /// `sms_provider_id` UNIQUE constraint instead. Drift throws, the pipeline's
+  /// per-message `catch` counts `failedWithError`, the watermark stops
+  /// advancing — and a completely benign duplicate is reported to the user as
+  /// a stalled pipeline. Every `redact` array in the bundled pack is `[]`
+  /// today, which is the only reason this is latent rather than live.
+  ///
+  /// Pre-checking both keys converts that unhandled constraint violation into
+  /// the counted `suppressedAsExactDuplicate` outcome ADR-017 D1 already
+  /// specifies. See `docs/architecture.md` ADR-006, KHA-133 subsection, Q1.
+  ///
+  /// A `NULL` `sms_provider_id` (a manually entered transaction has no inbox
+  /// row) can never match: SQL `=` is never true against `NULL`.
+  Future<RawMessageRow?> findBySmsProviderId(String smsProviderId) {
+    return (select(rawMessages)
+          ..where((RawMessages t) => t.smsProviderId.equals(smsProviderId)))
+        .getSingleOrNull();
+  }
+
   Future<List<RawMessageRow>> all() => select(rawMessages).get();
 }
