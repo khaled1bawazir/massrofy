@@ -1,11 +1,18 @@
-STATUS: APPROVED
+STATUS: APPROVED (base document, v2.1 content — unchanged, already built)
+ADDENDUM A STATUS: APPROVED (2026-07-30 — Banks & Senders screen, US-A6 / US-B16. Design-critic
+found 12 must-fix items on the first pass (missing unlink affordance, missing states, an
+ambiguous multi-select link flow, token/RTL drift); one revision round applied all of them,
+verified directly against the mockup source before approval rather than taken on the designer's
+report. See every section tagged "Addendum A — NEW" below.)
 # Massrofy — UI/UX Design Specification
 
-**Version:** 2.1 (post-review revision — typography swap to brand.md v1.1, icons rebuilt as
-inline SVG, two new manual-add screens; supersedes v2.0. See changelog below.)
-**Date:** 2026-07-27
-**Author:** ui-ux-designer agent (Gate 2)
-**Source of truth for requirements:** `docs/PRD.md` (STATUS: Approved)
+**Version:** 2.2 (Addendum A delta — adds the Banks & Senders screen plus small entry-point and
+rename additions to three already-approved screens; every v2.1 screen and decision below is
+otherwise untouched. See changelog.)
+**Date:** 2026-07-30 (v2.2, Addendum A); 2026-07-27 (v2.1 base, still current for everything not
+tagged "Addendum A — NEW")
+**Author:** ui-ux-designer agent (Gate 2 base; additive `/revise-design` round for Addendum A)
+**Source of truth for requirements:** `docs/PRD.md` (STATUS: Approved, incl. Addendum A)
 **Source of truth for visual tokens:** `docs/brand.md` (STATUS: DRAFT — v1.1, awaiting approval
 alongside this document)
 **Planning context:** `docs/build-plan.md` (design flags D-1..D-12 answered throughout; see §10)
@@ -13,6 +20,28 @@ alongside this document)
 layout** + English (LTR) as a fully-supported second locale, side-loaded APK.
 
 **Changelog:**
+- **v2.2 (2026-07-30 — Addendum A delta, DRAFT, additive only):** New screen **Banks & Senders**
+  (`docs/mockups/banks-senders.html`, S-50..S-53) for US-A6 / AC-A6.1-11 — two clearly separated
+  sender lists (recognized vs. unrecognized, each with an exact sender string and a message
+  count for the current window), a redaction-applied single-most-recent-message preview for an
+  ambiguous unrecognized sender (AC-A6.2, never persisted), a name-only linking flow with a
+  non-binding text-overlap suggestion the user must actively confirm (AC-A6.3/6/7 — no
+  pattern/rule authoring anywhere, per X18), and a post-link rescan result screen (AC-A6.4/5).
+  A linked bank whose messages can't yet be auto-parsed states this explicitly with an on-demand
+  "check again" action (AC-A6.10). New screen **Diagnostics / Parser Health**
+  (`docs/mockups/diagnostics.html`, S-54) — this also fills a pre-existing gap: `docs/architecture.md`
+  ADR-015 specified a parser-health panel in v1.0 but no mockup for it existed until now — carrying
+  the standing "N unrecognized senders" row required by AC-A6.11, shown whether or not it is
+  zero, so a sender-ID change discovered in month eight is as visible as day-one emptiness.
+  Small additive edits to three already-approved screens, each marked in place: `home.html`'s
+  empty state and `needs-review.html`'s empty-per-tab state each gain a one-line link into the
+  new screen (AC-A6.1); `banks.html`'s Bank Detail (S-22) gains a rename affordance for the bank
+  entity itself (new S-25b, US-B16 / AC-B16.1-2 — the bank-level counterpart of the existing
+  instrument rename, S-25); `privacy-data.html`'s Settings root (S-40) gains "Banks & Senders"
+  and "Diagnostics" rows. **Nothing from v2.1 is removed, restyled, or renumbered.** This delta
+  does not reopen gate 2 for the rest of the document — matching the process note in
+  `docs/PRD.md`'s Addendum A status line, and the shape of this project's prior `/revise-design`
+  rounds.
 - **v2.1 (2026-07-27, same-day revision after human mockup review):**
   1. **Typography.** `docs/brand.md` was updated to v1.1 (Tajawal + Manrope replacing IBM Plex
      Sans / IBM Plex Sans Arabic). Every mockup's Google Fonts `<link>` and `font-family` CSS
@@ -43,6 +72,12 @@ layout** + English (LTR) as a fully-supported second locale, side-loaded APK.
 > Penpot or any other design-tool integration is stale and does not apply to this workflow;
 > the mockups themselves are the source of visual truth, and this document is kept in sync
 > with them.
+
+> **Addendum A scope note (v2.2, DRAFT).** Everything tagged **`Addendum A — NEW`** below is new,
+> unapproved content added for PRD Addendum A (`US-A6`, `US-B16`) and needs its own sign-off from
+> the human. It does not require re-reading or re-approving the rest of this document — every
+> section without that tag is exactly what was approved at v2.1 and is unchanged. This mirrors
+> `docs/PRD.md`'s own Addendum A status line, which stayed separate from the base PRD's approval.
 
 ---
 
@@ -111,6 +146,18 @@ away at all times, satisfying NFR-U7 at the navigation level, not just inside th
 flow itself. **The tab order and every chevron/back affordance mirror under Arabic RTL**,
 which is the app's primary, first-designed direction (see §3.1) — `docs/mockups/home-en.html`
 is kept as the one explicit English/LTR reference showing the mirrored counterpart of Home.
+
+> **Addendum A — NEW.** Four entry points reach a new screen, **Banks & Senders**
+> (`docs/mockups/banks-senders.html`, S-50), none of which change the four-tab structure above:
+> **Settings → Banks & Senders** (primary entry — a new row on S-40, alongside "Banks"),
+> **Home's zero/empty state** (a one-line link, AC-A6.1), **Needs Review's empty-per-tab state**
+> (a one-line link, AC-A6.1), and **Settings → Diagnostics' parser-health panel**
+> (`docs/mockups/diagnostics.html`, S-54) via its standing "N unrecognized senders" row
+> (AC-A6.11). That last entry point is the only one **not** conditional on an empty state, which
+> is what makes a later silent sender-ID change discoverable rather than only visible at first
+> run. From Banks & Senders, linking an unrecognized sender is a layered sheet flow (S-51 preview
+> → S-52 link → S-53 result) that never leaves the screen or adds a bottom-nav tab — the same
+> "sheet, not a screen-count cost" philosophy §6 already uses for category correction.
 
 ---
 
@@ -387,6 +434,10 @@ the tokens in §2 directly.
 | **Toast/Snackbar** | Transient confirmation, often with Undo | `message`, `actionLabel?` | info, success, with-undo | `category-correction.html` |
 | **LockGateScreen** | Full-screen auth gate | `method`, `onSuccess`, `onFail` | idle, authenticating, failed, locked-out, session-expired-banner | `lock-gate.html` |
 | **RecentlyDeletedItem** | Row in Recently Deleted | `transaction summary`, `deletedAt`, `onRestore` | default, restored | `transaction-detail.html` (restore banner variant) |
+| **SenderListRow** (Addendum A — NEW) | One row in either of the Banks & Senders lists | `kind` (`recognized`\|`unrecognized`), `displayName`\|`senderString`, `messageCount`, `windowLabel`, `unparsedNote?`, `suggestion?`, `onTap`, `onCheckAgain?`, `onUnlink?` | recognized, recognized-with-unparsed-note (+ "Check again" and "Remove this sender's link", AC-A6.8/A6.10), recognized-with-check-again-result (positive or no-change outcome), unrecognized, unrecognized-with-suggestion | `banks-senders.html` |
+| **SenderPreviewSheet** (Addendum A — NEW) | Redaction-applied preview of any unrecognized sender's single most recent message — opened uniformly for every unrecognized sender, never a conditional heuristic | `senderString`, `redactedBody`, `receivedAt`, `suggestion?` | shown-once, shown-with-suggestion-carried-forward, dismissed (never persisted either way, AC-A6.2/A6.9) | `banks-senders.html` |
+| **LinkSenderSheet** (Addendum A — NEW) | Name-only sender-to-bank linking flow, rendered as one mutually-exclusive choice list (the suggested bank, if any, is one row among the rest, never pre-selected) — deliberately has no field for a pattern, regex, or template (X18) | `senderString`, `suggestedBank?`, `existingBanks[]`, `newBankName?`, `selectedOptionId` | no-selection (Save disabled), one-option-selected-suggested-bank, one-option-selected-existing-bank, one-option-selected-new-bank (inline name field), saving | `banks-senders.html` |
+| **DiagnosticsParserHealthPanel** (Addendum A — NEW) | Settings → Diagnostics counts panel (ADR-015) | `parsedCount`, `reviewCount`, `ignoredCount`, `unrecognizedSenderCount`, `topFailingRuleIds[]` | populated-nonzero-unrecognized, zero-unrecognized (row still shown, never hidden — AC-A6.11) | `diagnostics.html` |
 
 ---
 
@@ -563,6 +614,16 @@ AC-B14.3 — not an error).
 **S-25 — Rename sheet.** Text field + Save, for any auto-created instrument (AC-B3.1,
 AC-B15.2).
 
+**S-25b — Rename a Bank.** `Addendum A — NEW.` Same file, same rename-sheet pattern as S-25,
+now available for the bank entity itself via a small pencil affordance next to the bank's title
+on S-22 Bank Detail. Purpose: US-B16/AC-B16.1 — the bank keeps its identity (accounts, cards,
+totals, history all stay attached) while only its display name changes, everywhere it's shown.
+Copy states AC-B16.2 explicitly: a later rule-pack update or SMS supplying a different display
+name never silently overwrites a name the user set (the same "user wins" principle US-D3 already
+gives merchant rules, applied one level up). States shown: **default** (pre-filled with current
+name), **saved**. No separate error state beyond the existing "name required" pattern shared
+with S-25.
+
 **S-48 — Add Account Manually.** Mockup: `docs/mockups/add-account.html`. **New in v2.1 —
 extends US-B15 at human request during design review; see §10 D-13.** Reached via a new "+"
 entry point on `banks.html` (Banks List FAB, and an inline "add account to this bank" tile on
@@ -589,6 +650,107 @@ shown: **Empty** (Save disabled), **Error/validation** (incomplete last-4 entry 
 inline — "Enter exactly the last 4 digits, as shown in your bank's SMS" — plus the same
 missing-bank/nickname messages as S-48), **Success** (confirmation summary showing the linked
 settlement account as a chip, mirroring `banks.html`'s Card Detail linked-account chip).
+
+### Addendum A — NEW: Banks & Senders — `docs/mockups/banks-senders.html`
+
+Purpose (US-A6, AC-A6.1-11): let the user tell the app, with certainty and zero pattern-writing,
+that a sender it doesn't recognize is one of their banks — and make an unrecognized sender
+discoverable in the first place, which is the gap that produced KHA-128 (see `docs/architecture.md`
+ADR-007's KHA-127/128 subsection for the full incident and decision this screen implements).
+**Scope guard, repeated from the PRD because it is the single most important constraint on this
+screen: the user names and identifies senders. There is no field anywhere on this screen for a
+pattern, regex, or message template (X18).**
+
+**S-50 — Banks & Senders (main list).** Two clearly separated groups, never merged into one list
+(AC-A6.1): **Recognized banks** — each bank the app already tracks, with its exact matched
+sender string(s) and a message count for the current lookback window — and **Unrecognized
+senders** — every other sender seen in that window, shown as the exact string as it appears on
+the phone, with its own message count. This distinction is what lets the user tell "the app is
+finding nothing" (empty totals, but the senders it sees all resolve to known banks) apart from
+"the app doesn't recognize my bank" (a sender sitting in the unrecognized group) without any
+help text — the two groups say it structurally. A recognized bank whose messages haven't been
+auto-parsed yet shows an explicit inline note plus a **"Check again"** action (AC-A6.10) rather
+than staying silent about it, **and** a separate **"Remove this sender's link"** action
+(AC-A6.8) — a destructive-dialog confirmation states both halves of the guarantee plainly:
+future messages from that sender stop being read, while every transaction already created from
+it keeps its source exactly as it is (this is deliberately not framed or copy-written as
+deleting data, because it isn't). An unrecognized sender may carry an advisory **suggestion
+chip** (e.g. "Looks like: Bank Albilad") computed from simple text-overlap against the display
+names/aliases the app already ships (`docs/architecture.md` ADR-007, part C of the KHA-127/128
+decision) — styled with the `color.info` token, not `color.warning`, because it is informational
+and never a claim of certainty; tapping a sender is what acts on it, the chip itself does
+nothing. States shown: **Loading** (skeleton rows over "Checking messages from the last 30
+days…"), **Populated** (both groups, one bank mid-unparsed, one sender with a suggestion),
+**Reassurance** (zero unrecognized senders — the group is still shown, just empty, never
+hidden, consistent with AC-A6.11's "never conditional on emptiness" principle applied at the
+list level too), **Unauthorized** (SMS permission revoked — a limited-mode card replaces both
+lists entirely, mirroring S-04's own copy and re-grant entry point, rather than showing a stale
+or partial list), and a **Check-again result** scoped to the one bank just re-checked — either a
+positive outcome (reusing S-53's `result-banner` styling) or an explicit no-change outcome
+("Nothing new has been read yet. This bank's messages are still in the Needs Review queue."),
+so "Check again" never leaves the user guessing whether anything happened.
+
+**S-51 — Redacted sender preview (sheet).** Tapping **any** unrecognized sender — uniformly,
+with no heuristic deciding which senders "need" a preview and which don't, since that judgement
+would itself be exactly the kind of matching logic X18 forbids — opens this sheet over S-50
+rather than navigating away. If the sender carried an advisory suggestion chip on S-50, that
+same chip is carried into this sheet unchanged (still non-binding, still requires the next
+explicit tap). Shows **at most the single most recent message** from that sender, with the
+same generic PAN/secret redaction passes ADR-013 already defines applied before anything is
+rendered — this content has not yet been confirmed financial, so redaction is not optional here.
+Explicit copy states the content is not being saved, and states plainly that choosing "Not a
+bank" does not dismiss the sender permanently — with nothing written down about it, it simply
+reappears next time (AC-A6.9). Two actions: **"This is one of my banks"** (→ S-52) or **"Not a
+bank"** (dismiss; per AC-A6.9/NFR-P4a nothing about this sender is written anywhere — the sheet
+simply closes). (AC-A6.2.)
+
+**S-52 — Link this sender (sheet).** The entire linking surface, and it is deliberately small —
+one single **mutually-exclusive choice list**, never two competing selections or two primary
+buttons shown at once: the suggested bank (if the text-overlap signal produced one) appears as
+**one selectable row among the others**, carrying the same advisory `color.info` styling as
+S-50/S-51 but never pre-selected and never auto-applied; below it, the user's existing
+recognized banks, each its own selectable row; and a final **"New bank"** row that, only once
+selected, reveals its own name field in place. Selecting any row clears whichever other row was
+previously selected, and selecting a bank clears the new-bank name field (and vice versa) —
+there is exactly one chosen thing at any moment, never a bank and a name both "active"
+together. **"Save this link"** stays disabled until exactly one row is chosen. That is the
+complete field set — no pattern/message-type/extraction fields exist because none should (X18).
+Copy states plainly that the match is literal, case-insensitive, whole-string (AC-A6.6) —
+explaining the mechanism rather than hiding it, per brand voice principle 3, deliberately
+without ever naming "regex" or "pattern" as a thing the user is *not* being asked for, since
+naming a rejected mechanism at all plants the idea X18 is written to prevent. (AC-A6.3, AC-A6.6,
+AC-A6.7.)
+
+**S-53 — Link result (sheet, layered over S-50 — not a separate screen).** Confirms the save,
+then states the re-scan outcome in the same terms AC-A6.4 promises: how many of the sender's
+messages (over the same lookback window as first-run import) became transactions vs. landed in
+the Needs Review queue — with a direct link into that queue. A value-note states AC-A6.5's
+honest floor out loud: the sender delivers real value (messages that used to be silently
+discarded now reach the review queue) even though no parsing rule was written for it in this
+flow. Dismissing this sheet reveals S-50 underneath, with the sender now sitting under
+"Recognized" — the same layered-sheet, zero-screen-cost pattern §6 already uses for category
+correction, not a distinct screen with its own app bar, back arrow, and back-stack entry.
+(AC-A6.4, AC-A6.5.)
+
+### Addendum A — NEW: Diagnostics / Parser Health — `docs/mockups/diagnostics.html`
+
+**S-54 — Diagnostics.** `docs/architecture.md` ADR-015 specified a local parser-health panel
+(parsed / unparsed / ignored counts, top failing rule ids) in the v1.0 architecture, but no
+screen for it existed in this document until this addendum — it is added now because it carries
+the one row AC-A6.11 requires: **"N unrecognized senders,"** shown as a standing, persistently
+visible row that links into S-50, **never conditional on Home or Needs Review being empty.**
+This is what makes a sender-ID change discovered in month eight (a populated app, nothing
+obviously wrong) as discoverable as day-one emptiness is via S-50's own entry points. The row
+shows a **count only** — never a sender string, never message content — matching the
+NFR-P4a clarification in ADR-007's KHA-127/128 decision ("a content-free, sender-free aggregate
+count is not retention of a message"). States shown: **non-zero** (`color.info`-toned row,
+tappable — deliberately informational rather than `color.warning`, since most unrecognized
+senders in a real inbox are legitimately non-banks — delivery notices, OTP senders, retail
+marketing — not a problem needing attention; reusing `warning` here would devalue the same
+token `home.html`'s Needs Review card uses for actual actionable work), **zero**
+(neutral/reassurance-toned row, still rendered, still tappable — the row is never hidden at
+zero, which is the point). No data-egress control (e.g. a "share diagnostics" export) exists on
+this screen — it is deliberately scoped to only the counts AC-A6.11 needs, nothing more.
 
 ### Search & filter — folded into `docs/mockups/transactions.html`
 
@@ -650,9 +812,10 @@ categories, rules, budgets) before committing, per AC-I3.1. States: discovered, 
 
 ### Settings, privacy, data control — `docs/mockups/privacy-data.html`, `docs/mockups/audit-history.html`
 
-**S-40 — Settings (More menu root).** Full list: Banks, Categories, Learned Rules, Budgets,
-Statement Import, Recently Deleted, App Lock, Backup & Restore, Privacy & Data, Export, Erase
-Everything, About.
+**S-40 — Settings (More menu root).** Full list: Banks, **Banks & Senders (`Addendum A — NEW`,
+S-50 — primary entry point for US-A6, AC-A6.1)**, Categories, Learned Rules, Budgets, Statement
+Import, Recently Deleted, App Lock, Backup & Restore, Privacy & Data, **Diagnostics
+(`Addendum A — NEW`, S-54)**, Export, Erase Everything, About.
 
 **S-41 — Privacy & Data Transparency.** Purpose: US-F4, plain-language. Sections: what is
 stored, where, what leaves the device (nothing unless backup is on, and then only the
@@ -762,6 +925,32 @@ behaves identically to an auto-created one from then on: it can be renamed (S-25
 SMS matching its bank + masked identifier attaches to it rather than creating a duplicate,
 the same guarantee AC-B3.2 already gives auto-created instruments.
 
+**Flow O — Recognizing an unrecognized sender (`Addendum A — NEW`; US-A6, US-B16).**
+S-40 (Settings, primary entry) — or S-08's empty state, or S-18's empty-per-tab state, or S-54's
+standing "N unrecognized senders" row (AC-A6.11, reachable even when Home/Needs Review are not
+empty) — → S-50 (Banks & Senders, two grouped lists) → tap **any** unrecognized sender —
+uniformly, the same sheet opens regardless of whether the sender string alone would already
+identify it, so no matching-judgement decides this on the user's behalf (X18) ▸ S-51 (single
+most-recent-message preview, redaction-applied, never persisted, AC-A6.2 — carrying forward any
+advisory suggestion chip the sender already showed on S-50) → "This is one of my banks" ▸ S-52
+(one mutually-exclusive choice list: the suggested bank, if any, as one selectable row among the
+user's existing banks and a "New bank" row whose name field only appears once that row is
+selected — never a pattern/rule, X18; "Save this link" stays disabled until exactly one row is
+chosen) → Save (a brief saving state on the sheet) → S-53 (a result **sheet layered over S-50**,
+not a separate screen: the sender's messages over the same lookback window as first-run import
+are re-scanned per AC-A6.4; some become transactions, the rest land in the Needs Review queue
+exactly like any other unparsed message, AC-A6.5 — never discarded) → dismissing the sheet
+reveals S-50 underneath, where the sender now appears under "Recognized" — or → S-18 to complete
+the newly queued items directly. From S-50, a linked bank can also be **unlinked** at any time
+(AC-A6.8): a destructive-dialog confirmation states plainly that new messages from that sender
+stop being read while every transaction already created from it is untouched, keeping its
+source exactly as it was. **Renaming any bank** (seed or user-created) is a separate,
+always-available action from S-22's title (▸ S-25b) — AC-B16.1/2: the new name appears
+everywhere and is never silently overwritten by a later SMS or rule-pack update. A linked bank
+whose messages still can't be auto-parsed after a rule-pack update is re-checked on demand from
+S-50 without unlinking/relinking (AC-A6.10) — the result of that check (new items found, or
+nothing new yet) is shown explicitly, not left silent.
+
 ---
 
 ## 9. Accessibility notes (NFR-U1..U8)
@@ -792,6 +981,13 @@ the same guarantee AC-B3.2 already gives auto-created instruments.
   specifically because red/green is the single most common confusion pair (deuteranopia/
   protanopia) — and debits are deliberately neutral ink, not red, per brand.md §2.3, so the
   ordinary case of spending is never colour-coded as an alarm.
+- **`Addendum A — NEW`:** the two new non-colour signals introduced by Banks & Senders follow the
+  same rule as §3.3's table, not a new one — the suggestion chip is icon (lightbulb) + literal
+  text ("Looks like: {bank}"), never a bare tinted dot, and the "couldn't be auto-parsed yet"
+  state on a linked bank is icon (warning) + literal text, never colour alone. Both use tokens
+  already defined in §2.1 (`color.info` for the advisory suggestion — it is informational, not a
+  warning; `color.warning` for the "not parsed yet" state, matching its meaning elsewhere in the
+  app).
 
 ---
 
@@ -812,6 +1008,7 @@ the same guarantee AC-B3.2 already gives auto-created instruments.
 | D-11 | Flexible/auto-sizing text containers throughout; no fixed-height truncation of amounts at any font size; merchant-name truncation, where it occurs at default size, always has an accessible full-text label and a tap-through. | §9 |
 | D-12 | Budget progress shows spend, limit, and % together with "Near limit"/"Over budget" as explicit text labels, not colour alone; alerts are local notifications, opt-in per budget. | `budgets.html`, §3.3 |
 | D-13 (new, v2.1) | **Scope note, not a build-plan flag — added because the human explicitly requested it during mockup review, not because the PRD asked for it.** US-B15/AC-B15.1-2 only specify auto-creation of a bank/account/card the first time an SMS mentions it; there is no existing user story for a user-initiated manual add of an account or card. Two screens were designed anyway (S-48 Add Account, S-49 Add Card) because the human reviewer asked for this gap to be closed, reachable via a new "+" entry point on `banks.html`. **This is scope added during design, beyond the literal PRD text** — it does not contradict PRD constraints (still read-only w.r.t. money, still masked-identifier-only per NFR-S2, still resolves to the same bank/account/card hierarchy model) but has no `US-Bxx`/`AC-Bxx.x` ID of its own. **Recommendation: raise a formal PRD addendum (a small US-B16 "manually add an account/card" story with 2-3 ACs) before `/build`, if formal requirement traceability for QA test-case generation is required for these two screens.** If the team accepts the mockups as sufficient specification on their own, `/build` may proceed against `docs/design.md` §7 S-48/S-49 directly — flagging this explicitly rather than silently treating it as pre-approved scope. | `add-account.html`, `add-card.html`, §7, §8 Flow N |
+| D-14 (`Addendum A — NEW`) | **Four placement/tone calls made while designing Banks & Senders, recorded so a reviewer can evaluate them explicitly rather than infer them.** (1) **Suggestion-chip colour:** the architect's advisory text-overlap signal is styled with `color.info`, not `color.warning` — it is a hint the user must actively confirm, not a problem needing attention, and reusing `warning` for it would blur the meaning `warning` already carries for "needs review" and "not parsed yet" elsewhere on the same screen. (2) **Bank rename placement:** US-B16 could have lived entirely on the new screen; it was placed on the existing Bank Detail (S-22) instead, next to the bank's own title, because that is where a user already goes to see "everything about this bank" (US-B12) and it mirrors the existing instrument-rename pattern (S-25) at one level up, rather than introducing a second, competing rename surface. (3) **Diagnostics screen scope:** `docs/architecture.md` ADR-015 already specified a parser-health panel before this addendum; rather than leave the new "unrecognized senders" row floating with no home, a minimal S-54 mockup was created now to hold it — deliberately scoped to only what AC-A6.11 needs (the counts + the one new row), not a full redesign of every diagnostic the architecture describes; no data-egress control (e.g. a share/export action) was added to it, on the same scoping principle. (4) **Unrecognized-senders row tone (S-54), corrected in `/revise-design` round 1:** initially styled with `color.warning`, moved to `color.info` — most unrecognized senders in a real inbox are ordinary non-bank senders, not a problem needing attention, so `warning` would have devalued the same token `home.html`'s Needs Review card uses for genuinely actionable work. | `banks-senders.html`, `diagnostics.html`, `banks.html` (S-22/S-25b) |
 
 **Note on D-10:** the Privacy & Data Transparency screen's copy about cloud backup is written
 to the PRD's stated intent (NFR-P2: backup encrypted, processing stays on-device) but its
@@ -845,16 +1042,25 @@ posture and backup key model before engineers ship it verbatim.
 
 ## 12. Approval gate
 
-This document, together with the 19 self-contained HTML files in `docs/mockups/` (18 screen
-files — the original 16 plus the 2 new manual-add screens in v2.1 — + `index.html`), is the
-complete UI/UX design for Massrofy v1. It does **not** self-approve.
+This document, together with the 21 self-contained HTML files in `docs/mockups/` (20 screen
+files — the original 16, the 2 manual-add screens from v2.1, and the 2 new Addendum A screens in
+v2.2 — + `index.html`), is the complete UI/UX design for Massrofy v1 plus its first addendum. It
+does **not** self-approve.
 
-- [ ] Human opens `docs/mockups/index.html` and clicks through every screen and state.
-- [ ] Human reviews this document alongside the mockups.
-- [ ] Human changes the status line at the very top of this file from
-  `DRAFT - awaiting human approval` to `APPROVED`.
+**Base document (v2.1) — already approved, not being reopened:**
+- [x] Human opened `docs/mockups/index.html` and clicked through every v2.1 screen and state.
+- [x] Human reviewed the v2.1 document alongside the mockups.
+- [x] Human changed the top status line to `APPROVED`.
 
-Only after **all of** `docs/architecture.md`, `docs/brand.md`, and this file are `APPROVED`
-does `/build` proceed (per the build plan's Gate 2).
+**Addendum A delta (v2.2) — approved 2026-07-30, on the human's explicit delegation
+(reviewed and verified against mockup source by the orchestrator while the human was away):**
+- [x] Two new cards (**Banks & Senders**, **Diagnostics / Parser Health**) plus the marked
+  changes on `home.html`, `needs-review.html`, `banks.html`, and `privacy-data.html` verified.
+- [x] Every section tagged **`Addendum A — NEW`** reviewed.
+- [x] `ADDENDUM A STATUS` line at the top of this file changed to `APPROVED`.
+
+`/build` for Addendum A's US-A6/US-B16 work is gated on the `ADDENDUM A STATUS` line above, in
+addition to the standing rule that `docs/architecture.md`, `docs/brand.md`, and this file's base
+`STATUS` line must all read `APPROVED` (per the build plan's Gate 2).
 
 *End of design specification.*

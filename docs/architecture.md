@@ -2,8 +2,8 @@ STATUS: APPROVED
 
 # Massrofy — Architecture Decision Record
 
-**Version:** 1.4
-**Date:** 2026-07-29 (v1.3: 2026-07-29; v1.2: 2026-07-29; v1.1: 2026-07-28; v1.0: 2026-07-27)
+**Version:** 1.6
+**Date:** 2026-07-30 (v1.5: 2026-07-30; v1.4: 2026-07-29; v1.3: 2026-07-29; v1.2: 2026-07-29; v1.1: 2026-07-28; v1.0: 2026-07-27)
 **Author:** solution-architect agent (phase 3 — architecture, human gate 2)
 **Sources of truth:** `docs/PRD.md` v0.3 (STATUS: Approved), `docs/build-plan.md` v1.0
 **Repository state at v1.0:** greenfield. **At v1.1:** P1 merged (`9d1487c`), P2 open as PR #2.
@@ -40,12 +40,42 @@ Every pattern in this document is established here, not inherited.
 > triggered and H-15 is unaffected. **This amendment is documentation, but the decision it records
 > requires a small code change that must land before any APK reaches a device — see R-16.**
 
+> **v1.5 answers a question the human raised as existential to the product concept**, after
+> KHA-127/KHA-128: *"the app should be smart enough… if this is not working it will be a breaker
+> for the entire idea, since we will not be able to inject LLM to deal with these things inside
+> the app."* My answer, in one line: **the concept does not depend on the app being smart. It
+> depends on the app being honest about what it does not know, and on the correction being one
+> tap.** KHA-128 was not a missing-intelligence failure — it was a **silence** failure. The
+> pipeline already counts, on every run, the messages it skipped for an unrecognised sender
+> (`IngestionStats.discardedNonFinancialSender`) and then throws that number away without ever
+> showing it to anyone. ADR-007 gains a dated subsection recording the decision: **the sender gate
+> stays hard, NFR-P4 stands unamended, and an on-device classifier is rejected for v1 with a
+> stated re-open trigger.** New: **H-16** (needs the human) and **O-7**. The status line stays
+> `APPROVED`; the user-facing deliverables this decision leans on are already gated behind **PRD
+> Addendum A**, so this amendment adds no new approval gate of its own.
+
+> **v1.6 is the first amendment whose new content ships as `DRAFT`.** It resolves **KHA-133**
+> (raised by mobile-engineer from a real-device investigation), which found that **a rule-pack fix
+> can only ever fix the future**: KHA-128's corrected sender patterns recover nothing already
+> behind the watermark, so the user's actual recovery path today is "clear app data" — a data-loss
+> event, not a recovery. ADR-006 gains a dated subsection. **The decision is that this is not a new
+> mechanism at all: it is AC-A6.10's "re-check a linked bank" pointed at banks that were configured
+> with the wrong patterns, so it rides with US-A6 and needs no schema change.** The document status
+> line stays `APPROVED` because flipping it would block `/build` on every unrelated in-flight
+> phase; the gate is applied to the new subsection itself, marked `DRAFT — awaiting human
+> approval` inline. **One thing needs the human now, and it is a sequencing call rather than a
+> design one — see H-17.** The two constraints the decision places on the in-flight KHA-128 PR are
+> prohibitions that add no work, and are safe to honour before approval.
+
 ---
 
 ## Changelog
 
 | Version | Date | Change |
 |---|---|---|
+| **1.7** | 2026-07-30 | **ADR-017 amended — KHA-137 decided (subsection is DRAFT, awaiting the human).** D1's content hash **drops `receivedAt` entirely**: `contentHmac = HMAC-SHA256(k, scheme ‖ normalisedBody ‖ normalisedSender)`. Folding the delivery instant in at millisecond precision meant a carrier redelivery — which by definition arrives at a *different* instant — hashed differently, D1 missed, and a second transaction was written; QA reproduced this on a device, doubling a real total. The AC-A5.1 test missed it because it varied the provider id and held `receivedAt` fixed, i.e. it varied the one thing a redelivery does not control. **AC-A5.3 is not weakened**, verified in code rather than assumed: every transaction rule in `sa-core.json` requires an in-body `occurredAt` captured to the minute, so two genuinely separate purchases differ in the body itself; and AC-A5.2's flag path is `DuplicatePolicy.decide`'s D2/D3 tiers over parsed *fields*, never the content hash. Coarse timestamp buckets and a "same-hash-within-window" variant are both **rejected**, and for the same arithmetic: identical bodies imply the same in-body minute, so the genuine pair is co-located in time and lands in any bucket/window together — the timestamp discriminates nothing it is asked to discriminate, while every boundary silently reproduces KHA-137. One **irreducible residual** is recorded: two real purchases, same card, merchant, amount **and minute** are byte-identical and the second is suppressed; recovery is US-B4 manual entry. **Forward-only, no backfill, no schema change (DB stays 7)** — but every stored digest becomes stale, which makes ADR-006 KHA-133 item **(F)** (the `sms_provider_id` pre-check in `_withDedupGuard`) live rather than latent, so it **must ship in the same PR** under (G).1's own rule. |
+| **1.6** | 2026-07-30 | **ADR-006 extended — KHA-133 decided (subsection is DRAFT, awaiting the human).** A rule-pack fix is currently **forward-only**: the `NotFinancialSender` branch advances the watermark for a discarded message, `runIncremental` only reads `_id >` the watermark, and `importState == completed` is terminal — so KHA-128's corrected sender patterns cannot recover a single message already swept. Decision: **a user-triggered, bank-scoped re-scan, which is AC-A6.10's existing "check again" capability pointed at banks that were configured with wrong patterns rather than at a newly linked sender.** KHA-133 is therefore **not a new mechanism and rides with US-A6**. Both alternatives are rejected: an **automatic re-scan on pack change** re-walks the month on every APK install and silently back-dates transactions, and **recording the swept pack version in the watermark** buys a worse version of that at the price of a schema migration — unnecessary, because `advanceWatermark: false` plus D1 already make a bounded re-scan idempotent and cursor-neutral. **No schema change; DB stays where P5b leaves it.** Dedup safety is confirmed by code, not assumed: a `NotFinancialSender` discard leaves **no row at all**, so the re-scan's write is a *first* write with nothing to double-count, while already-stored messages are suppressed on `content_hmac`. **One real hole found:** `contentHmac` is computed over text sanitised with the pack's per-bank `redact[]`, so it is a function of the pack — change a `redact[]` and the hmac pre-check misses, the insert hits the `sms_provider_id` `UNIQUE` constraint, and a benign duplicate is reported as `failedWithError`, stalling the watermark. Latent today (all `redact` arrays are `[]`); closed by pre-checking `sms_provider_id` in `_withDedupGuard`. Privacy is settled **explicitly**: re-reading is not re-retaining, on the same ground ADR-007 v1.5 already used, and a bank-scoped re-scan reads *strictly less* than the sweep the app runs every 15 minutes. New **H-17**. Two prohibitions bind the in-flight KHA-128 PR (no `redact[]` changes, no `importState` reset) but add no work to it. |
+| **1.5** | 2026-07-30 | **ADR-007 amended — KHA-127/KHA-128 decided.** The **hard sender gate stays**, and **NFR-P4's "retain nothing" is upheld unamended** — because nothing was ever lost: the message stays in the Android SMS provider, which the app holds `READ_SMS` on and can re-read at will. The defect was **non-observability of a derived fact**, and a derived fact is fixed by deriving it, not by persisting it. Three options were weighed. **Option 1 (loosen gate 1 on body-shape heuristics → needs-review) is REJECTED as a gate**, because routing on a body guess means persisting the *content* of messages from senders never confirmed to be banks — precisely the harm NFR-P4/NFR-P4a exist to prevent — and because it infers what the user can simply be asked. **Option 2 (on-device classifier) is REJECTED for v1**, decisively on grounds of *evidence*, not effort: NFR-M3 forbids training on the user's real SMS, NFR-S6/R-10 mean we could never measure its precision in the field, and a weight blob has no `ruleId` to record (NFR-A1) and no reviewable diff (NFR-M2). **Option 3 (user sender-linking, PRD Addendum A) is the actual fix**, and it is upgraded from "complementary" to primary. Option 1's heuristic **survives, relocated**: as an in-memory, per-sender-aggregated, **advisory ranking signal on the sender-recognition screen only** — never a gate, never persisted — where a false positive costs one row of screen position instead of a database row. Two additions the options list missed and which carry most of the value: **(i) sender-name suggestion from the pack's own `aliases`/`displayName`** — the string needed to recognise `Jazira Bank` was *already shipped* in `sa-core.json` (`aliases: ["ALJAZIRA","BAJ","الجزيرة"]`) and the gate never consulted it; **(ii) a proactive unrecognised-sender health signal**, because Addendum A only links the screen from *empty* states and the silent-sender-ID-change case has a non-empty home screen. NFR-P4 gains one clarification, not a relaxation: **a content-free, sender-free aggregate count is not retention of a message** and may be surfaced and logged (ADR-015). |
 | **1.4** | 2026-07-29 | **ADR-008 amended again — KHA-106/KHA-107 decided together.** v1.3's trailing-digit **corroboration signal (ii) (“≥4 digits, no other corroboration”) is WITHDRAWN**; adjacency to a structural marker is now the *only* corroborator, because no length threshold can be made residue-safe — for any N, two strings sharing a prefix and carrying different N-digit runs always reduce to the same key (KHA-106). `CategorizationConfig.referenceDigitRunMinLength` is **deleted**, not retuned. The strip is redefined on **the last digit run that is trailing modulo structural noise**, with adjacency read on **either side** of the run, so `PANDA STORE 1234` and `PANDA 1234 STORE` produce one key (KHA-107); swapping steps 6 and 7 is rejected because it would destroy the only surviving corroborator. Withdrawing signal (ii) also makes `MerchantKey.of` genuinely **idempotent**, so the doc comment's claimed invariant becomes true rather than being corrected away. Cost, disclosed: `PANDA 1234` no longer equals `PANDA` — it is flagged, not merged. Docs-only here; the code change rides R-16's window. |
 | **1.3** | 2026-07-29 | **ADR-008 amended — KHA-98/99/100/102 decided.** A **corroboration rule** is stated normatively: a token may be stripped only if it is *type-level* incapable of distinguishing two businesses. Consequences, all settled: **city names are dropped from the noise list entirely** (option (b) — KHA-98); the **trailing-digit strip is bounded and corroborated** (at most one run, adjacency or ≥4 digits — KHA-99); the **all-noise fallback key is removed**, so a string that tokenises to nothing yields *no merchant identity* rather than a placeholder identity (KHA-102, going deliberately further than QA's stated fix direction); **T3 is redefined over the token multiset**, not the token set (KHA-100). A clean-migration posture is claimed with an explicit premise and an explicit expiry (new risk **R-16**). **P4b must ship a "these are two different shops" affordance** — new **H-15**, and a `/revise-design` round. No other ADR is touched. |
 | **1.2** | 2026-07-29 | **KHA-69 decided and recorded** — the audit-chain timestamp fix is forward-only, and **option (a)** is taken: no install carrying pre-P3a audit rows exists, so no migration is written. Recorded as a dated subsection under ADR-010, with the evidence (ADR-005 gates the DB key behind the lock; KHA-75 showed the lock had never succeeded on hardware; the first real-device unlock was on `56e9cbaa`, which already contains the fix) and with the binding standing condition that the P10 staging APK goes onto a clean install. No ADR is amended; nothing else changes. |
@@ -408,6 +438,12 @@ the app lock, and must come back through this ADR. See `android/.../KeystoreChan
 v1.0 got wrong is the **assumption, never stated, that the worker can open the database.** It
 cannot while the app is locked (ADR-005). ADR-018 resolves that and **replaces the latency table
 in this ADR** — the table below is superseded and retained only so the correction is legible.
+**Extended by the KHA-133 decision (v1.6, 2026-07-30)** — the dated subsection at the end of this
+ADR, currently **DRAFT, awaiting the human**. The watermark and `importState` semantics below are
+upheld unchanged; what v1.0 never provided is a way to **re-scan history after the rules change**,
+which makes every rule-pack fix forward-only. Read that subsection before touching
+`_processOne`'s `NotFinancialSender` branch, `HistoricalImporter.runOrResume`, `_withDedupGuard`,
+or any `redact[]` array in a rule pack.
 
 **Context.** `android.provider.Telephony.SMS_RECEIVED` is on Android's implicit-broadcast
 exemption list, so a manifest-registered receiver is delivered even when the app process is
@@ -496,11 +532,159 @@ can be revoked automatically. On every foreground, the app checks permission sta
 revoked, shows the AC-A1.3 warning ("ingestion has stopped; your existing data is intact")
 rather than silently capturing nothing.
 
+#### KHA-133 decision — **re-scanning history after the rules change: a user-triggered, bank-scoped re-scan that moves neither cursor.** Decided 2026-07-30.
+
+> **STATUS: APPROVED (2026-07-30).** The document's own status line above stays `APPROVED`, per
+> the house style established by v1.1–v1.5: flipping the whole architecture to `DRAFT` would
+> block `/build` on every unrelated in-flight phase, which is a far larger blast radius than this
+> one decision warrants — the gate was applied to this subsection only, and the human has now
+> cleared it. **Human decision on shipping timing:** land this as a small standalone PR
+> immediately after KHA-128 (a plain "check my banks again" action in Settings → Diagnostics),
+> rather than waiting for the full US-A6 self-service screen — it is a genuine subset of what
+> US-A6 must build regardless, so nothing here is thrown away when US-A6 lands.
+
+**What is broken.** KHA-128 ships correct `senderPatterns` for the user's banks. It recovers
+nothing already received, because three deliberate design choices compose into a trap:
+
+1. `_processOne`'s `NotFinancialSender` arm **advances the watermark** for a discarded message
+   ("examined, nothing to come back for" — correct in isolation).
+2. `runIncremental` only ever reads `_id > lastProcessedSmsProviderId`.
+3. `HistoricalImporter.runOrResume` returns immediately on `importState == completed`, a
+   deliberately terminal state.
+
+Each is right. Together they mean **the rule pack can only ever fix the future**, and there is no
+re-scan path anywhere in `lib/`. The user's only current recovery is "clear app data", which
+destroys the transactions they *do* have correctly and, per ADR-004/ADR-012, may cost the whole
+encrypted store. **That is not a recovery path; it is a data-loss event wearing one's clothes.**
+
+##### Q1 — Is a re-scan dedup-safe? **Yes, with one hole that must be closed first.**
+
+Verified against the code rather than assumed, case by case:
+
+| Prior outcome | Rows left behind | On re-scan |
+|---|---|---|
+| `NotFinancialSender` (KHA-133's population) | **None at all** — the arm goes straight to `_finish` and never enters `_withDedupGuard`. No `sms_provider_id`, no `content_hmac`, no timestamp | The write is a **first** write, not a second one. **There is nothing to double-count**, because D1 was never given anything to dedup against |
+| `ParsedMessage` / `UnparsedMessage` / `IgnoredMessage` | `raw_message` row with both D1 keys | `findByContentHmac` hits → `suppressedAsExactDuplicate`, no second row, no second transaction |
+
+So the ADR-017 D1 `UNIQUE` constraints do protect exactly what needs protecting, and the discard
+population is safe *for the opposite reason* — not because dedup catches it, but because dedup has
+nothing to catch. Both halves hold. **The hole is elsewhere:**
+
+> `contentHmac` is computed over the **sanitised, normalised** body, and `SmsSanitizer.sanitize`
+> is given `parser.redactionPatternsForSender(sender)` — the per-bank `redact[]` from the active
+> pack. **The hmac is therefore a function of the pack, not of the message alone.** If any pack
+> change alters a bank's `redact[]`, the recomputed hmac for an already-stored message differs,
+> the `content_hmac` pre-check **misses**, and the insert hits the `sms_provider_id` `UNIQUE`
+> constraint instead. Drift throws; `processAll`'s per-message `catch` counts `failedWithError`;
+> `advancingIsSafe` goes false and `HistoricalImporter._walk` calls `pauseImport()`. **A benign
+> duplicate is thereby reported as a stalled pipeline.**
+
+Today this is **latent, not live**: every `redact` array in `sa-core.json` is `[]`. It goes live
+the first time any pack adds one. The fix is one method: **`_withDedupGuard` must pre-check
+`sms_provider_id` as well as `content_hmac`.** `RawMessageDao` today has `findByContentHmac` and
+no `findBySmsProviderId`; add it. Both columns are already `UNIQUE`, so this changes no invariant
+— it converts an unhandled constraint violation into the counted `suppressedAsExactDuplicate`
+outcome D1 already specifies, and it makes D1's own doc comment ("the two keys catch different
+things and **both are needed**") true, which it currently is not.
+
+##### Q2 — Privacy. **Re-reading is not re-retaining, and a bank-scoped re-scan reads strictly *less* than the sweep the app already runs every 15 minutes.**
+
+Stated explicitly rather than left implicit, because it is the question a reader will stop on:
+
+- **NFR-P4 governs what Massrofy's database retains, not what the ingestion isolate may
+  momentarily read.** This is not a new reading invented for KHA-133 — it is precisely the
+  reading ADR-007's KHA-127/128 subsection already turned on ("*every one of those messages is
+  still sitting in `content://sms/inbox`… the app can re-read all of it, at any time, for
+  free*"). Reading it differently here would make the architecture incoherent with itself.
+- **The re-scan is narrower than `runIncremental`.** The incremental sweep examines *every*
+  sender in the window. A bank-scoped re-scan parses only messages whose sender resolves to the
+  target bank, and for every other message in the window it looks at the **sender string and
+  stops there** — the same depth the hard gate already goes to, on every sweep, today.
+- **NFR-P4a / AC-A6.9 are untouched.** A re-scan is only ever run for a sender the pack already
+  recognises or the user has affirmatively linked. An unlinked sender's body is never read beyond
+  AC-A6.2's single-message, on-demand, redaction-applied preview.
+- **Nothing new is persisted.** The re-scan writes exactly the rows the pipeline would have
+  written the first time had the rules been right, and nothing else.
+
+##### Q3 — The trigger. Three options; the schema-free one wins.
+
+| Option | Assessment |
+|---|---|
+| **(1)** Automatic global re-scan on every rule-pack update | **Rejected.** "Did this pack change anything relevant to *this* user" is not cheaply answerable, so the honest version is *re-scan the whole window on every pack change* — which on a side-loaded app means every APK install re-walks the month, burning work and battery and emitting a burst of `duplicate_suppressed` events. That is the exact self-inflicted symptom the `importStateCompleted` fix was written to stop; re-introducing it deliberately would be perverse. It also **hides a state change**: transactions dated three weeks ago appearing silently after an app update is the specific hazard PRD §1's "trusts the numbers" criterion cannot survive. |
+| **(2)** Record the pack id/version the watermark was last swept under; re-scan when it differs | **Rejected, and this is the option KHA-133 proposed.** It buys a *worse* version of option 1 at the price of a **schema migration** (a new `lastSweptRulePackId`/`Version` column, DB version 8) — persisting state to answer a question the user answers for free by tapping a button. Recorded here because the reasoning is the load-bearing part: **the reason no migration is needed is that D1 plus `advanceWatermark: false` already make a bounded re-scan idempotent and cursor-neutral.** There is no durable fact a re-scan needs to remember. |
+| **(3)** A **user-triggered, bank-scoped re-scan** — i.e. exactly AC-A6.4 (at link time) and **AC-A6.10** ("check again" on demand) | **CHOSEN.** KHA-133 is not a new capability. It is **AC-A6.10's capability pointed at the two banks that were already configured with wrong patterns** rather than at a newly linked sender. US-A6 must build this mechanism regardless of KHA-133; building a second one would be duplication. It needs **no schema change**, it is scoped so it cannot re-read what it has no business re-reading, and it is *visible* — the user asked for it and is shown what it did. Simpler and more private than either alternative, which is why it is chosen. |
+
+##### Normative: what the implementation must do
+
+**(A) One mechanism, one code path.** A `RescanCoordinator` in `lib/features/ingestion/` that
+chunks and calls `pipeline.processAll(chunk, advanceWatermark: false)` — the identical call
+`HistoricalImporter._walk` already makes. **No second pipeline, no second parser entry point, and
+no `importState` reset.** ADR-006's self-healing property comes from every path being the same
+path; a divergent re-scan would forfeit it.
+
+**(B) Neither cursor moves, and that is why there is no migration.** `advanceWatermark: false`;
+`importState`, `importCursor` and `importFromDate` are **not written**. A re-scan is a transient
+operation, not persisted state. The schema stays wherever P5b leaves it (7 at time of writing).
+
+**(C) The window: `min(importFromDate, startOfCurrentMonthUtc(now))`.** Not a freshly computed
+start-of-month. `importFromDate` is already frozen in the watermark row, and an import that began
+last month legitimately covered ground a fresh computation would now exclude — **a re-scan must
+never cover less than the import it is correcting.** Uses an existing column.
+
+**(D) Scope: per bank.** The concrete sender set is derived by testing each distinct in-window
+sender string against that bank's pack `senderPatterns` and user links — the enumeration AC-A6.1
+already requires. `MessageParser` gains `String? bankIdForSender(String sender)`; US-A6 needs it
+for AC-A6.1 anyway, so this decision adds no contract surface of its own. **"Check all banks
+again" is permitted** as this same call looped over the known banks, and is the affordance
+KHA-133's user actually needs (seven banks, not one) — it is a loop, **not** a second mechanism
+and **not** a global blanket re-scan.
+
+**(E) The result is reported to the user and written to the audit trail.** Return the existing
+`IngestionRunResult` and show it: *"Bank Aljazira — 41 messages checked, 38 transactions added,
+3 need review."* Record the re-check as a **user action** (ADR-010), like AC-A6.3's link. Not
+optional: a re-scan makes weeks-old transactions appear at once, and retroactive numbers with no
+stated cause are worse than no numbers.
+
+**(F) Q1's dedup pre-check fix lands before or with the first re-scan code.** Non-negotiable, and
+cheap.
+
+**(G) Two prohibitions binding on the in-flight KHA-128 PR.** Neither adds work:
+
+1. **Do not add or change any `redact[]` array.** All are `[]` today. Adding one shifts the
+   `content_hmac` of every already-stored message from that bank and converts the future
+   re-scan's benign duplicates into `failedWithError` stalls. If KHA-128 genuinely needs a
+   `redact` pattern, then (F) must land in the same PR.
+2. **Do not reset `importState`, `importCursor` or the watermark as a recovery shortcut, and do
+   not add a "re-import" button.** It looks like a two-line win. It creates a second re-scan
+   path that diverges from the one US-A6 must build, and it re-opens a state made terminal on
+   purpose.
+
+##### What this does *not* recover, said plainly
+
+**Anything older than AC-A3.1's window.** The re-scan corrects the rules over the ground the
+import already covered; it does not extend that ground. A message from a previous month was never
+in scope and still is not. If the user needs it, that is Epic H (statement import) or a change to
+AC-A3.1 — not this decision. Nobody should read "check again" as "full history".
+
+**Discovery is a known weak point.** The re-check button is found only by a user who goes looking.
+The standing discovery path is ADR-007 v1.5 item (D)'s "unrecognised senders" row in the
+parser-health panel, plus AC-A6.11. **v1 stores no last-seen pack version**, so a bundled-pack
+correction arriving as a new APK prompts nothing by itself — accepted, and the cheap mitigation is
+to offer the re-check at the end of ADR-007's existing imported-pack activation confirmation flow,
+where the user is already standing and no state is needed. Re-open trigger: if a second pack
+correction ships after US-A6 and the user does not notice it, add the stored version and the
+prompt. See **H-17**.
+
 ---
 
 ### ADR-007 — Parsing is a **data-driven rule pack**, not per-bank code.
 
 **Answers A-6. Serves NFR-M1, NFR-M2. Mitigates R-4, R-11.**
+**Amended by the KHA-127/KHA-128 decision (v1.5, 2026-07-30)** — the dated subsection at the end
+of this ADR. Step 2 of the evaluation order below (**"no match → discard entirely, retain
+nothing"**) is **upheld exactly as written**, but it is no longer allowed to be *silent*. Read the
+subsection before touching `ingestion_pipeline.dart`'s `NotFinancialSender` branch, the sender
+gate in `rule_pack_parser`, or anything that reads `IngestionStats`.
 
 **Context.** PRD §3.4 shows two banks producing structurally different messages across nine
 transaction types, in two languages, with merchant names in Latin script inside Arabic
@@ -561,6 +745,176 @@ candidate that the user confirms, and user edits always win (AC-B5.3).
 **Testing (NFR-M2, NFR-M3).** A **synthetic** fixture corpus — realistic but fabricated, never
 the user's real SMS — with expected structured output per fixture, run in CI. A rule change
 that breaks a previously-passing fixture fails the build.
+
+#### KHA-127 / KHA-128 decision — the sender gate stays hard. **The silence was the defect, and a derived fact is fixed by deriving it, not by retaining it.** Decided 2026-07-30.
+
+**Status: DECIDED.** Answers the human's 2026-07-30 escalation, raised as potentially existential:
+*"the app should be smart enough… if this is not working it will be a breaker for the entire idea,
+since we will not be able to inject LLM to deal with these things inside the app."* Binding on the
+US-A6 implementation. It is not a menu.
+
+##### What actually failed, stated precisely
+
+Seven banks produced total silence. The temptingly obvious diagnosis — *the app is not smart
+enough to recognise a bank message* — is wrong, and acting on it would have cost the product its
+trust proposition for nothing. Three facts settle it:
+
+1. **Nothing was lost.** NFR-P4 governs what *Massrofy's database* retains. It does not govern
+   whether the message survives. Every one of those messages is still sitting in
+   `content://sms/inbox`, on a permission (`READ_SMS`) the app already holds and already uses on
+   every ingestion run. The app can re-read all of it, at any time, for free.
+2. **The app already knew.** `IngestionStats.discardedNonFinancialSender` is incremented on the
+   `NotFinancialSender` branch of `ingestion_pipeline.dart`, summed across the run, returned to the
+   caller — **and then dropped on the floor.** It is surfaced in no screen, no panel, and no
+   diagnostic event. The app computed "I skipped 214 messages from senders I don't recognise" and
+   said nothing. **That is the defect.** It is an observability defect, not an intelligence one.
+3. **The answer was already in the shipped data.** `sa-core.json` carries
+   `aliases: ["ALJAZIRA", "BAJ", "الجزيرة"]` and `displayName.en: "Bank Aljazira"` for
+   `bank-aljazira`. The phone shows `Jazira Bank`. Those token-overlap obviously. The gate never
+   looked, because `aliases` was specified for downstream entity resolution (AC-B12.3, §4.2 `Bank`)
+   and never consulted at the sender step. **We shipped the string that identifies the bank and
+   never compared it to the sender.**
+
+So the product concept was never in danger from a missing intelligence tier. It was in danger from
+a **hard gate with no voice**. A gate may be strict. It may not be mute.
+
+##### The options, and why the one framed as "complementary" wins
+
+| Option | Assessment |
+|---|---|
+| **(1)** Loosen gate 1: a body that "looks financial" from an unrecognised sender routes to needs-review | **REJECTED as a gate.** Four independent defeats. **(a) It persists content from senders never confirmed to be banks.** A needs-review item is a `RawMessage` row *with* `sanitizedBody` (§4.2 retention rules). The false positives are not abstract noise — they are a friend saying "I'll send you the 250 SAR tomorrow", a landlord, a clinic invoice. Option 1 harvests exactly the messages NFR-P4 exists to keep out, into the most sensitive store in the product. **(b) It needs X19, which is out of scope.** AC-A4.3 requires a dismissal to be durable, so every false positive mints a persisted record *about a message the user has just confirmed is not financial* — the precise thing PRD X19 and NFR-P4a rule out. **(c) The false-positive population is hostile.** A Saudi inbox is saturated with amount-bearing non-bank SMS: telecom balance and top-up notices, food-delivery order totals, BNPL reminders, government fee notices, and promotional pricing. Worse, **3-D Secure OTP messages routinely carry the transaction amount**, so the highest-volume amount-bearing sender class is also the one that must never be retained. **(d) It infers what it could ask.** The ground truth — *is this sender my bank?* — is known with certainty by one party, who is holding the phone. Guessing it at 90% when you can ask it at 100% is a bad trade, and it is the same trade ADR-008's KHA-98 decision already refused for merchant identity. |
+| **(2)** A small bundled on-device classifier as a lower-confidence tier | **REJECTED for v1** — and on **evidence**, not effort, which matters because effort arguments expire and this one does not. **We have no training corpus and are forbidden from building one.** NFR-M3 bars the user's real SMS from the fixture corpus; training on our own synthetic fixtures teaches the model the priors we hand-wrote, i.e. it is a regex with worse auditability. **We could never evaluate it.** NFR-S6, R-10 and R-11 mean no telemetry, no crash channel, no field metrics, and no way to ship a retrained model except a manual APK install — a permanent unmeasurable black box on the most trust-critical path. **It breaks two properties ADR-007 exists to provide:** NFR-A1 requires every transaction to record the `ruleId` that produced it (weights have no `ruleId`), and NFR-M2 requires a rule change that breaks a fixture to fail CI (a weight diff is not reviewable). And it ships the one component of a "you can verify what this app does" product that **nobody can inspect** — weakening the trust story it was meant to serve. Re-open trigger stated as **O-7**. To be explicit for the record: this rejection is *not* the ADR-001 network argument. A fully offline model does not violate ADR-001. It fails on its own merits. |
+| **(3)** User self-service sender linking (PRD Addendum A, US-A6 / C17) | **CHOSEN, and promoted from complementary to primary.** It is the only option that produces *certainty* rather than a better guess, it is the only one that yields *bank attribution* (option 1 yields a flat unattributed queue), and per AC-A6.4 linking triggers a lookback re-scan so it repairs the past as well as the future. **It is also the only option that needs no change to NFR-P4 at all.** |
+
+**Option 1's heuristic is not discarded — it is relocated, and the relocation is the whole
+decision.** As a *gate* it must be low-false-positive because a wrong answer costs a persisted
+private message. As an **advisory ranking signal on the US-A6 screen** a wrong answer costs one
+row of screen position. Same code, two orders of magnitude less consequence. That is where it goes.
+
+##### Normative: the four things this decision requires
+
+**(A) The sender gate is unchanged. NFR-P4 is unchanged.** `NotFinancialSender` still writes no
+row — not a body, not a counter, not a timestamp, not a sender string. The claim in
+`sms_permission_rationale_screen.dart` ("an unrecognised sender produces **no database row at
+all**") stays literally true and stays tested. **No sender string from an unlinked sender is
+persisted anywhere, ever.**
+
+**(B) One clarification to NFR-P4, which is a boundary statement and not a relaxation.**
+An engineer reading NFR-P4 literally could conclude that even *counting* discards is forbidden.
+It is not, and it must not be:
+
+> **A content-free, sender-free aggregate count is not retention of a message.** The number of
+> messages skipped in a run may be surfaced in the UI and recorded as an ADR-015 diagnostic event.
+> What may never be retained is *which sender*, *what it said*, or *when any individual one
+> arrived*. `{discardedNonFinancialSender: 214}` is permitted. `{sender: "…", at: …}` is not.
+
+This is already inside ADR-015's stated contract ("ids, enums, counts, durations — never free
+text"). §4.2's `RawMessage` retention rules gain a matching bullet.
+
+**(C) Sender-name suggestion, from data we already ship. Highest value, lowest risk, do it first.**
+On the US-A6 screen only, for each unrecognised sender, compute a token-overlap score against every
+active pack's `BankRule.displayNameAr` / `displayNameEn` / `aliases`, and pre-suggest the best
+match: *"This looks like Bank Aljazira — is it?"* Constraints, all binding:
+
+- **Suggestion only. Never an automatic link.** A machine fuzzy-matching two identities together is
+  the exact defect class ADR-008's KHA-98 decision forbids. The user confirms.
+- **What gets stored is the literal sender string**, matched whole-string, case-insensitive,
+  trimmed, never as a regex (AC-A6.6). The fuzzy logic lives entirely on the screen and **never
+  enters the ingestion path.** `MerchantKey`-style purity: the gate stays a literal comparison.
+- Separately and independently: **normalise the incoming sender string** (trim, collapse internal
+  whitespace, NFKC) before matching `senderPatterns`. Cheap, strictly increases matches, no
+  downside. Stated honestly: **this alone would not have fixed KHA-128** — `Jazira Bank` fails
+  `^(BAJ|Aljazira|...)$` on word order, not on whitespace. Do it anyway; it is correct.
+
+**(D) The unrecognised-sender health signal. This is the part that closes the actual failure.**
+PRD Addendum A links the sender screen from Home's **zero/empty** state and from an **empty** review
+queue. Both are empty only at first run. **The silent-sender-ID-change case — a bank changes its
+sender ID in month eight — has a fully populated home screen, and Addendum A as written is silent
+for it, which is the same silence that produced KHA-128.** Therefore:
+
+- On every ingestion run and on every foreground sweep, if the run's
+  `discardedNonFinancialSender` count is non-zero, emit an ADR-015 diagnostic event (count only)
+  **and** make the fact reachable from a persistently visible affordance — a row in the
+  parser-health panel at minimum, and a dismissable-per-session entry point from Home. Not
+  conditional on an empty state.
+- The parser-health panel (ADR-015) gains an **"unrecognised senders"** row alongside its
+  parsed/unparsed/ignored counts. It shows a **count**, and it links to the US-A6 screen where the
+  live list is derived on demand. The panel never stores the senders.
+
+##### The advisory financial-shape signal — concrete shape, since it is now advisory
+
+`FinancialShapeSignal.of(String normalizedBody, {required bool panRedacted}) → {unlikely, possible,
+likely}`. A pure function. Runs **only** on the US-A6 screen path, in memory, over text already
+normalised by `SmsTextNormalizer` (so Arabic-Indic digits are already ASCII and bidi controls are
+already stripped — write ASCII regexes). Never called from `ingestion_pipeline.dart`.
+
+**Necessary conditions — both required, or the answer is `unlikely`:**
+
+1. **An amount adjacent to a currency token**, not merely a number. Currency tokens: `SAR`, `SR`,
+   `AED`, `QAR`, `KWD`, `BHD`, `OMR`, `JOD`, `USD`, `EUR`, `GBP`, `EGP`, `TRY`, `﷼` (U+FDFC),
+   `⃀`/U+20C0, and `ريال`, `ر.س`, `درهم`, `دينار`, `دولار`, `جنيه`, `هللة`. **`$` alone does not
+   count** — it is endemic in promotional text. Amount shape, requiring the token within ~12
+   characters of a currency token on either side:
+   `(?<![\d.,])\d{1,3}(?:,\d{3})*(?:\.\d{1,3})?(?!\d)` or `(?<![\d.,])\d+(?:\.\d{1,3})?(?!\d)`.
+2. **A transaction-event keyword** — a *completed movement on an account or card*, not a price.
+   Arabic: `شراء`, `سحب`, `إيداع`/`ايداع`, `حوالة`, `تحويل`, `عملية`, `بطاقة`, `حسابك`,
+   `نقاط البيع`, `صرف آلي`, `مدى`, `استرداد`, `فاتورة`, `خصم من الحساب`/`خصم من حسابك`.
+   English: `purchase`, `withdrawal`, `deposit`, `transfer`, `payment`, `POS`, `ATM`, `debit`,
+   `credit`, `refund`, `transaction`, `mada`, `authoris`/`authoriz`. **Bare `خصم` is excluded** —
+   it means both *deduction* and *discount*, and the discount sense dominates in marketing.
+
+**Corroborators (raise to `likely`; two or more required):** `panRedacted == true` (a message
+containing a PAN is overwhelmingly a bank — and it is free, the sanitiser already returns it); a
+masked instrument reference (`\*{2,}\s?\d{2,4}`, `\d{4}\*+`, `تنتهي ب`, `ending`); a
+balance-after or reference field (`الرصيد`, `المتاح`, `available balance`, `مرجع`, `رقم العملية`,
+`ref`, `trn`); an in-body date **and/or** time stamp (`\d{2}[/-]\d{2}[/-]\d{2,4}`, `\d{1,2}:\d{2}`);
+a two-decimal amount (`\.\d{2}` — banks print cents, promotional pricing prints round numbers).
+
+**Veto and demotion signals — this is where the false positives actually die:**
+
+- **Veto to `unlikely` outright: OTP/verification shape.** `رمز`, `رمز التحقق`, `كلمة المرور`,
+  `لا تشاركه`, `صالح لمدة`, `OTP`, `verification code`, `one-time`. **This veto is load-bearing:**
+  Saudi 3-D Secure OTPs carry the transaction amount, the merchant, and the masked card, so they
+  satisfy every positive signal above and must still never be retained (AC-A2.1).
+- **Veto to `unlikely`: the sender is a plain mobile number** (`^\+?9665\d{8}$`, `^0?5\d{8}$`).
+  Bank alerts in Saudi arrive from alphanumeric sender IDs, never an MSISDN. This single rule
+  removes the most privacy-sensitive false-positive class — a person texting about money — and it
+  costs one regex.
+- **Demote one level (each):** a URL (`http`, `www.`, `.com`) — transaction alerts rarely carry
+  links, marketing always does; `%` together with `خصم`/`عرض`/`discount`/`offer`/`sale`/`promo`;
+  unsubscribe language (`لإلغاء`, `unsubscribe`, `STOP`); telecom-plan vocabulary (`الباقة`,
+  `رصيدك المتبقي`, `جيجابايت`, `GB`, `MB`, `minutes`); delivery/e-commerce (`طلبك`, `شحنة`,
+  `تم تسليم`, `order`, `shipment`, `delivery`).
+
+**The aggregation is worth more than the per-message logic, and it is only available here.**
+The signal shown to the user is **per sender, over that sender's whole message population in the
+window**: *22 of 30 messages look like transactions*. A sender scoring `likely` on 70%+ of a
+double-digit message count is a bank with near-certainty; a marketing sender that mentioned a price
+once scores 1 of 40 and sorts to the bottom. **Gate 1 sees one message at a time and structurally
+cannot do this.** That asymmetry is an independent argument for the relocation, on accuracy grounds
+rather than privacy grounds.
+
+**Where the lists live.** Dart constants in `lib/features/parsing/` for v1, **not** new rule-pack
+schema surface. Prefer the simpler option and say so: these lists only affect screen ordering, so
+making them updatable-as-data buys little and costs schema review. Promoting them into the pack is
+noted as a v1.1 option under **O-7**.
+
+##### What this decision does *not* fix, said plainly
+
+The gap that remains is **gate 2 quality**, and the human should understand that it, not gate 1, is
+where the concept is genuinely exposed. AC-A6.5 sets an honest floor: a linked sender delivers value
+with *no* parsing rule, via the review queue and manual completion. Nothing is lost. But PRD §1
+defines success as *"the user opens the app and trusts the numbers without having done manual data
+entry."* If linking seven banks yields seven senders whose bodies no rule can parse, the user
+hand-completes hundreds of messages a month and **the product fails its own success criterion while
+every component behaves exactly as specified.** That is a rule-*content* problem, discharged by
+obtaining real message samples per bank and writing rules — engineering and ops work (KHA-128's
+other half), not an architecture change. The mechanism already half-exists: extend ADR-015's
+"share diagnostics" pattern to a **user-initiated, redaction-applied, fully reviewable sample
+export**. Note the NFR-M3 boundary carefully, because an engineer will otherwise either refuse the
+task or violate the rule: the rule author may *read* real samples the user deliberately shared, and
+must then commit a **synthetic** fixture that mimics the shape. Real message text never enters the
+repository.
 
 ---
 
@@ -1667,7 +2021,7 @@ Three tiers, applied in order:
 
 | Tier | Key | Action |
 |---|---|---|
-| **D1 — exact** | `smsProviderId` UNIQUE (re-scan idempotency, AC-A3.3) **and** `contentHmac = HMAC-SHA256(k, normalisedBody‖sender‖smsTimestamp)` UNIQUE (carrier retry, AC-A5.1) | **Suppress silently**, but write a diagnostic event recording the suppression. Storing an HMAC rather than the text keeps the dedup index non-reversible. |
+| **D1 — exact** | `smsProviderId` UNIQUE (re-scan idempotency, AC-A3.3) **and** `contentHmac = HMAC-SHA256(k, scheme‖normalisedBody‖normalisedSender)` UNIQUE (carrier retry, AC-A5.1) — **no delivery timestamp; see the KHA-137 subsection below** | **Suppress silently**, but write a diagnostic event recording the suppression. Storing an HMAC rather than the text keeps the dedup index non-reversible. |
 | **D2 — reference number** | same `referenceNumber` + same instrument (PRD §3.4 confirms transfers carry these) | Treat as the same transaction. If it enriches an existing record, **merge — and write an audit entry recording the merge.** Never a silent destruction. |
 | **D3 — heuristic** | same instrument + same amount + same currency + \|Δt\| ≤ 15 min, and (merchant equal **or** one message is an authorisation-type and the other a posting-type) | **Flag as a possible duplicate for user confirmation. Never auto-remove.** Both remain in the list and in totals until the user decides. |
 
@@ -1676,6 +2030,128 @@ genuine identical purchases the same day) pull in opposite directions, and only 
 failure modes is recoverable: an inflated total is visible and fixable, a silently deleted real
 transaction is invisible and unfixable. **We bias hard toward flagging.** Banking default:
 prefer the auditable, recoverable error.
+
+#### KHA-137 decision — **D1's content hash drops `receivedAt` entirely.** Decided 2026-07-30.
+
+> **STATUS: APPROVED (2026-07-30).** The human approved the fix and explicitly accepted the
+> disclosed same-minute residual (two genuinely separate purchases at the same merchant, same
+> amount, within the same in-body minute, would collide and the second would need manual entry —
+> judged unavoidable and rare). Scoped to this subsection, per the house style established by
+> v1.1–v1.6: the document's own `APPROVED` line above stays as it is, because
+> flipping the whole architecture to `DRAFT` would block every unrelated in-flight phase for one
+> decision. **No engineer implements this subsection until a human changes this line to
+> `APPROVED`.** The rest of ADR-017 is unchanged and remains in force.
+
+**What is broken.** `ContentHmac.compute` folds `smsTimestampUtc` — the SMS's `receivedAt`,
+at **millisecond** precision — into the digest. A carrier redelivery arrives at a *different
+instant by definition*, so it produces a different digest, so `_withDedupGuard`'s
+`findByContentHmac` misses, so a second transaction is written. The `smsProviderId` key does not
+catch it either, because a redelivery is a *new* provider row. **D1 has two keys and, for the one
+case it was built for, neither fires.** QA reproduced this on a device: a real total went from
+−312.40 SAR to −624.80 SAR. `content_hmac.dart`'s own doc comment names carrier redelivery as
+"the exact case D1 exists for" — the file argues correctly for the normalised body and then
+defeats itself in the next field.
+
+**Why the test suite passed anyway** (worth one line, because it is the reusable lesson): the
+AC-A5.1 test builds its redelivery with `receivedAt: first.receivedAt` and varies only the
+provider id — it holds fixed the one variable a real redelivery does not control. A test that
+cannot fail is not coverage.
+
+**The decision.** The digest is a function of **the message text and its sender, and nothing
+else**:
+
+> `contentHmac = HMAC-SHA256(k, "massrofy/content-hmac/v2" ‖ normalisedBody ‖ normalisedSender)`,
+> `\x00`-separated as today.
+
+**Why this does not weaken AC-A5.3.** Three facts, checked in the code rather than reasoned from
+the ACs:
+
+1. **Genuinely separate purchases already differ in the body.** Every transaction rule in
+   `sa-core.json` lists `occurredAt` in `requiredFields`, and every template's regex captures a
+   date-time **to the minute** *from the message text*. The existing AC-A5.3 test is itself the
+   proof: it separates its two purchases by in-body time (`09:00` / `09:40`) and never depends on
+   `receivedAt`.
+2. **AC-A5.2's flag path is not the content hash.** Possible-duplicate flagging is
+   `DuplicatePolicy.decide` — D2 (reference number + instrument) and D3 (instrument + amount +
+   currency + 15-minute window + merchant/auth-posting), over **parsed fields**, returning
+   `acceptAndFlag`. It never consults `contentHmac`. Collapsing D1's key therefore cannot move
+   work from "flag" to "silently drop" through that route.
+3. So the timestamp component was never what protected AC-A5.3. The **body** was. Removing it
+   costs AC-A5.3 nothing and gives AC-A5.1 the guarantee it was always supposed to have.
+
+**The residual, stated plainly rather than buried.** Two genuinely separate purchases, same card,
+same merchant, same amount, **in the same minute**, produce byte-identical SMS. D1 will now
+suppress the second one. This is **irreducible from the message**: nothing in the text
+distinguishes the two, and the only external discriminator is the delivery instant — the very
+field a redelivery also changes. In that one case AC-A5.1 and AC-A5.3 are formally contradictory
+and we resolve toward AC-A5.1, because carrier redelivery is common and same-minute duplicate
+spend is rare. The suppression is **not invisible** (`_withDedupGuard` writes the
+`duplicate_suppressed` diagnostic, ADR-015) and the recovery is **US-B4 manual entry**.
+
+**Options rejected.**
+
+| Option | Assessment |
+|---|---|
+| **Coarse-bucket the timestamp** (same day, same hour) | **Rejected, and it fails on its own terms.** Every bucket has a boundary, so a redelivery that straddles one silently reproduces KHA-137 — *intermittently*, which is worse than a clean rule because it is unreproducible in the field. And it does not buy what it is for: byte-identical bodies imply the same in-body minute, so both genuine purchases land in the **same** bucket regardless. It keeps the failure mode and not the benefit. |
+| **Keep the timestamp out of the hash but suppress only if the stored row's `receivedAt` is within a window `W`** | **Rejected, by the same arithmetic.** The pair AC-A5.3 wants separated is co-located in time *by construction* (same in-body minute ⇒ deliveries seconds apart), so every `W` ≥ 1 minute suppresses them too; and every finite `W` lets a store-and-forward redelivery through. The window discriminates nothing, and it adds a tunable no evidence can tune. |
+| **Flag rather than suppress on a D1 hash hit** (raised because ADR-017 biases toward flagging) | **Rejected.** It writes two transactions and asks the user, which is exactly what AC-A5.1 forbids — *"exactly one transaction exists"*. It would put a confirmation prompt in front of the user for the **common** case in order to serve the rare one. ADR-017's flag bias governs the *ambiguous* tiers; D1 is the tier defined as unambiguous. |
+
+**Normative — what the implementation must do.**
+
+**(A) The new signature.** `smsTimestampUtc` is **removed from the parameter list**, not merely
+ignored — an unused parameter is an invitation to re-add it:
+
+```dart
+static String compute({
+  required List<int> key,
+  required String normalizedBody,
+  required String sender,
+});
+// material = ['massrofy/content-hmac/v2', normalizedBody,
+//             SmsTextNormalizer.normalize(sender).toLowerCase()].join('\x00')
+```
+
+The scheme tag goes **first** so the digest is self-describing and a future third revision has to
+change it deliberately rather than collide by accident. The **sender is canonicalised the same
+way the body is** — `SmsTextNormalizer.normalize`, then lower-cased — because rule-pack
+`senderPatterns` already compile with `caseSensitive: false`, so the parser treats `D360` and
+`d360` as one bank while the digest treats them as two messages. That is the same class of defect
+(delivery noise defeating dedup) and it is free to close **now**, while digests are being
+invalidated anyway; closing it later would cost a second invalidation. `ingestion_pipeline.dart`
+is the only caller.
+
+**(B) The key-derivation label does not change.** It stays `massrofy/dedup-content-hmac/v1`. That
+label separates *keys by protocol domain* (ADR-017 B5 / KHA-21); it is not a message-format
+version, and bumping it would rotate a Keystore-derived subkey for no security reason.
+
+**(C) Forward-only. No backfill, no migration, no schema change — DB stays at version 7.** Every
+already-stored digest becomes stale. A backfill would be **partial by construction**:
+content-free noise rows (`insertIgnoredNoContent`) retain no body to recompute from, and NFR-P4
+is why. The exposure is bounded to messages ingested *before* the update whose redelivery arrives
+*after* it — hours, not weeks. `content_hmac` stays a plain `TEXT UNIQUE` with no format
+assumption, and a v1 digest can never equal a v2 digest, so the two coexist without false
+suppression. Same posture as v1.2 (KHA-69) and v1.6.
+
+**(D) ADR-006 KHA-133 item (F) — the `sms_provider_id` pre-check in `_withDedupGuard` — must
+land in the same PR. Non-negotiable.** (G).1 of that subsection states the rule already: anything
+that shifts the `content_hmac` of stored messages converts a re-scan's benign duplicates into
+`failedWithError` stalls, and "then (F) must land in the same PR". **This change shifts every
+stored digest, so it makes that hazard live rather than latent** — the first historical-import
+resume or bank-scoped re-scan over pre-fix messages would miss on `content_hmac`, hit the
+`sms_provider_id` `UNIQUE` constraint, throw, set `advancingIsSafe = false` and call
+`pauseImport()`. Shipping the hash change without (F) trades a doubling bug for a stalled
+pipeline.
+
+**(E) Regression tests, at minimum.** (i) AC-A5.1 with the redelivery given a **different**
+`receivedAt` — this is the test that must fail before the fix; (ii) the existing AC-A5.3 and
+AC-A5.2 tests unchanged and still green; (iii) sender case/whitespace variation hashing equal;
+(iv) a re-scan of a pre-fix row (stale v1 digest, same provider id) counted as
+`suppressedAsExactDuplicate` rather than `failedWithError`, which is (D)'s test.
+
+**(F) Doc comments that assert the old formula must be corrected in the same PR**, or the next
+reader re-derives the bug: `content_hmac.dart` (library comment and `compute`),
+`raw_message_table.dart` (`contentHmac` column), `domain_separated_key.dart:10`, and
+`ingestion_pipeline.dart`'s `_withDedupGuard` comment.
 
 ---
 
@@ -2012,6 +2488,12 @@ nullable (US-B14) · `linkSource` (`sms_repayment` | `user` | null) · `linkObse
 > - Financial sender + parsed or unparsed → row **with** `sanitizedBody` (redacted), because
 >   AC-B1.2 requires the user to be able to verify the parse and AC-A4.1 requires the raw text
 >   in the review queue.
+> - **Clarification added v1.5 (KHA-127/128), a boundary and not a relaxation:** the first bullet
+>   forbids retaining a *message*. It does **not** forbid a **content-free, sender-free aggregate
+>   count**. `{discardedNonFinancialSender: 214}` may be surfaced in the UI and logged as an
+>   ADR-015 event; `{sender: "…", at: …}` may not. Rule of thumb: if it could tell you *who* texted
+>   the user or *what they said*, it is retention and it is forbidden. **The count is required, not
+>   merely permitted** — see ADR-007's KHA-127/128 subsection, item (D).
 
 **`Merchant`** / **`MerchantAlias`** — ADR-008, R-5
 `Merchant`: `id` · `canonicalName` · `merchantKey` UNIQUE · `createdAt`
@@ -2075,7 +2557,17 @@ nullable (US-B14) · `linkSource` (`sms_repayment` | `user` | null) · `linkObse
 
 **`IngestWatermark`** (single row) — ADR-006
 `lastProcessedSmsProviderId` · `lastProcessedSmsDate` · `importState` (`idle` | `running` |
-`paused`) · `importCursor` · `importFromDate` (start of current calendar month, per AC-A3.1)
+`paused` | `completed`) · `importCursor` · `importFromDate` (start of current calendar month, per
+AC-A3.1)
+> **Correction, v1.6:** this row omitted `completed`, which the shipped schema has and which is
+> **terminal** — it is deliberately a different value from the initial `idle`, because reusing
+> `idle` to mean "finished" made every app foreground re-run the whole month's backfill. Its
+> terminality is also the third of the three choices that make a rule-pack fix forward-only, so
+> it must be written down where a reader of the data model will see it (ADR-006's KHA-133
+> subsection).
+> **No column is added for re-scan.** A re-scan is transient: it runs with
+> `advanceWatermark: false` and writes none of these fields. Recording *which rule pack the
+> watermark was last swept under* was considered and rejected — see that subsection, Q3 option (2).
 
 **`AppSettings`** (single row)
 `baseCurrency` (default `SAR`) · `locale` · `lockGraceSeconds` · `autoApplyThreshold` ·
@@ -2457,6 +2949,8 @@ equivalents. This binds QA and production-support as much as engineering.
 | **H-13** | **⚠️ NFR-R1 is reduced. This is the one item in v1.1 you should actually weigh.** ADR-018 decides that background SMS ingestion is suspended while the app is locked, because the alternative is a second, auth-free copy of your financial data. **Net effect: "seconds from SMS arrival" holds while the app is unlocked; while locked it becomes "seconds from unlock, with nothing lost."** AC-A1.4 is still fully met. If you want the *feel* of the original, ADR-018 decision 5 offers an opt-in, content-free "a bank message is waiting" notification at zero security cost | **Confirm the reduction**, and say yes/no to building the opt-in nudge in P6/P7. If you would rather have the original latency and accept an auth-free ingest inbox, say so — but read ADR-018's four arguments first; I recommend against it clearly |
 | **H-14** | **Ratifying ADR-013's widening surfaced two live defects of the same class that KHA-54's fix did *not* close.** (i) The grouped-PAN scan tests only the maximal digit-group sequence, so `4111 1111 1111 1111 45` leaves a full PAN in cleartext with `panRedacted = false`. (ii) Grouped SA IBANs (`SA03 8000 0000 6080 1016 7519`) are not matched at all. Both are security defects in an open PR, not future work | **No decision needed — flagging for visibility.** These are must-fix under §13.4/§13.5 before PR #2 merges, and should be raised as `bug` issues routed to mobile-engineer. Tell me if you want them held to a follow-up instead |
 | **H-15** | **⚠️ A `/revise-design` round is now required — this is the v1.3 item that needs you.** The KHA-98 decision makes the `MerchantAlias` link the **only** remaining operation in the product that collapses two identities into one, so it must be reversible (R-8's principle). That needs a **"This is a different shop"** affordance on **S-16 (Learned / Merchant Rules)** plus a confirmation dialog, and `docs/design.md` has neither. The change is **additive** — one action on an existing screen, one dialog, no new top-level screen — so in my judgement it does not require re-approving the whole design document, only the delta. But design approval is a human gate under `CLAUDE.md`, so it is yours to approve, not the team's to assume | **Two things, please.** (1) Confirm the additive-delta reading, so the manager can run `/revise-design` scoped to S-16 rather than re-opening gate 2. (2) Note the sequencing: this blocks only the P4b issue that carries the split affordance — not P4b as a whole, and not the mobile-engineer's KHA-98/99/100/102 fix, which should land first and independently |
+| **H-16** | **⚠️ The v1.5 item, and the one you asked for a real opinion on.** You framed KHA-128 as possibly existential — *"the app should be smart enough… we will not be able to inject LLM."* **My independent judgement: the architecture is sound and needs a fix, not a rework — but the fix is not the one that looks obvious, and the diagnosis in the question is worth correcting.** The app was never insufficiently smart. It was **mute**: it counted 214 skipped messages on every run and told nobody, and the string that identifies `Jazira Bank` was already shipped in `sa-core.json`'s `aliases` and never compared to the sender. So: **hard sender gate KEPT, NFR-P4 KEPT unamended** (nothing was lost — the messages are still in the SMS provider we hold `READ_SMS` on); **option 1 rejected as a gate** (it would persist private non-bank message content, and needs the out-of-scope X19); **option 2 rejected for v1** on evidence grounds, not effort — we have no lawful training corpus (NFR-M3) and no way to measure it in the field (NFR-S6/R-10); **option 3, which was framed as merely complementary, is the primary fix.** Option 1's heuristic survives as an advisory ranking signal on the sender screen, where a false positive costs a screen row instead of a database row | **Three things.** (1) **Approve PRD Addendum A** — it is the load-bearing fix and it is currently `DRAFT`, so nothing here can be built until you do. (2) **Confirm you accept "the app asks you once per bank" instead of "the app guesses"** — this is the actual product decision inside all of this, and I recommend it strongly: it is more accurate (certainty, not 90%), more private, and cheaper. (3) **Note where the real risk actually sits — it is not gate 1.** It is whether the bundled rules can *parse* your seven banks' message bodies once linked. AC-A6.5 guarantees nothing is lost, but hand-completing hundreds of messages a month fails PRD §1's own definition of success. **That needs real sample messages from your seven banks; it is the highest-leverage thing available right now and it is ops work, not architecture.** Say the word and I will spec the user-initiated redacted sample export |
+| **H-17** | **⚠️ The v1.6 item, and it is a sequencing call, not a design one.** KHA-133's decision is settled: the re-scan is AC-A6.10's capability, bank-scoped, user-triggered, no schema change, riding with US-A6. What is **not** settled is *when your already-received messages come back*. KHA-128 merging fixes the future only; **the recovery lands with US-A6**, and until then the only recovery the app offers is "clear app data", which I am explicitly telling you **not to do** — it destroys the transactions you already have correctly and, per ADR-004/ADR-012, may cost the whole encrypted store. Two ways to close the gap: **(a)** wait for US-A6, which is already next per OQ-23 — correct, zero extra work, and right if US-A6 is days away; **(b)** land items (A)–(F) of the KHA-133 subsection as a small PR **immediately after** KHA-128, with a plain "check my banks again" button in Settings → Diagnostics, then let US-A6 dress the same mechanism in its real screen. **(b) is not a stopgap and throws nothing away** — it is a subset of the mechanism US-A6 must build anyway, which is exactly why I am willing to recommend it. I did *not* consider a third option worth offering: resetting `importState` to re-run the import. It is two lines, it is dedup-safe, and I am still refusing it — it creates a second re-scan path that diverges from the one US-A6 needs, and ADR-006's self-healing property comes entirely from there being one path | **Two things.** (1) **Approve or amend the KHA-133 subsection** (currently `DRAFT` inline; the rest of this document stays `APPROVED`). (2) **Pick (a) or (b).** I recommend **(b)** if US-A6 is more than a few days out, **(a)** if it is imminent. Also worth noting for the record: **v1 stores no last-seen rule-pack version**, so a future bundled-pack correction arriving as a new APK will prompt nothing by itself — the user has to go and tap "check again". I accepted that rather than pay for a schema column; if it bites twice, that is the re-open trigger |
 
 ### 8.2 Residual open questions I am deliberately **not** deciding here
 
@@ -2468,6 +2962,7 @@ equivalents. This binds QA and production-support as much as engineering.
 | **O-4** | Whether the diagnostic ring buffer should survive erase-all for post-mortem purposes | Currently: it is wiped, because AC-F3.1 says "all data". Raise only if production-support finds this blocking |
 | **O-5** | **`setInvalidatedByBiometricEnrollment` shipped as `false` in P1, where ADR-004 specifies `true`.** Observed while researching KHA-56; **not** part of either escalation and **not** decided here. The engineer's reasoning is sound and documented in `KeystoreChannel.kt`: `true` is only safe once `unwrapWithRecoverySecret` is real, which is Epic I / P8, and shipping it today would mean the first biometric re-enrolment permanently destroys the database with no way back | **This must flip to `true` in P8, in the same PR that makes the recovery path real.** Until then H-5's stated posture is not yet in force and the human should know that. Recommend a Linear issue blocking P8 exit so it cannot be forgotten — silence here is how a temporary deviation becomes permanent |
 | **O-6** | **Generic IBAN detection via the ISO 7064 mod-97-10 check** (ADR-013 §13.5 SHOULD), covering foreign counterparty IBANs on outbound international transfers | Deferred as additional surface on an already-large open PR, not because it is doubtful. It is the exact analogue of Luhn and would be precise rather than blunt. Pick it up in P3 or as a standalone hardening issue |
+| **O-7** | **The on-device classifier (KHA-127/128 option 2), and the home of the financial-shape keyword lists.** Rejected for v1 in ADR-007's KHA-127/128 subsection; the lists ship as Dart constants rather than as rule-pack schema | **Stated re-open trigger, so this is a decision and not a shrug: re-open the classifier only if, after PRD Addendum A ships and the user has linked their real banks, the sender-recognition screen is measurably failing** — i.e. the user reports banks still going unnoticed *despite* the health signal firing, or the unrecognised-sender list is too noisy to use even with per-sender aggregation and the mobile-number veto. Until then the classifier is a guess where certainty is available. And the precondition would still not be met: we would need a lawfully-obtained labelled corpus (NFR-M3) and a way to evaluate precision without telemetry (NFR-S6). **If that trigger fires, the correct first move is still not a model — it is tuning the veto lists, which is a data change.** Promoting the lists into the rule-pack schema becomes worth its review cost only at that point |
 
 ### 8.3 Risk register updates (against build-plan §6)
 

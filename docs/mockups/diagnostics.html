@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>مصروفي — التشخيص وصحة المحلِّل (Addendum A — NEW — S-54 Diagnostics)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --primary:#0B3D62; --secondary:#B8842E; --secondary-text:#8A5F1E; --secondary-tint10:#F7EEDD;
+  --ink-900:#101418; --ink-700:#3A434C; --ink-500:#6B7580; --ink-300:#C7CDD4; --ink-100:#EEF1F4;
+  --surface:#F7F8FA; --success:#1E7A46; --success-tint:#E5F3EA; --error:#B3261E;
+  --warning-text:#8A5A00; --warning-fill:#F2A93B; --info:#0B6E8C; --info-tint:#E4F1F5;
+}
+*{box-sizing:border-box;} html,body{margin:0;padding:0;}
+body{background:#DDE2E7;font-family:'Tajawal','Manrope',sans-serif;color:var(--ink-900);
+  display:flex;flex-direction:column;align-items:center;gap:20px;padding:32px 12px 80px;min-height:100vh;}
+.page-title{font-size:24px;font-weight:700;margin:0;}
+.badge-new{display:inline-block;background:var(--secondary-tint10);color:var(--secondary-text);font-size:12px;font-weight:700;padding:4px 12px;border-radius:99px;margin-bottom:10px;}
+.page-note{max-width:820px;text-align:center;color:var(--ink-700);font-size:14px;line-height:1.6;margin:0 0 8px;}
+.backlink a{color:var(--primary);font-weight:600;text-decoration:none;font-size:14px;}
+.gallery{display:flex;flex-wrap:wrap;gap:32px;justify-content:center;align-items:flex-start;}
+.unit{display:flex;flex-direction:column;align-items:center;}
+.unit .caption{margin-bottom:10px;font-weight:700;color:var(--ink-700);font-size:14px;text-align:center;}
+.unit .caption span{display:block;font-weight:400;color:var(--ink-500);font-size:12px;margin-top:2px;}
+.screen{width:380px;background:var(--surface);border-radius:28px;overflow:hidden;box-shadow:0 20px 50px rgba(16,20,24,.25);
+  border:8px solid var(--ink-900);min-height:800px;position:relative;display:flex;flex-direction:column;}
+.appbar{display:flex;align-items:center;gap:10px;padding:16px 16px 6px;}
+.appbar h1{font-size:20px;font-weight:700;margin:0;flex:1;}
+.icon{width:1em;height:1em;display:inline-block;vertical-align:middle;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;font-size:24px;flex-shrink:0;}
+.content{flex:1;overflow-y:auto;padding:8px 16px 24px;}
+.section-h{font-size:13px;font-weight:700;color:var(--ink-500);margin:16px 0 8px;}
+.section-h:first-child{margin-top:2px;}
+.stat-row{display:flex;gap:10px;margin-bottom:16px;}
+.stat{flex:1;background:#fff;border:1px solid var(--ink-100);border-radius:12px;padding:12px;text-align:center;}
+.stat .n{font-size:24px;line-height:32px;font-weight:600;font-family:'Manrope',sans-serif;font-variant-numeric:tabular-nums;}
+.stat .l{font-size:11px;color:var(--ink-500);margin-top:2px;}
+.sender-alert{display:flex;align-items:center;gap:12px;background:var(--info-tint);border:1px solid var(--info);border-radius:16px;padding:14px 16px;margin-bottom:16px;cursor:pointer;text-decoration:none;}
+.sender-alert .icon{color:var(--info);flex-shrink:0;}
+.sender-alert .main{flex:1;min-width:0;}
+.sender-alert .name{font-size:15px;font-weight:500;color:var(--ink-900);}
+.sender-alert .meta{font-size:12px;color:var(--ink-700);margin-top:2px;line-height:1.5;}
+.sender-alert .chev{color:var(--info);flex-shrink:0;transform:scaleX(-1);}
+.sender-alert.clear{background:#fff;border-color:var(--ink-100);}
+.sender-alert.clear .icon{color:var(--success);}
+.sender-alert.clear .chev{color:var(--ink-500);}
+.rule-row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--ink-100);font-size:13px;}
+.rule-row:last-child{border-bottom:none;}
+.rule-row .k{color:var(--ink-700);font-family:'Manrope',sans-serif;direction:ltr;unicode-bidi:isolate;}
+.rule-row .v{color:var(--ink-500);font-family:'Manrope',sans-serif;font-variant-numeric:tabular-nums;}
+.footnote{font-size:12px;color:var(--ink-500);line-height:1.6;margin-top:16px;padding-top:14px;border-top:1px dashed var(--ink-300);}
+</style>
+</head>
+<body>
+<svg style="display:none" aria-hidden="true">
+<symbol id="i-arrow_back" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></symbol>
+<symbol id="i-chevron_left" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+<symbol id="i-help_outline" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.5 9.3a2.5 2.5 0 1 1 3.7 2.2c-.8.5-1.2 1-1.2 1.9"/><circle cx="12" cy="17" r="0.9" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-task_alt" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.3l2.3 2.3 4.7-5"/></symbol>
+</svg>
+<div class="backlink"><a href="index.html">‹ العودة إلى الفهرس / Back to index</a></div>
+<div class="badge-new">Addendum A — NEW · AC-A6.11, ADR-015</div>
+<h1 class="page-title">S-54 — التشخيص وصحة المحلِّل (Diagnostics / Parser Health)</h1>
+<p class="page-note">لوحة صحة المحلِّل الموجودة أصلاً في العمارة (ADR-015) لم يكن لها تصميم واجهة بعد — أُضيفت هنا الآن لأنها تحمل الصف الجديد "مرسلون غير معروفون" الذي يطلبه AC-A6.11: عدّاد ثابت، غير مرتبط بأي حالة فارغة، حتى يظل تغيّر صامت في معرّف مرسل بنك (بعد شهور من الاستخدام) قابلاً للاكتشاف — لا فقط فراغ اليوم الأول. لا يُخزَّن أي محتوى رسالة أو اسم مرسل هنا — عدّاد فقط (NFR-P4a). لا يوجد أي زر مشاركة أو تصدير على هذه الشاشة — نطاقها محصور عمداً بما تحتاجه AC-A6.11 فقط.</p>
+
+<div class="gallery">
+
+<div class="unit">
+<div class="caption">S-54 — مرسلون غير معروفون &gt; 0 (معلومة، لا تنبيه)<span>AC-A6.11 — يظهر رغم أن الرئيسية وصندوق المراجعة ليسا فارغين · لون color.info وليس التحذير</span></div>
+<div class="screen">
+  <div class="appbar"><svg class="icon" style="transform:scaleX(-1);display:inline-block;"><use href="#i-arrow_back"></use></svg><h1>التشخيص</h1></div>
+  <div class="content">
+    <div class="section-h">صحة تحليل الرسائل — آخر 24 ساعة</div>
+    <div class="stat-row">
+      <div class="stat"><div class="n">812</div><div class="l">مُحلَّلة</div></div>
+      <div class="stat"><div class="n">14</div><div class="l">بحاجة مراجعة</div></div>
+      <div class="stat"><div class="n">203</div><div class="l">متجاهلة (غير مالية)</div></div>
+    </div>
+
+    <a class="sender-alert" href="banks-senders.html">
+      <svg class="icon"><use href="#i-help_outline"></use></svg>
+      <div class="main"><div class="name">3 مرسلين غير معروفين</div><div class="meta">في آخر 30 يوماً — أغلبهم غالباً ليسوا بنوكاً؛ لا يُحفظ اسم المرسل أو محتوى رسائله هنا، عدّاد فقط</div></div>
+      <svg class="icon chev"><use href="#i-chevron_left"></use></svg>
+    </a>
+
+    <div class="section-h">أهم القواعد المتعثرة</div>
+    <div class="rule-row"><span class="k">aljazira.pos.v3</span><span class="v">6 حالات</span></div>
+    <div class="rule-row"><span class="k">d360.transfer.v1</span><span class="v">2 حالة</span></div>
+
+    <div class="footnote">لا يُخزَّن أو يُشارَك أي محتوى رسالة أو اسم مرسل من هذه الشاشة — عدّاد فقط، ولا يغادر جهازك أبداً (NFR-P4a, NFR-S6).</div>
+  </div>
+</div>
+</div>
+
+<div class="unit">
+<div class="caption">S-54 — مرسلون غير معروفون = 0 (لا يُخفى الصف)<span>الحالة الهادئة — لا تزال ظاهرة، وليست شرطية على حالة فارغة</span></div>
+<div class="screen">
+  <div class="appbar"><svg class="icon" style="transform:scaleX(-1);display:inline-block;"><use href="#i-arrow_back"></use></svg><h1>التشخيص</h1></div>
+  <div class="content">
+    <div class="section-h">صحة تحليل الرسائل — آخر 24 ساعة</div>
+    <div class="stat-row">
+      <div class="stat"><div class="n">794</div><div class="l">مُحلَّلة</div></div>
+      <div class="stat"><div class="n">3</div><div class="l">بحاجة مراجعة</div></div>
+      <div class="stat"><div class="n">198</div><div class="l">متجاهلة (غير مالية)</div></div>
+    </div>
+
+    <a class="sender-alert clear" href="banks-senders.html">
+      <svg class="icon"><use href="#i-task_alt"></use></svg>
+      <div class="main"><div class="name">لا مرسلون غير معروفين</div><div class="meta">جميع المرسلين في آخر 30 يوماً معروفون للتطبيق</div></div>
+      <svg class="icon chev"><use href="#i-chevron_left"></use></svg>
+    </a>
+
+    <div class="section-h">أهم القواعد المتعثرة</div>
+    <div class="rule-row"><span class="k">—</span><span class="v">لا شيء هذا الأسبوع</span></div>
+  </div>
+</div>
+</div>
+
+</div>
+</body>
+</html>

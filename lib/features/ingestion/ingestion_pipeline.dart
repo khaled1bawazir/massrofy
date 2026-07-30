@@ -461,11 +461,15 @@ final class IngestionPipeline {
       sender: record.address,
     );
 
+    // ADR-017 D1 v2. Body + sender, and deliberately NOT `record.receivedAt`
+    // (KHA-137): a carrier redelivery is the same text arriving at a
+    // *different* instant, so folding the delivery time in was exactly what
+    // let a redelivery through and doubled the user's month total. See
+    // `content_hmac.dart` for the full reasoning and the disclosed residual.
     final String contentHmac = ContentHmac.compute(
       key: contentHmacKey,
       normalizedBody: normalized,
       sender: record.address,
-      smsTimestampUtc: record.receivedAt,
     );
 
     // The exhaustive switch. `ParseOutcome` is sealed, so adding a case
@@ -562,7 +566,30 @@ final class IngestionPipeline {
   ///  - `sms_provider_id` — a re-scan of the same inbox row (AC-A3.3). This
   ///    is what makes the historical import safe to restart at any point.
   ///  - `content_hmac` — a **carrier redelivery**, which arrives as a *new*
-  ///    provider row with identical content (AC-A5.1).
+  ///    provider row with identical content (AC-A5.1). Since the KHA-137
+  ///    decision this digest is over body + sender only; it deliberately does
+  ///    NOT include the delivery instant, because a redelivery changes that
+  ///    instant by definition and the timestamped v1 digest therefore missed
+  ///    the exact case it existed for.
+  ///
+  /// **KHA-137 makes the `sms_provider_id` pre-check below load-bearing, not
+  /// merely tidy.** The v2 digest differs from every v1 digest already stored,
+  /// so the first re-scan over pre-fix messages misses on `content_hmac`. With
+  /// only that one lookup, the write would then hit the `sms_provider_id`
+  /// `UNIQUE` constraint, throw, set `advancingIsSafe = false` and pause the
+  /// import — reporting a benign duplicate to the user as a stalled pipeline.
+  /// The second lookup turns that into an ordinary `suppressedAsExactDuplicate`.
+  ///
+  /// **KHA-133 (F): both keys are now actually pre-checked.** The sentence
+  /// above has been true of the *schema* since ADR-017 D1 and false of *this
+  /// method* until now — only `content_hmac` was ever looked up, so the
+  /// `sms_provider_id` half was enforced solely by the constraint throwing.
+  /// That gap is harmless while the two keys agree, and stops being harmless
+  /// the moment a rule pack changes a bank's `redact[]`: see
+  /// [RawMessageDao.findBySmsProviderId] for the full failure chain (a benign
+  /// duplicate reported to the user as a stalled pipeline). The re-scan this
+  /// pre-check was written for walks ground the app has already swept, so it
+  /// is the path most likely to meet it.
   Future<IngestionRunResult> _withDedupGuard({
     required String contentHmac,
     required RawSmsRecord record,
@@ -570,7 +597,13 @@ final class IngestionPipeline {
     required bool advanceWatermark,
     required Future<IngestionRunResult> Function() onNew,
   }) async {
-    final existing = await rawMessageDao.findByContentHmac(contentHmac);
+    // Ordered cheapest-likeliest first, and short-circuiting: in the ordinary
+    // case (a genuinely new message) both queries miss and cost one indexed
+    // lookup each; in the re-scan case the first usually hits and the second
+    // is never issued.
+    final existing =
+        await rawMessageDao.findByContentHmac(contentHmac) ??
+        await rawMessageDao.findBySmsProviderId(record.providerId.toString());
     if (existing != null) {
       // "Suppress silently, but write a diagnostic event recording the
       // suppression" (ADR-017 D1). Silent to the *user*; never silent to the

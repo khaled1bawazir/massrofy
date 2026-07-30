@@ -1,0 +1,9 @@
+﻿# flutter test --exclude-tags=release_mode_guard — QA branch
+# (b93250f + test/qa/ probes only; zero lib/assets diff, verified by tree hash)
+# Compact output trimmed to its tail. 1591 = 1490 baseline + 101 QA probes.
+
+1591 ~3: C:/Users/aasb2/OneDrive/Desktop/Massrofy/.claude/worktrees/agent-a004a
+1591 ~3: 3 skipped tests.                                                      
+1591 ~3: All other tests passed!                                               
+
+EXIT=0

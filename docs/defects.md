@@ -14,6 +14,63 @@ KHA-64 first half), PR #11, head `51bb730`. See `docs/test-plan.md` §1a, §6a a
 
 ## Summary
 
+### Pass 10 (PR #43, KHA-128 — the sender gate for all seven of the human's real banks)
+
+**Nothing found that blocks merge. No new defect issues filed. Verdict:
+`QA: PASS 43`.** Head `b93250f`. Data + tests only, **zero `lib/` diff** (tree
+hash `f0b8531c…` identical on both branches).
+
+This is the first fix in the build that addresses a symptom the human observed on
+their own phone — zero ingestion from all seven of their banks — so the sender
+strings were verified as *values*, one by one, rather than as "a test exists". All
+three engineer-claimed gates were re-measured on `b93250f` (format 240/0,
+analyze clean, **1490 pass / 3 skip / 0 fail**) and all reproduced exactly.
+
+**101 QA probes** (`test/qa/`, `1591 / 3 / 0` with them added) verified, by a
+*different* oracle than the PR's own tests — reading `bankId` back out of the
+production `parse()` outcome instead of re-walking `pack.banks`:
+
+- all seven confirmed senders match, including under alternating case and
+  provider-supplied padding;
+- all seven pre-existing guessed alternatives still match (**additive**, and
+  mutation M3 proves a silent narrowing cannot pass CI);
+- 33 lookalikes rejected, including QA's own additions `STCPay`, `SAB Bank`,
+  `SABB Bank`, `AlRajhi Capital`, `nera bank` — **`SABB` is a different real
+  bank**, so a match there would misattribute one bank's messages to another;
+- 28 sender-spoofing attacks rejected with no exception: newline anchor bypass,
+  regex metacharacters, SQL/command/JNDI injection, zero-width and bidi controls,
+  Arabic-Indic homoglyph digits, embedded NUL;
+- the "matched sender, no template" path proven end to end for all five new banks
+  through the real pipeline and a real DB with QA's own fabricated bodies — and
+  with a **business oracle on the retained text**: the stored `sanitizedBody`
+  must still contain the exact amount literal (`3,000.00`, `1,204.35`), because a
+  review row whose amount was redacted away would satisfy `isNotNull` and still
+  make AC-A6.5's argument false;
+- a re-ingested duplicate does not grow the review queue, on **both** D1 keys —
+  previously proven only for the parsed path.
+
+**Six mutations were run because reading a test is not evidence it fires**
+(`docs/evidence/kha-128/mutation-log.md`). The one this pass was specifically
+asked about: emptying `bank-aljazira.messageRules` makes the PR's new corpus
+assertion fail with `Expected: contains all of Set:['bank-aljazira','d360'] /
+Actual: Set:['d360']`, while the same break run against only the three *filtered*
+whole-pack assertions reports **"All tests passed!"** — so the escape hatch the
+new assertion closes is real, and the engineer's rationale is now demonstrated
+rather than argued. The corpus-test change is a genuine fix, not a suppression.
+
+**Not run: any device or emulator** (`adb devices` empty, `flutter emulators`
+none, Android-only app). No coverage claimed for release-mode on-device
+behaviour; that stays KHA-127 / KHA-7 / risk R-12. QA added the one runtime link
+nothing covered — loading the pack through the production
+`rootBundle.loadString(bundledRulePackAsset)` path, which mutation M5 proves is
+load-bearing (every other rule-pack test uses a plain `File` read and would keep
+passing if the `pubspec.yaml` asset entry were dropped, while the shipped app
+threw on first ingestion).
+
+Two low-severity observations recorded for audit, neither a merge blocker:
+**O-QA-12** (residual variant risk on the three single-token senders) and
+**O-QA-13** (no Arabic-script sender pattern for any bank).
+
 ### Pass 9 (PR #41, P5a — home dashboard, transaction list, bank/instrument screens, and the three P5-entry-gate High defects)
 
 **Nothing found that blocks merge. Verdict: `QA: PASS 41`.** Head `d9fac9e`.
@@ -1617,6 +1674,137 @@ naming that dependency would close it.
   merchant, an edited amount and a user-cleared field all survive two full
   re-scans, and no second transaction row is written. Recommend the engineer
   move it to `test/features/ingestion/` alongside its sibling.
+
+---
+
+## Observations from the pass-11 probe suite (PR #46 / KHA-133 — recorded for audit, not defects)
+
+Neither blocks the merge. Neither touches dedup, cursor movement or money
+correctness — the three properties this PR had to get right, all of which held
+under attack (see `docs/test-plan.md` §7i).
+
+### O-QA-42 → **KHA-141** — `RawMessageDao.insert`'s doc comment states the exact opposite of the premise item (F) was built on, in the same file, ~150 lines above the fix
+
+**Severity: Low** (documentation, but load-bearing documentation).
+
+**Observed.** `lib/data/dao/raw_message_dao.dart`, the doc on `insert`:
+
+> `[contentHmac]` is the D1-exact dedup key (ADR-017) — computed by the caller
+> … over the *normalised* body, sender, and timestamp, **never over the redacted
+> display text, so dedup semantics don't shift if a redaction rule changes
+> later.**
+
+**Expected.** The sentence to be true, or corrected.
+
+**Actual.** It is false, and QA proved it by execution rather than by reading:
+probe **P1** computes the same message's hmac under the shipped pack and under a
+pack whose `bank-aljazira` rules carry `redact: ["EXTRA MART|TAMIMI MARKETS"]`
+and asserts the two differ. They do. The chain is
+`_processOne` → `SmsSanitizer.sanitize(record.body, extraRedactPatterns: parser.redactionPatternsForSender(...))`
+→ `SmsTextNormalizer.normalize(sanitized.value)` → `ContentHmac.compute(normalizedBody: normalized, …)`.
+The normalised text *is* the redacted text, so the hmac shifts exactly when a
+`redact[]` changes — which is precisely ADR-006 Q1's finding and the entire
+reason `findBySmsProviderId` was added.
+
+**Why it is worth recording rather than shrugging at.** This false sentence is
+the most likely explanation for why the hole stayed invisible until the architect
+went looking, and it now sits ~150 lines above `findBySmsProviderId`, whose own
+doc says the opposite correctly and at length. A future maintainer who reads
+`insert`'s doc first has been told, in the codebase's own voice, that the new
+pre-check is guarding against something that cannot happen — which is an argument
+for deleting it.
+
+**Not introduced by this PR** (it predates it), but this PR is the one that made
+it contradictory and is editing that file already. Suggested: delete the clause
+from `and never over the redacted display text` onward, or replace it with a
+pointer to `findBySmsProviderId`. Owner: mobile-engineer. No test change needed —
+P1 already pins the real behaviour.
+
+### O-QA-43 → **KHA-142** — a failure in the audit append discards a result for writes that already committed, which is the one direction item (E) says must not happen
+
+**Severity: Low** (narrow trigger, no data loss, no double-count).
+
+**Steps to reproduce (by inspection; not reproduced live because the trigger
+needs an induced DAO failure).** `RescanCoordinator._run`:
+
+1. `_walk(...)` runs and commits each recovered message in its own DB
+   transaction. Say 12 transactions are now in the ledger.
+2. `await _recordUserAction(...)` is called **after** the walk.
+3. If that append throws (app locks mid-run and the session closes, disk full,
+   chain contention), the exception propagates out of `recheckAllBanks()`.
+4. `RescanController.run`'s `catch` sets `RescanFailed(unexpectedError)`.
+
+**Expected.** The user is told what the re-scan did — item (E): *"a re-scan makes
+weeks-old transactions appear at once, and retroactive numbers with no stated
+cause are worse than no numbers."*
+
+**Actual.** The user is shown "something went wrong", while 12 weeks-old
+transactions have silently appeared in their ledger and no audit entry explains
+them. That is the exact failure mode item (E) exists to prevent, reached through
+the error path rather than the happy one.
+
+**Mitigating, and why this is Low not Medium.** Nothing is lost or double-counted
+— the writes are correct and a subsequent re-scan is still idempotent. The
+ordering itself is deliberate and defensible: the file's comment explains that
+writing the audit entry *after* the walk keeps the recorded counts true, and that
+"a crash mid-walk therefore records nothing, which is the right direction to be
+wrong in." QA agrees with that reasoning for a crash *during* the walk; the gap
+is only the narrow window where the walk fully succeeded and just the audit
+append failed. A cheap improvement would be to catch around
+`_recordUserAction` and still return the `RescanResult` (with the audit failure
+surfaced separately), so the user is never left with unexplained retroactive
+numbers. Owner: mobile-engineer. Suggested for KHA-129/US-A6, which revisits this
+screen anyway.
+
+---
+
+## Observations from the pass-10 probe suite (PR #43 / KHA-128 — recorded for audit, not defects)
+
+Neither is a merge blocker and neither was filed as a new Linear issue: both are
+already-owned residual risk of the same class the PR fixes, and both belong to
+**KHA-129 (US-A6)**, which exists precisely to make sender drift the user's own
+30-second fix instead of an APK release. Recorded here so they are traceable and
+so KHA-129's scoping can cite them.
+
+### O-QA-12 — three of the seven senders are bare acronyms, with no `…\s*Bank` alternative, so a per-message-type sender variant would still be lost silently
+
+**Observed.** The PR widens *within a brand's own words* wherever the confirmed
+string has more than one token: `^Jazira\s*Bank$`, `^D360\s*Bank$`,
+`^STC\s*Bank$`, `^Al\s*Rajhi\s*Bank$`. Three banks' confirmed senders are single
+tokens and so have nothing to widen: `^SAB$`, `^SAIB$`, `^nera$`. QA confirmed
+`SAB Bank`, `SAIB Bank` and `nera bank` all match **no** bank.
+
+**Why that is correct as shipped, and still worth recording.** The three strings
+were read off the human's phone, so they are right for the message that was
+looked at. But a bank can use different sender ids for different message types
+(marketing from one, transaction alerts from another), and the confirmation
+covered "what the phone shows", not "every sender id this bank ever uses". If any
+of the three ever delivers as `SAB Bank`, the failure is **silent and identical
+to KHA-128's** — NFR-P4 keeps no trace. Widening speculatively would be exactly
+the guessing this PR exists to stop, so **the fix is not to widen the pack** —
+it is KHA-129, plus **AC-A6.11**'s standing unrecognized-sender count in the
+diagnostics panel, which is what makes month-eight drift discoverable at all.
+
+**Severity: low.** Not present today; no action on this PR.
+
+### O-QA-13 — no bank has an Arabic-script `senderPatterns` entry, though every bank has an Arabic `displayName`
+
+**Observed.** All seven banks carry an Arabic `displayName` (e.g.
+`بنك الجزيرة`, `مصرف الراجحي`), and the parser compiles patterns with
+`unicode: true`, but every `senderPatterns` entry is Latin-script. QA confirmed
+`D٣٦٠ Bank` (Arabic-Indic digits) matches nothing.
+
+**Why this is fine for the reporting user and still worth a line.** Their own
+device showed Latin strings for all seven, which is the actual evidence, and the
+app's primary locale being Arabic does not imply the carrier's sender id is. But
+an Arabic-locale device on a different carrier plausibly could show an
+Arabic-script sender id, and the pack's `_readme` is careful to note the Arabic
+display names for `nera` and `stc bank` are transliterations rather than confirmed
+strings — the same "not verified" caveat applies one field over, to any
+Arabic-script sender id nobody has seen.
+
+**Severity: low.** Same owner and same structural answer as O-QA-12 (KHA-129).
+No action on this PR.
 
 ---
 

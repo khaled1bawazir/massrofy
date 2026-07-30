@@ -40,6 +40,15 @@ final class ThrowingParser implements MessageParser {
   List<RegExp> redactionPatternsForSender(String sender) =>
       _inner.redactionPatternsForSender(sender);
 
+  /// Delegated, deliberately **not** made to throw. This fake simulates a
+  /// defect while *parsing a body*; sender resolution is body-free and is what
+  /// the re-scan uses to decide which messages to hand to the pipeline at all.
+  /// Making it throw here would mean the throwing message never reached the
+  /// pipeline, and the `failedWithError` invariants these tests exist to prove
+  /// would silently stop being exercised.
+  @override
+  String? bankIdForSender(String sender) => _inner.bankIdForSender(sender);
+
   @override
   ParseOutcome parse({
     required SanitizedSmsText sanitized,

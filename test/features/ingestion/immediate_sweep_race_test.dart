@@ -34,7 +34,12 @@
 ///  - `raw_message.sms_provider_id` is `UNIQUE` — the same inbox row cannot be
 ///    stored twice (ADR-017 D1, and AC-A3.3's re-scan safety);
 ///  - `raw_message.content_hmac` is `UNIQUE` — identical content cannot be
-///    stored twice even under a *new* provider id (AC-A5.1, carrier redelivery);
+///    stored twice even under a *new* provider id (AC-A5.1, carrier redelivery).
+///    **Only true since KHA-137**: this file's original redelivery case held
+///    `receivedAt` fixed and varied only the provider id, so it passed against a
+///    digest that folded the delivery instant in and would have missed every
+///    real redelivery. The case below now varies the instant, which is the only
+///    shape that reproduces the field failure QA found on a device;
 ///  - each message is one `database.transaction(...)` covering its raw-message
 ///    row, its transaction row, its audit entry **and** the watermark advance,
 ///    so there is no window in which one exists without the others;
@@ -116,13 +121,21 @@ void main() {
     contentHmacKey: _testChainKey,
   );
 
-  RawSmsRecord record({int providerId = 1, String body = _posPurchaseBody}) =>
-      RawSmsRecord(
-        providerId: providerId,
-        address: 'BAJ',
-        body: body,
-        receivedAt: DateTime.utc(2026, 7, 15, 10, 20),
-      );
+  /// The base delivery instant. [record] offsets from this rather than
+  /// hard-coding it, so a *redelivery* can be expressed the only way a real
+  /// one occurs — same text, later instant (KHA-137).
+  final DateTime deliveredAt = DateTime.utc(2026, 7, 15, 10, 20);
+
+  RawSmsRecord record({
+    int providerId = 1,
+    String body = _posPurchaseBody,
+    Duration delay = Duration.zero,
+  }) => RawSmsRecord(
+    providerId: providerId,
+    address: 'BAJ',
+    body: body,
+    receivedAt: deliveredAt.add(delay),
+  );
 
   Future<int> transactionCount() async => (await transactionDao.all())
       .where((TransactionRow r) => !r.isDeleted)
@@ -208,20 +221,37 @@ void main() {
         'transaction (AC-A5.1, product-owner retest step 3)', () async {
       // A carrier redelivery arrives as a *new* inbox row with identical
       // content, so the provider-id UNIQUE constraint cannot help — only the
-      // content HMAC can. Same body, new provider id, past the watermark.
+      // content HMAC can.
+      //
+      // **KHA-137.** This test used to build the redelivery with `record()` and
+      // `record(providerId: 2)` — same `receivedAt`, varying only the id. That
+      // is the one shape a real redelivery cannot take: the carrier re-sends at
+      // a *later* instant, which is precisely what defeated the old
+      // timestamped `content_hmac` on a device. So the second row here is
+      // **43 seconds late**, matching QA's measured device repro (43,287 ms
+      // between the two inbox rows), and it is that gap — not the new id —
+      // that makes this test able to fail.
+      const Duration carrierRetryGap = Duration(seconds: 43);
+
       final FakeSmsSource first = FakeSmsSource(<RawSmsRecord>[record()]);
       await pipeline(first).runIncremental();
       expect(await transactionCount(), 1);
 
       final FakeSmsSource redelivered = FakeSmsSource(<RawSmsRecord>[
         record(),
-        record(providerId: 2),
+        record(providerId: 2, delay: carrierRetryGap),
       ]);
       final IngestionRunResult second = await pipeline(
         redelivered,
       ).runIncremental();
 
-      expect(second.examined, 1, reason: 'only the new provider row is read');
+      expect(
+        second.examined,
+        1,
+        reason:
+            'only the new provider row is past the watermark — and it IS past '
+            'it, because it arrived later; that is the situation under test',
+      );
       expect(second.suppressedAsExactDuplicate, 1);
       expect(second.transactionsWritten, 0);
       expect(
