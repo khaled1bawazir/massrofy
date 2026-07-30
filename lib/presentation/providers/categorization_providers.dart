@@ -56,6 +56,11 @@ import '../../features/ingestion/review_queue.dart';
 import '../../features/ledger/ledger_transaction.dart';
 import '../screens/category_management_screen.dart' show CategoryListItem;
 import 'app_providers.dart';
+// KHA-144: Home's review count is composed from the same providers S-18's tabs
+// render, so the two cannot disagree. Dart permits these cyclic library imports
+// and the three provider files already reference each other both ways.
+import 'ingestion_providers.dart' show reviewQueueProvider;
+import 'ledger_providers.dart' show ReviewInboxView, reviewInboxProvider;
 
 /// The categorization DAOs and service for the current unlocked session, with
 /// the default categories already seeded.
@@ -382,104 +387,223 @@ CategoryAssignment _assignment({
   reviewReason: reviewReason,
 );
 
-/// **AC-C4.2 — the review count, visible from the main screen.**
+/// Every **live transaction row**, for counting only (KHA-144).
 ///
-/// KHA-32's done-check states how it must be computed:
+/// `watchLive()` verbatim — deliberately the *same* query the ledger and
+/// `flaggedTransactionsProvider` read from, so Home's figure cannot describe a
+/// narrower set of rows than the lists it claims to summarise. That divergence
+/// is precisely what KHA-144 was.
 ///
-/// > *"The review count on the home screen equals the number of flagged plus
-/// > uncategorized items, verified against the data layer."*
-///
-/// So it is derived from the ledger on every emission rather than accumulated:
-/// a counter that is incremented and decremented drifts, and this one is
-/// checkable against the rows it claims to describe.
-///
-/// Deliberately a **union, not a sum**: a transaction that is both
-/// uncategorized *and* flagged is one thing needing review, and adding the two
-/// figures would tell the user there are twice as many problems as there are.
-final StreamProvider<ReviewCounts> reviewCountsProvider =
-    StreamProvider<ReviewCounts>((Ref ref) async* {
+/// Raw rows rather than domain objects because the three fields the count needs
+/// (`needsReview`, `categoryId`, `id`) all live on the row, and mapping several
+/// hundred rows into `LedgerTransaction`s just to count them would repeat work
+/// `ledgerViewProvider` already does for the screen beside it.
+final StreamProvider<List<TransactionRow>> reviewCountRowsProvider =
+    StreamProvider<List<TransactionRow>>((Ref ref) async* {
       final UnlockedDatabaseSession? session = await ref.watch(
         unlockedDatabaseSessionProvider.future,
       );
       if (session == null) {
-        yield ReviewCounts.empty;
+        // Locked: ADR-005 makes the lock cryptographic, so there is no database
+        // and "nothing" is the truthful answer rather than a stale cache.
+        yield const <TransactionRow>[];
         return;
       }
-      // **One stream, held for this provider's whole lifetime.**
-      //
-      // An earlier draft also folded in the unparsed-message queue, by reading
-      // `reviewQueueProvider`. Two problems, and the second is the one that
-      // decided it:
-      //
-      //  1. KHA-32's done-check defines this number precisely — *"the number of
-      //     flagged plus uncategorized items"* — and says nothing about
-      //     unparsed messages. Adding them would make the figure unverifiable
-      //     against the criterion it exists to satisfy. S-18's tabs already
-      //     carry their own counts, which is where that question belongs.
-      //  2. Combining a second Drift stream means **cancelling** one, and a
-      //     cancelled Drift query stream schedules a zero-duration cleanup
-      //     timer (`StreamQueryStore.markAsClosed`). Held over into a disposed
-      //     widget tree that is a *"Timer is still pending"* failure; in the
-      //     app it is a subscription churning on every emission. One
-      //     subscription, opened once and closed when the provider is, has
-      //     neither problem.
-      await for (final List<TransactionRow> rows
-          in session.transactionDao.watchLive()) {
-        yield ReviewCounts.fromRows(rows);
+      // One subscription, opened once and closed when the provider is disposed
+      // — see [reviewCountsProvider] for why that property matters here.
+      yield* session.transactionDao.watchLive();
+    });
+
+/// **AC-C4.2 — the count of items needing review, visible from the main
+/// screen.**
+///
+/// ## KHA-144 — what this used to count, and why it was wrong
+///
+/// Until this fix the figure was computed from the **transactions table
+/// alone**. On a real device that produced the worst possible outcome: 833
+/// genuine bank messages sat in `More → Organising → Needs review → Not
+/// understood`, correctly retained per AC-A4.1/NFR-A7 — and Home said *"All
+/// caught up"*, with the card not even tappable, because none of those 833
+/// rows is a transaction. The app was doing exactly the right thing and
+/// reporting that it had nothing to do.
+///
+/// The old code documented that exclusion as deliberate, citing KHA-32's
+/// done-check (*"flagged plus uncategorized items"*). That reasoning read one
+/// issue's done-check as if it were the acceptance criterion. Reading the ACs
+/// themselves, together, gives the opposite answer:
+///
+///  - **AC-C4.2** — *"the count of **items needing review** is visible from the
+///    main screen."* Not "the count of flagged transactions". The Needs Review
+///    inbox (S-18) is what "items needing review" denotes.
+///  - **AC-A4.1** — an unparsed financial SMS *"appears in a **Needs review** /
+///    unparsed list"*. It is an item in that queue by the PRD's own words.
+///  - **AC-C1.2** — an uncategorized transaction is *"counted in the review
+///    queue"*.
+///  - **AC-B11.2** — an undecidable transfer is *"**flagged for review**"*.
+///  - **design.md Flow C** settles it independently: *"S-08 (tap review count)
+///    → S-18 [**Unparsed** tab] → S-19"*. Home's count is the entry point to
+///    the unparsed tab, so a count that excludes unparsed items makes the
+///    product's own documented flow unreachable — which is exactly what the
+///    untappable "All caught up" card was.
+///
+/// So the figure is now the whole inbox: S-18's three tabs, plus AC-C1.2's
+/// uncategorized rows.
+///
+/// ## Composed from three providers rather than one merged stream
+///
+/// The old comment gave a real reason not to `await for` over two Drift
+/// streams in one provider body: combining them means **cancelling** one, and a
+/// cancelled Drift query stream schedules a zero-duration cleanup timer
+/// (`StreamQueryStore.markAsClosed`) that surfaces as *"A Timer is still
+/// pending"* in a widget test and as subscription churn on a device.
+///
+/// That objection is answered rather than ignored. Each source stays in **its
+/// own** provider, so Riverpod owns exactly one subscription per source for
+/// that provider's lifetime and nothing is ever cancelled mid-flight; this
+/// provider is a plain (synchronous) `Provider` that only *combines the
+/// `AsyncValue`s they already expose*. It opens no stream of its own.
+///
+/// Reusing `reviewQueueProvider` and `reviewInboxProvider` — the very providers
+/// `NeedsReviewHost` renders the tabs from — is the other half of the fix: the
+/// count and the queue are now structurally incapable of disagreeing, because
+/// they are the same reads.
+final Provider<AsyncValue<ReviewCounts>> reviewCountsProvider =
+    Provider<AsyncValue<ReviewCounts>>((Ref ref) {
+      final AsyncValue<List<TransactionRow>> rows = ref.watch(
+        reviewCountRowsProvider,
+      );
+      // S-18's "Not understood" tab (AC-A4.1) — raw messages, not transactions.
+      final AsyncValue<List<ReviewQueueItem>> unparsed = ref.watch(
+        reviewQueueProvider,
+      );
+      // S-18's "Transfers" tab (AC-B11.2).
+      final AsyncValue<ReviewInboxView> inbox = ref.watch(reviewInboxProvider);
+
+      // design.md §3.4's Error state, ahead of everything: a failed read must
+      // never render as a reassuring zero. `ReviewCountCard` turns this into an
+      // honest message, and "All caught up" is the one thing it must not say
+      // when it does not know.
+      for (final AsyncValue<Object?> part in <AsyncValue<Object?>>[
+        rows,
+        unparsed,
+        inbox,
+      ]) {
+        if (part.hasError) {
+          return AsyncValue<ReviewCounts>.error(
+            part.error!,
+            part.stackTrace ?? StackTrace.empty,
+          );
+        }
       }
+
+      // `.value` is non-null from the first emission onward and stays non-null
+      // across a refresh, so a re-read shows the previous figure rather than
+      // flickering back to a spinner.
+      final List<TransactionRow>? liveRows = rows.value;
+      final List<ReviewQueueItem>? queue = unparsed.value;
+      final ReviewInboxView? view = inbox.value;
+      if (liveRows == null || queue == null || view == null) {
+        return const AsyncValue<ReviewCounts>.loading();
+      }
+
+      return AsyncValue<ReviewCounts>.data(
+        ReviewCounts.from(
+          rows: liveRows,
+          transferTransactionIds: <int>{
+            for (final TransferReviewItem item in view.transfers)
+              item.transactionId,
+          },
+          unparsedMessages: queue.length,
+        ),
+      );
     });
 
 /// The figures behind AC-C4.2's badge, kept apart rather than pre-summed so a
 /// screen can explain what the number is made of.
 final class ReviewCounts {
-  /// Rows carrying `needs_review` — duplicates, transfers, low-confidence
-  /// categorizations.
+  /// Rows carrying `needs_review` — duplicates, low-confidence
+  /// categorizations. S-18's "Low confidence" tab.
   final int flagged;
 
   /// Rows with no category (AC-C1.2's *"assigned Uncategorized and counted in
   /// the review queue"*).
   final int uncategorized;
 
-  /// The **union** of the two — what the badge shows, and KHA-32's done-check
-  /// figure verbatim. See [reviewCountsProvider] for why this is not
-  /// `flagged + uncategorized`.
+  /// Rows with an open "is this account yours?" question (AC-B11.2). S-18's
+  /// "Transfers" tab.
+  ///
+  /// Derived by the internal-transfer detector rather than stored on the row,
+  /// which is why it arrives as a set of ids rather than a column.
+  final int transfers;
+
+  /// Unparsed financial messages in the raw-message queue (AC-A4.1). S-18's
+  /// "Not understood" tab — **833 of these on the device that raised KHA-144.**
+  final int unparsed;
+
+  /// The **union** of [flagged], [uncategorized] and [transfers] — one *row*
+  /// counted once however many questions it raises.
+  ///
+  /// A union rather than a sum because a transaction that is uncategorized
+  /// *and* flagged is one thing to look at, and adding the figures would tell
+  /// the user there are twice as many problems as there are.
   final int needingAttention;
 
   const ReviewCounts({
     required this.flagged,
     required this.uncategorized,
     required this.needingAttention,
+    this.transfers = 0,
+    this.unparsed = 0,
   });
 
-  /// The AC-C4.2 computation itself, as a pure function over rows.
+  /// The AC-C4.2 computation itself, as a pure function over its inputs.
   ///
-  /// Separated from the provider so a test can assert the arithmetic against a
-  /// list it built by hand — KHA-32's done-check says the count must be
+  /// Separated from the provider so a test can assert the arithmetic against
+  /// values it built by hand — KHA-32's done-check says the count must be
   /// *"verified against the data layer"*, and a figure that can only be
   /// observed through a stream is one nobody verifies.
-  factory ReviewCounts.fromRows(List<TransactionRow> rows) {
+  factory ReviewCounts.from({
+    required List<TransactionRow> rows,
+    Set<int> transferTransactionIds = const <int>{},
+    int unparsedMessages = 0,
+  }) {
     int flagged = 0;
     int uncategorized = 0;
+    int transfers = 0;
     int needingAttention = 0;
     for (final TransactionRow row in rows) {
       final bool isFlagged = row.needsReview;
       final bool isUncategorized = row.categoryId == null;
+      final bool hasTransferQuestion = transferTransactionIds.contains(row.id);
       if (isFlagged) {
         flagged++;
       }
       if (isUncategorized) {
         uncategorized++;
       }
-      if (isFlagged || isUncategorized) {
+      if (hasTransferQuestion) {
+        transfers++;
+      }
+      if (isFlagged || isUncategorized || hasTransferQuestion) {
         needingAttention++;
       }
     }
     return ReviewCounts(
       flagged: flagged,
       uncategorized: uncategorized,
+      transfers: transfers,
+      unparsed: unparsedMessages,
       needingAttention: needingAttention,
     );
   }
+
+  /// The transaction-only half, for callers that have rows and nothing else.
+  ///
+  /// Kept because several tests and the QA probe suite assert the arithmetic
+  /// this way. It is **not** the figure Home shows — [total] adds the unparsed
+  /// queue on top — so nothing should treat it as AC-C4.2's number.
+  factory ReviewCounts.fromRows(List<TransactionRow> rows) =>
+      ReviewCounts.from(rows: rows);
 
   static const ReviewCounts empty = ReviewCounts(
     flagged: 0,
@@ -488,10 +612,18 @@ final class ReviewCounts {
   );
 
   /// The single figure S-08's `ReviewCountCard` renders.
-  int get total => needingAttention;
+  ///
+  /// A **sum**, not a union, and that is safe rather than sloppy: an unparsed
+  /// message is by definition one the parser could not turn into a transaction,
+  /// so it has no row in the transactions table and cannot already be inside
+  /// [needingAttention]. The two sets are disjoint by construction.
+  int get total => needingAttention + unparsed;
 
   @override
-  String toString() => 'ReviewCounts($total)';
+  String toString() =>
+      'ReviewCounts(total: $total, unparsed: $unparsed, '
+      'flagged: $flagged, uncategorized: $uncategorized, '
+      'transfers: $transfers)';
 }
 
 /// **KHA-31 — "why is this categorized this way?", assembled.**

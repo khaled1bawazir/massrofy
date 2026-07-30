@@ -1814,11 +1814,11 @@ abstract class AppLocalizations {
   /// **'{count, plural, one{1 item needs review} other{{count} items need review}}'**
   String reviewCountNeedsReview(int count);
 
-  /// What the badge number is made of. AC-C1.2 counts uncategorized rows in this queue, and a user who did not know that would be looking for that many PROBLEMS. Deliberately does NOT include unparsed messages: KHA-32's done-check defines the badge as flagged plus uncategorized, and S-18's own tabs carry the message count. The two figures overlap (a row can be both flagged and uncategorized), so they do not add up to the headline — which is why the headline is a union, not a sum.
+  /// KHA-144. What the badge number is made of, and deliberately an EXACT partition of it: unparsed + transactions == the headline, with no overlap (an unparsed message has no transaction row). The previous wording split the transaction half into uncategorized/flagged, which overlapped and therefore never added up to the headline, and omitted the unparsed queue entirely — the defect KHA-144 reports. 'Not understood' is the literal S-18 tab name, so the breakdown tells the user which tab to open.
   ///
   /// In en, this message translates to:
-  /// **'{uncategorized} uncategorized · {flagged} flagged'**
-  String reviewCountBreakdown(int uncategorized, int flagged);
+  /// **'{unparsed} not understood · {transactions} transactions to check'**
+  String reviewCountBreakdown(int unparsed, int transactions);
 
   /// design.md §3.4 Error state. A failed read must never render as a reassuring zero.
   ///

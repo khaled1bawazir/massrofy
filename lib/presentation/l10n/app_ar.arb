@@ -314,7 +314,7 @@
   "reviewInboxUnavailable": "تعذّر تحميل قائمة المراجعة. لم يتغيّر أي شيء.",
   "reviewCountAllClear": "كل شيء مُراجَع",
   "reviewCountNeedsReview": "{count, plural, one{عنصر واحد يحتاج مراجعة} two{عنصران يحتاجان مراجعة} few{{count} عناصر تحتاج مراجعة} many{{count} عنصراً يحتاج مراجعة} other{{count} عنصر يحتاج مراجعة}}",
-  "reviewCountBreakdown": "{uncategorized} غير مصنّفة · {flagged} مُعلَّمة",
+  "reviewCountBreakdown": "{unparsed} غير مفهومة · {transactions} معاملة للمراجعة",
   "reviewCountUnavailable": "عدد عناصر المراجعة غير متاح حالياً",
 
   "learnedRulesTitle": "القواعد المتعلمة",

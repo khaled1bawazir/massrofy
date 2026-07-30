@@ -1085,8 +1085,8 @@ class AppLocalizationsAr extends AppLocalizations {
   }
 
   @override
-  String reviewCountBreakdown(int uncategorized, int flagged) {
-    return '$uncategorized غير مصنّفة · $flagged مُعلَّمة';
+  String reviewCountBreakdown(int unparsed, int transactions) {
+    return '$unparsed غير مفهومة · $transactions معاملة للمراجعة';
   }
 
   @override
