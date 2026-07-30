@@ -43,6 +43,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:massrofy/app.dart';
 import 'package:massrofy/core/money/money.dart';
 import 'package:massrofy/core/money/sign_convention.dart';
+import 'package:massrofy/core/time/clock.dart';
 import 'package:massrofy/data/dao/app_settings_dao.dart';
 import 'package:massrofy/data/dao/audit_log_dao.dart';
 import 'package:massrofy/data/dao/raw_message_dao.dart';
@@ -732,7 +733,25 @@ void main() {
     late FakeSmsPermissionService permissions;
     late ProviderContainer container;
 
+    /// The instant this group pretends "now" is (KHA-158).
+    ///
+    /// **Mid-July 2026, and it must stay in the same Riyadh calendar month as
+    /// [purchase]'s `receivedAt` dates** (11–13 July) — that is the entire
+    /// contract between this constant and the fixture. If you re-date the
+    /// fixtures, re-date this too.
+    ///
+    /// Chosen *after* the three messages rather than before them so the
+    /// scenario is also physically coherent: a device imports messages that
+    /// have already arrived. `readRange` currently applies only a lower bound,
+    /// but if an upper bound of "now" is ever added, this stays correct
+    /// instead of silently importing nothing.
+    final DateTime probeBNow = DateTime.utc(2026, 7, 15, 12);
+
     /// A real D360 purchase, in the format the bundled pack parses.
+    ///
+    /// Dated inside [probeBNow]'s calendar month on purpose — the historical
+    /// importer only reads from the start of the current Riyadh month
+    /// (AC-A3.1), so a fixture outside it is invisible to this probe.
     RawSmsRecord purchase(int n) => RawSmsRecord(
       providerId: n,
       address: 'D360',
@@ -776,6 +795,22 @@ void main() {
           activeRulePacksProvider.overrideWith(
             (Ref ref) async => <RulePack>[loadBundledRulePack()],
           ),
+          // **KHA-158: the probe must not depend on today's date.**
+          //
+          // The importer bounds its read at
+          // `RiyadhCalendar.startOfCurrentMonthUtc(clock.nowUtc())`
+          // (AC-A3.1). With the real `SystemClock` that bound moves every
+          // month, while the fixtures above are hard-dated July 2026 — so from
+          // 1 August 2026 the fixtures fall *below* the window, the importer
+          // reads nothing, and B1/B3 fail with `Actual: []` for a reason that
+          // has nothing to do with what they test.
+          //
+          // For readers new to Riverpod: `overrideWithValue` swaps what a
+          // provider hands out, for this container only. Every other override
+          // in this list replaces a *device* dependency (the database, SMS
+          // permission, the inbox, the asset bundle); this one replaces the
+          // last ambient dependency the probe had left — the wall clock.
+          clockProvider.overrideWithValue(FixedClock(probeBNow)),
         ],
       );
     });
