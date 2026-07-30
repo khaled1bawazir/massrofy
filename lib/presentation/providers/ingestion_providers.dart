@@ -42,6 +42,7 @@ import '../../features/ingestion/sms_permission_service.dart';
 import '../../features/ingestion/sms_source.dart';
 import '../../features/ledger/ledger_entity_resolver.dart';
 import '../../features/parsing/message_parser.dart';
+import '../../features/parsing/partial_extraction.dart';
 import '../../features/parsing/rule_pack.dart';
 import '../../features/parsing/rule_pack_loader.dart';
 import '../../features/parsing/rule_pack_message_parser.dart';
@@ -330,6 +331,15 @@ final StreamProvider<List<ReviewQueueItem>> reviewQueueProvider =
               bankId: row.bankId as String?,
               unparsedReason: row.unparsedReason as String?,
               unparsedRuleId: row.unparsedRuleId as String?,
+              // KHA-146. `tryDecode` returns null for anything unreadable —
+              // an older row written before schema v8, a row from a future
+              // encoding, or a corrupted one — so a single bad row degrades
+              // that one message to a blank form instead of throwing inside a
+              // stream and emptying the whole review queue (NFR-A7 again: the
+              // queue must survive its own contents).
+              partialExtraction: PartialExtraction.tryDecode(
+                row.partialExtraction as String?,
+              ),
             ),
         ],
       );

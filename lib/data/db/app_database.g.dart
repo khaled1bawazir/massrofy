@@ -779,6 +779,18 @@ class $RawMessagesTable extends RawMessages
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _partialExtractionMeta = const VerificationMeta(
+    'partialExtraction',
+  );
+  @override
+  late final GeneratedColumn<String> partialExtraction =
+      GeneratedColumn<String>(
+        'partial_extraction',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -805,6 +817,7 @@ class $RawMessagesTable extends RawMessages
     dismissedAsNotTransaction,
     unparsedReason,
     unparsedRuleId,
+    partialExtraction,
     createdAt,
   ];
   @override
@@ -920,6 +933,15 @@ class $RawMessagesTable extends RawMessages
         ),
       );
     }
+    if (data.containsKey('partial_extraction')) {
+      context.handle(
+        _partialExtractionMeta,
+        partialExtraction.isAcceptableOrUnknown(
+          data['partial_extraction']!,
+          _partialExtractionMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -983,6 +1005,10 @@ class $RawMessagesTable extends RawMessages
         DriftSqlType.string,
         data['${effectivePrefix}unparsed_rule_id'],
       ),
+      partialExtraction: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}partial_extraction'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -1042,6 +1068,37 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
   /// The `ruleId` that matched but could not complete, when there was one.
   /// `NULL` when no rule matched at all.
   final String? unparsedRuleId;
+
+  /// `PartialExtraction.encode()` — the fields a rule extracted successfully
+  /// before its `requiredFields` check failed. `NULL` for every other row.
+  ///
+  /// ## Why this column exists
+  ///
+  /// Without it, a message that failed on ONE required field reached the
+  /// "Complete the details" form (S-19) carrying only its raw text, so the
+  /// user retyped an amount, a merchant and a card the parser had already read
+  /// correctly. See `lib/features/parsing/partial_extraction.dart`.
+  ///
+  /// ## Three properties worth being explicit about
+  ///
+  /// 1. **It is unconfirmed data, and it lives here rather than on
+  ///    `transactions` precisely because of that.** Nothing sums it, nothing
+  ///    counts it, no total can reach it. It becomes money only when the user
+  ///    presses "Save as transaction" on a form they can see.
+  /// 2. **It retains nothing new** (NFR-P4, ADR-013). Every value in it is
+  ///    derived from [sanitizedBody] on this same row — already redacted, with
+  ///    any card identifier already masked to last-4 (NFR-S2). It is a
+  ///    structured projection of text the app already keeps, and it is deleted
+  ///    with the row.
+  /// 3. **It is `NULL` when no rule matched at all**, which is the honest
+  ///    value: nothing was extracted, so there is nothing to pre-fill and a
+  ///    blank form is correct.
+  ///
+  /// JSON in one column rather than eight typed columns because none of it is
+  /// ever queried, filtered, indexed or aggregated — it is read back whole, by
+  /// exactly one screen, for exactly one row at a time. Typed columns would
+  /// buy query capability nothing wants and cost eight `ALTER TABLE`s.
+  final String? partialExtraction;
   final DateTime createdAt;
   const RawMessageRow({
     required this.id,
@@ -1056,6 +1113,7 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
     required this.dismissedAsNotTransaction,
     this.unparsedReason,
     this.unparsedRuleId,
+    this.partialExtraction,
     required this.createdAt,
   });
   @override
@@ -1085,6 +1143,9 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
     if (!nullToAbsent || unparsedRuleId != null) {
       map['unparsed_rule_id'] = Variable<String>(unparsedRuleId);
     }
+    if (!nullToAbsent || partialExtraction != null) {
+      map['partial_extraction'] = Variable<String>(partialExtraction);
+    }
     map['created_at'] = Variable<DateTime>(createdAt);
     return map;
   }
@@ -1113,6 +1174,9 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
       unparsedRuleId: unparsedRuleId == null && nullToAbsent
           ? const Value.absent()
           : Value(unparsedRuleId),
+      partialExtraction: partialExtraction == null && nullToAbsent
+          ? const Value.absent()
+          : Value(partialExtraction),
       createdAt: Value(createdAt),
     );
   }
@@ -1137,6 +1201,9 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
       ),
       unparsedReason: serializer.fromJson<String?>(json['unparsedReason']),
       unparsedRuleId: serializer.fromJson<String?>(json['unparsedRuleId']),
+      partialExtraction: serializer.fromJson<String?>(
+        json['partialExtraction'],
+      ),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
     );
   }
@@ -1158,6 +1225,7 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
       ),
       'unparsedReason': serializer.toJson<String?>(unparsedReason),
       'unparsedRuleId': serializer.toJson<String?>(unparsedRuleId),
+      'partialExtraction': serializer.toJson<String?>(partialExtraction),
       'createdAt': serializer.toJson<DateTime>(createdAt),
     };
   }
@@ -1175,6 +1243,7 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
     bool? dismissedAsNotTransaction,
     Value<String?> unparsedReason = const Value.absent(),
     Value<String?> unparsedRuleId = const Value.absent(),
+    Value<String?> partialExtraction = const Value.absent(),
     DateTime? createdAt,
   }) => RawMessageRow(
     id: id ?? this.id,
@@ -1198,6 +1267,9 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
     unparsedRuleId: unparsedRuleId.present
         ? unparsedRuleId.value
         : this.unparsedRuleId,
+    partialExtraction: partialExtraction.present
+        ? partialExtraction.value
+        : this.partialExtraction,
     createdAt: createdAt ?? this.createdAt,
   );
   RawMessageRow copyWithCompanion(RawMessagesCompanion data) {
@@ -1232,6 +1304,9 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
       unparsedRuleId: data.unparsedRuleId.present
           ? data.unparsedRuleId.value
           : this.unparsedRuleId,
+      partialExtraction: data.partialExtraction.present
+          ? data.partialExtraction.value
+          : this.partialExtraction,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
     );
   }
@@ -1251,6 +1326,7 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
           ..write('dismissedAsNotTransaction: $dismissedAsNotTransaction, ')
           ..write('unparsedReason: $unparsedReason, ')
           ..write('unparsedRuleId: $unparsedRuleId, ')
+          ..write('partialExtraction: $partialExtraction, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
@@ -1270,6 +1346,7 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
     dismissedAsNotTransaction,
     unparsedReason,
     unparsedRuleId,
+    partialExtraction,
     createdAt,
   );
   @override
@@ -1288,6 +1365,7 @@ class RawMessageRow extends DataClass implements Insertable<RawMessageRow> {
           other.dismissedAsNotTransaction == this.dismissedAsNotTransaction &&
           other.unparsedReason == this.unparsedReason &&
           other.unparsedRuleId == this.unparsedRuleId &&
+          other.partialExtraction == this.partialExtraction &&
           other.createdAt == this.createdAt);
 }
 
@@ -1304,6 +1382,7 @@ class RawMessagesCompanion extends UpdateCompanion<RawMessageRow> {
   final Value<bool> dismissedAsNotTransaction;
   final Value<String?> unparsedReason;
   final Value<String?> unparsedRuleId;
+  final Value<String?> partialExtraction;
   final Value<DateTime> createdAt;
   const RawMessagesCompanion({
     this.id = const Value.absent(),
@@ -1318,6 +1397,7 @@ class RawMessagesCompanion extends UpdateCompanion<RawMessageRow> {
     this.dismissedAsNotTransaction = const Value.absent(),
     this.unparsedReason = const Value.absent(),
     this.unparsedRuleId = const Value.absent(),
+    this.partialExtraction = const Value.absent(),
     this.createdAt = const Value.absent(),
   });
   RawMessagesCompanion.insert({
@@ -1333,6 +1413,7 @@ class RawMessagesCompanion extends UpdateCompanion<RawMessageRow> {
     this.dismissedAsNotTransaction = const Value.absent(),
     this.unparsedReason = const Value.absent(),
     this.unparsedRuleId = const Value.absent(),
+    this.partialExtraction = const Value.absent(),
     this.createdAt = const Value.absent(),
   }) : sender = Value(sender),
        receivedAt = Value(receivedAt),
@@ -1351,6 +1432,7 @@ class RawMessagesCompanion extends UpdateCompanion<RawMessageRow> {
     Expression<bool>? dismissedAsNotTransaction,
     Expression<String>? unparsedReason,
     Expression<String>? unparsedRuleId,
+    Expression<String>? partialExtraction,
     Expression<DateTime>? createdAt,
   }) {
     return RawValuesInsertable({
@@ -1367,6 +1449,7 @@ class RawMessagesCompanion extends UpdateCompanion<RawMessageRow> {
         'dismissed_as_not_transaction': dismissedAsNotTransaction,
       if (unparsedReason != null) 'unparsed_reason': unparsedReason,
       if (unparsedRuleId != null) 'unparsed_rule_id': unparsedRuleId,
+      if (partialExtraction != null) 'partial_extraction': partialExtraction,
       if (createdAt != null) 'created_at': createdAt,
     });
   }
@@ -1384,6 +1467,7 @@ class RawMessagesCompanion extends UpdateCompanion<RawMessageRow> {
     Value<bool>? dismissedAsNotTransaction,
     Value<String?>? unparsedReason,
     Value<String?>? unparsedRuleId,
+    Value<String?>? partialExtraction,
     Value<DateTime>? createdAt,
   }) {
     return RawMessagesCompanion(
@@ -1400,6 +1484,7 @@ class RawMessagesCompanion extends UpdateCompanion<RawMessageRow> {
           dismissedAsNotTransaction ?? this.dismissedAsNotTransaction,
       unparsedReason: unparsedReason ?? this.unparsedReason,
       unparsedRuleId: unparsedRuleId ?? this.unparsedRuleId,
+      partialExtraction: partialExtraction ?? this.partialExtraction,
       createdAt: createdAt ?? this.createdAt,
     );
   }
@@ -1445,6 +1530,9 @@ class RawMessagesCompanion extends UpdateCompanion<RawMessageRow> {
     if (unparsedRuleId.present) {
       map['unparsed_rule_id'] = Variable<String>(unparsedRuleId.value);
     }
+    if (partialExtraction.present) {
+      map['partial_extraction'] = Variable<String>(partialExtraction.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -1466,6 +1554,7 @@ class RawMessagesCompanion extends UpdateCompanion<RawMessageRow> {
           ..write('dismissedAsNotTransaction: $dismissedAsNotTransaction, ')
           ..write('unparsedReason: $unparsedReason, ')
           ..write('unparsedRuleId: $unparsedRuleId, ')
+          ..write('partialExtraction: $partialExtraction, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
@@ -9211,7 +9300,7 @@ class MerchantRuleRow extends DataClass implements Insertable<MerchantRuleRow> {
   /// makes `AppDatabase`'s category-delete trigger the right mechanism: the
   /// guarantee AC-C3.3 asks for is *"no transaction points at a missing
   /// category"*, and it is enforced at the single operation that could break
-  /// it (the delete) for every referencing table at once. `CategoryDao.delete`
+  /// it (the delete) for every referencing table at once. `CategoryDao.deleteCategory`
   /// repoints or removes the rules that name the doomed category inside the
   /// same database transaction as the delete.
   final String categoryId;
@@ -9903,6 +9992,7 @@ typedef $$RawMessagesTableCreateCompanionBuilder =
       Value<bool> dismissedAsNotTransaction,
       Value<String?> unparsedReason,
       Value<String?> unparsedRuleId,
+      Value<String?> partialExtraction,
       Value<DateTime> createdAt,
     });
 typedef $$RawMessagesTableUpdateCompanionBuilder =
@@ -9919,6 +10009,7 @@ typedef $$RawMessagesTableUpdateCompanionBuilder =
       Value<bool> dismissedAsNotTransaction,
       Value<String?> unparsedReason,
       Value<String?> unparsedRuleId,
+      Value<String?> partialExtraction,
       Value<DateTime> createdAt,
     });
 
@@ -9988,6 +10079,11 @@ class $$RawMessagesTableFilterComposer
 
   ColumnFilters<String> get unparsedRuleId => $composableBuilder(
     column: $table.unparsedRuleId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get partialExtraction => $composableBuilder(
+    column: $table.partialExtraction,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -10066,6 +10162,11 @@ class $$RawMessagesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get partialExtraction => $composableBuilder(
+    column: $table.partialExtraction,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -10135,6 +10236,11 @@ class $$RawMessagesTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get partialExtraction => $composableBuilder(
+    column: $table.partialExtraction,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 }
@@ -10182,6 +10288,7 @@ class $$RawMessagesTableTableManager
                 Value<bool> dismissedAsNotTransaction = const Value.absent(),
                 Value<String?> unparsedReason = const Value.absent(),
                 Value<String?> unparsedRuleId = const Value.absent(),
+                Value<String?> partialExtraction = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
               }) => RawMessagesCompanion(
                 id: id,
@@ -10196,6 +10303,7 @@ class $$RawMessagesTableTableManager
                 dismissedAsNotTransaction: dismissedAsNotTransaction,
                 unparsedReason: unparsedReason,
                 unparsedRuleId: unparsedRuleId,
+                partialExtraction: partialExtraction,
                 createdAt: createdAt,
               ),
           createCompanionCallback:
@@ -10212,6 +10320,7 @@ class $$RawMessagesTableTableManager
                 Value<bool> dismissedAsNotTransaction = const Value.absent(),
                 Value<String?> unparsedReason = const Value.absent(),
                 Value<String?> unparsedRuleId = const Value.absent(),
+                Value<String?> partialExtraction = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
               }) => RawMessagesCompanion.insert(
                 id: id,
@@ -10226,6 +10335,7 @@ class $$RawMessagesTableTableManager
                 dismissedAsNotTransaction: dismissedAsNotTransaction,
                 unparsedReason: unparsedReason,
                 unparsedRuleId: unparsedRuleId,
+                partialExtraction: partialExtraction,
                 createdAt: createdAt,
               ),
           withReferenceMapper: (p0) => p0

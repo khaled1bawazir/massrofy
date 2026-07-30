@@ -66,8 +66,9 @@ class AppDatabase extends _$AppDatabase {
   /// | 5 | P3b-2 | the mutation surface: `user_edited_fields` (KHA-26) and the merge pair `merged_into_id` / `merged_from_transaction_id` (KHA-64) |
   /// | 6 | — | **deliberately unused.** `docs/build-plan.md` reserved v6 for P3b-3 *if it needed a schema change*; it did not. The number is burned rather than reused so that no two builds can ever disagree about what "v6" contained — a gap in the sequence is free, a collision is not |
   /// | 7 | P4a | the categorization spine (KHA-30, KHA-31): `category`, `merchant`, `merchant_alias`, `merchant_rule` tables; `category_source` / `category_confidence` / `category_rule_id` / `merchant_id` on transactions; the category-delete guard trigger |
+  /// | 8 | KHA-146 | `raw_message.partial_extraction` — the fields a rule read successfully before failing its `requiredFields` check, so the completion form can pre-fill them instead of making the user retype what the parser already got right |
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -286,6 +287,27 @@ class AppDatabase extends _$AppDatabase {
         //    database is unlocked — so the seed list has exactly one
         //    implementation shared by fresh installs, upgrades and tests,
         //    instead of one here and one there that can drift apart.
+      }
+
+      if (from < 8) {
+        // ------------------------------------------------------------------
+        // KHA-146 — carry the partial extraction to the completion form.
+        // ------------------------------------------------------------------
+        //
+        // One nullable column, no backfill, and **the absence of a backfill is
+        // the only correct choice here**, for a stronger reason than in the
+        // migrations above.
+        //
+        // Backfilling would mean re-running the rule pack over every stored
+        // `sanitized_body` during an upgrade. That is not merely expensive —
+        // it would mean *today's* rule pack re-interpreting messages that were
+        // ingested under an older one, so a row's stored `unparsed_reason`
+        // (written by the old pack) and its freshly derived partial extraction
+        // (written by the new one) could describe two different readings of
+        // the same message. NULL says "this row predates the feature", which
+        // is true, and the form falls back to exactly the blank behaviour the
+        // user has today. Nothing regresses; new messages get the pre-fill.
+        await m.addColumn(rawMessages, rawMessages.partialExtraction);
       }
     },
     beforeOpen: (OpeningDetails details) async {

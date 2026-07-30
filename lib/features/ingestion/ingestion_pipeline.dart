@@ -117,6 +117,7 @@ import '../ledger/ledger_entity_resolver.dart';
 import '../parsing/message_parser.dart';
 import '../parsing/parse_outcome.dart';
 import '../parsing/parsed_fields.dart';
+import '../parsing/partial_extraction.dart';
 import 'content_hmac.dart';
 import 'duplicate_policy.dart';
 import 'sms_source.dart';
@@ -509,7 +510,17 @@ final class IngestionPipeline {
       // The safety net (US-A4, AC-A4.1). The sanitised text IS retained here,
       // because AC-A4.2 requires the user to be able to read the original and
       // fill in what the parser missed.
-      UnparsedMessage(:final String reason, :final RuleReference? rule) =>
+      // KHA-146 adds `partialExtraction` to what is carried here. It is
+      // non-null only when a rule matched, extracted, and then failed its
+      // `requiredFields` check — see `parse_outcome.dart`. For every other
+      // unparsed reason it is null, which is what keeps "we understood nothing"
+      // and "we understood most of it" two distinguishable states all the way
+      // to the form.
+      UnparsedMessage(
+        :final String reason,
+        :final RuleReference? rule,
+        :final PartialExtraction? partialExtraction,
+      ) =>
         await _withDedupGuard(
           contentHmac: contentHmac,
           record: record,
@@ -528,6 +539,7 @@ final class IngestionPipeline {
               unparsedRuleId: rule?.ruleId.isEmpty ?? true
                   ? null
                   : rule!.ruleId,
+              partialExtractionJson: _encodePartial(partialExtraction),
             );
             return running._plus(examined: 1, routedToReviewQueue: 1);
           },
@@ -646,6 +658,21 @@ final class IngestionPipeline {
         classification: 'financial_unparsed',
         unparsedReason: UnparsedReason.requiredFieldMissing,
         unparsedRuleId: parsed.rule.ruleId,
+        // KHA-146 applies here too, and this is the second place the same
+        // defect lived: this branch had a fully-populated `fields` in hand and
+        // wrote none of it. The merchant, card, date and type are still worth
+        // carrying to the completion form — **but the amount is not**, because
+        // the amount is precisely what was rejected. Pre-filling a missing or
+        // negative figure into a form the user is skimming is the one
+        // direction a spending tracker must never be wrong in, so
+        // `withoutAmount()` drops it and the form asks for it.
+        partialExtractionJson: _encodePartial(
+          PartialExtraction.fromParsedFields(
+            fields,
+            transactionType: parsed.rule.messageType,
+            missingFields: const <String>['amount'],
+          ).withoutAmount(),
+        ),
       );
       return running._plus(examined: 1, routedToReviewQueue: 1);
     }
@@ -776,6 +803,19 @@ final class IngestionPipeline {
 
     return running._plus(examined: 1, transactionsWritten: 1);
   }
+
+  /// **KHA-146** — the stored form of a partial extraction, or `null`.
+  ///
+  /// `hasAnyValue` guards the degenerate case: a rule whose only extractable
+  /// field is also the one that failed produces an extraction that read
+  /// nothing. Storing `{"v":1}` for that would be a row claiming there is
+  /// something to pre-fill when there is not, and the completion form would
+  /// show its "we read some of this" notice above five empty boxes.
+  ///
+  /// Shared by both review-queue write paths so the two cannot disagree about
+  /// when a row gets one.
+  static String? _encodePartial(PartialExtraction? partial) =>
+      partial != null && partial.hasAnyValue ? partial.encode() : null;
 
   Future<DuplicateDecision> _evaluateDuplicates({
     required ParsedFields fields,
