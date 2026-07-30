@@ -73,6 +73,7 @@ Every pattern in this document is established here, not inherited.
 
 | Version | Date | Change |
 |---|---|---|
+| **1.7** | 2026-07-30 | **ADR-017 amended — KHA-137 decided (subsection is DRAFT, awaiting the human).** D1's content hash **drops `receivedAt` entirely**: `contentHmac = HMAC-SHA256(k, scheme ‖ normalisedBody ‖ normalisedSender)`. Folding the delivery instant in at millisecond precision meant a carrier redelivery — which by definition arrives at a *different* instant — hashed differently, D1 missed, and a second transaction was written; QA reproduced this on a device, doubling a real total. The AC-A5.1 test missed it because it varied the provider id and held `receivedAt` fixed, i.e. it varied the one thing a redelivery does not control. **AC-A5.3 is not weakened**, verified in code rather than assumed: every transaction rule in `sa-core.json` requires an in-body `occurredAt` captured to the minute, so two genuinely separate purchases differ in the body itself; and AC-A5.2's flag path is `DuplicatePolicy.decide`'s D2/D3 tiers over parsed *fields*, never the content hash. Coarse timestamp buckets and a "same-hash-within-window" variant are both **rejected**, and for the same arithmetic: identical bodies imply the same in-body minute, so the genuine pair is co-located in time and lands in any bucket/window together — the timestamp discriminates nothing it is asked to discriminate, while every boundary silently reproduces KHA-137. One **irreducible residual** is recorded: two real purchases, same card, merchant, amount **and minute** are byte-identical and the second is suppressed; recovery is US-B4 manual entry. **Forward-only, no backfill, no schema change (DB stays 7)** — but every stored digest becomes stale, which makes ADR-006 KHA-133 item **(F)** (the `sms_provider_id` pre-check in `_withDedupGuard`) live rather than latent, so it **must ship in the same PR** under (G).1's own rule. |
 | **1.6** | 2026-07-30 | **ADR-006 extended — KHA-133 decided (subsection is DRAFT, awaiting the human).** A rule-pack fix is currently **forward-only**: the `NotFinancialSender` branch advances the watermark for a discarded message, `runIncremental` only reads `_id >` the watermark, and `importState == completed` is terminal — so KHA-128's corrected sender patterns cannot recover a single message already swept. Decision: **a user-triggered, bank-scoped re-scan, which is AC-A6.10's existing "check again" capability pointed at banks that were configured with wrong patterns rather than at a newly linked sender.** KHA-133 is therefore **not a new mechanism and rides with US-A6**. Both alternatives are rejected: an **automatic re-scan on pack change** re-walks the month on every APK install and silently back-dates transactions, and **recording the swept pack version in the watermark** buys a worse version of that at the price of a schema migration — unnecessary, because `advanceWatermark: false` plus D1 already make a bounded re-scan idempotent and cursor-neutral. **No schema change; DB stays where P5b leaves it.** Dedup safety is confirmed by code, not assumed: a `NotFinancialSender` discard leaves **no row at all**, so the re-scan's write is a *first* write with nothing to double-count, while already-stored messages are suppressed on `content_hmac`. **One real hole found:** `contentHmac` is computed over text sanitised with the pack's per-bank `redact[]`, so it is a function of the pack — change a `redact[]` and the hmac pre-check misses, the insert hits the `sms_provider_id` `UNIQUE` constraint, and a benign duplicate is reported as `failedWithError`, stalling the watermark. Latent today (all `redact` arrays are `[]`); closed by pre-checking `sms_provider_id` in `_withDedupGuard`. Privacy is settled **explicitly**: re-reading is not re-retaining, on the same ground ADR-007 v1.5 already used, and a bank-scoped re-scan reads *strictly less* than the sweep the app runs every 15 minutes. New **H-17**. Two prohibitions bind the in-flight KHA-128 PR (no `redact[]` changes, no `importState` reset) but add no work to it. |
 | **1.5** | 2026-07-30 | **ADR-007 amended — KHA-127/KHA-128 decided.** The **hard sender gate stays**, and **NFR-P4's "retain nothing" is upheld unamended** — because nothing was ever lost: the message stays in the Android SMS provider, which the app holds `READ_SMS` on and can re-read at will. The defect was **non-observability of a derived fact**, and a derived fact is fixed by deriving it, not by persisting it. Three options were weighed. **Option 1 (loosen gate 1 on body-shape heuristics → needs-review) is REJECTED as a gate**, because routing on a body guess means persisting the *content* of messages from senders never confirmed to be banks — precisely the harm NFR-P4/NFR-P4a exist to prevent — and because it infers what the user can simply be asked. **Option 2 (on-device classifier) is REJECTED for v1**, decisively on grounds of *evidence*, not effort: NFR-M3 forbids training on the user's real SMS, NFR-S6/R-10 mean we could never measure its precision in the field, and a weight blob has no `ruleId` to record (NFR-A1) and no reviewable diff (NFR-M2). **Option 3 (user sender-linking, PRD Addendum A) is the actual fix**, and it is upgraded from "complementary" to primary. Option 1's heuristic **survives, relocated**: as an in-memory, per-sender-aggregated, **advisory ranking signal on the sender-recognition screen only** — never a gate, never persisted — where a false positive costs one row of screen position instead of a database row. Two additions the options list missed and which carry most of the value: **(i) sender-name suggestion from the pack's own `aliases`/`displayName`** — the string needed to recognise `Jazira Bank` was *already shipped* in `sa-core.json` (`aliases: ["ALJAZIRA","BAJ","الجزيرة"]`) and the gate never consulted it; **(ii) a proactive unrecognised-sender health signal**, because Addendum A only links the screen from *empty* states and the silent-sender-ID-change case has a non-empty home screen. NFR-P4 gains one clarification, not a relaxation: **a content-free, sender-free aggregate count is not retention of a message** and may be surfaced and logged (ADR-015). |
 | **1.4** | 2026-07-29 | **ADR-008 amended again — KHA-106/KHA-107 decided together.** v1.3's trailing-digit **corroboration signal (ii) (“≥4 digits, no other corroboration”) is WITHDRAWN**; adjacency to a structural marker is now the *only* corroborator, because no length threshold can be made residue-safe — for any N, two strings sharing a prefix and carrying different N-digit runs always reduce to the same key (KHA-106). `CategorizationConfig.referenceDigitRunMinLength` is **deleted**, not retuned. The strip is redefined on **the last digit run that is trailing modulo structural noise**, with adjacency read on **either side** of the run, so `PANDA STORE 1234` and `PANDA 1234 STORE` produce one key (KHA-107); swapping steps 6 and 7 is rejected because it would destroy the only surviving corroborator. Withdrawing signal (ii) also makes `MerchantKey.of` genuinely **idempotent**, so the doc comment's claimed invariant becomes true rather than being corrected away. Cost, disclosed: `PANDA 1234` no longer equals `PANDA` — it is flagged, not merged. Docs-only here; the code change rides R-16's window. |
@@ -2020,7 +2021,7 @@ Three tiers, applied in order:
 
 | Tier | Key | Action |
 |---|---|---|
-| **D1 — exact** | `smsProviderId` UNIQUE (re-scan idempotency, AC-A3.3) **and** `contentHmac = HMAC-SHA256(k, normalisedBody‖sender‖smsTimestamp)` UNIQUE (carrier retry, AC-A5.1) | **Suppress silently**, but write a diagnostic event recording the suppression. Storing an HMAC rather than the text keeps the dedup index non-reversible. |
+| **D1 — exact** | `smsProviderId` UNIQUE (re-scan idempotency, AC-A3.3) **and** `contentHmac = HMAC-SHA256(k, scheme‖normalisedBody‖normalisedSender)` UNIQUE (carrier retry, AC-A5.1) — **no delivery timestamp; see the KHA-137 subsection below** | **Suppress silently**, but write a diagnostic event recording the suppression. Storing an HMAC rather than the text keeps the dedup index non-reversible. |
 | **D2 — reference number** | same `referenceNumber` + same instrument (PRD §3.4 confirms transfers carry these) | Treat as the same transaction. If it enriches an existing record, **merge — and write an audit entry recording the merge.** Never a silent destruction. |
 | **D3 — heuristic** | same instrument + same amount + same currency + \|Δt\| ≤ 15 min, and (merchant equal **or** one message is an authorisation-type and the other a posting-type) | **Flag as a possible duplicate for user confirmation. Never auto-remove.** Both remain in the list and in totals until the user decides. |
 
@@ -2029,6 +2030,125 @@ genuine identical purchases the same day) pull in opposite directions, and only 
 failure modes is recoverable: an inflated total is visible and fixable, a silently deleted real
 transaction is invisible and unfixable. **We bias hard toward flagging.** Banking default:
 prefer the auditable, recoverable error.
+
+#### KHA-137 decision — **D1's content hash drops `receivedAt` entirely.** Decided 2026-07-30.
+
+> **STATUS: DRAFT — awaiting human approval.** Scoped to this subsection, per the house style
+> established by v1.1–v1.6: the document's own `APPROVED` line above stays as it is, because
+> flipping the whole architecture to `DRAFT` would block every unrelated in-flight phase for one
+> decision. **No engineer implements this subsection until a human changes this line to
+> `APPROVED`.** The rest of ADR-017 is unchanged and remains in force.
+
+**What is broken.** `ContentHmac.compute` folds `smsTimestampUtc` — the SMS's `receivedAt`,
+at **millisecond** precision — into the digest. A carrier redelivery arrives at a *different
+instant by definition*, so it produces a different digest, so `_withDedupGuard`'s
+`findByContentHmac` misses, so a second transaction is written. The `smsProviderId` key does not
+catch it either, because a redelivery is a *new* provider row. **D1 has two keys and, for the one
+case it was built for, neither fires.** QA reproduced this on a device: a real total went from
+−312.40 SAR to −624.80 SAR. `content_hmac.dart`'s own doc comment names carrier redelivery as
+"the exact case D1 exists for" — the file argues correctly for the normalised body and then
+defeats itself in the next field.
+
+**Why the test suite passed anyway** (worth one line, because it is the reusable lesson): the
+AC-A5.1 test builds its redelivery with `receivedAt: first.receivedAt` and varies only the
+provider id — it holds fixed the one variable a real redelivery does not control. A test that
+cannot fail is not coverage.
+
+**The decision.** The digest is a function of **the message text and its sender, and nothing
+else**:
+
+> `contentHmac = HMAC-SHA256(k, "massrofy/content-hmac/v2" ‖ normalisedBody ‖ normalisedSender)`,
+> `\x00`-separated as today.
+
+**Why this does not weaken AC-A5.3.** Three facts, checked in the code rather than reasoned from
+the ACs:
+
+1. **Genuinely separate purchases already differ in the body.** Every transaction rule in
+   `sa-core.json` lists `occurredAt` in `requiredFields`, and every template's regex captures a
+   date-time **to the minute** *from the message text*. The existing AC-A5.3 test is itself the
+   proof: it separates its two purchases by in-body time (`09:00` / `09:40`) and never depends on
+   `receivedAt`.
+2. **AC-A5.2's flag path is not the content hash.** Possible-duplicate flagging is
+   `DuplicatePolicy.decide` — D2 (reference number + instrument) and D3 (instrument + amount +
+   currency + 15-minute window + merchant/auth-posting), over **parsed fields**, returning
+   `acceptAndFlag`. It never consults `contentHmac`. Collapsing D1's key therefore cannot move
+   work from "flag" to "silently drop" through that route.
+3. So the timestamp component was never what protected AC-A5.3. The **body** was. Removing it
+   costs AC-A5.3 nothing and gives AC-A5.1 the guarantee it was always supposed to have.
+
+**The residual, stated plainly rather than buried.** Two genuinely separate purchases, same card,
+same merchant, same amount, **in the same minute**, produce byte-identical SMS. D1 will now
+suppress the second one. This is **irreducible from the message**: nothing in the text
+distinguishes the two, and the only external discriminator is the delivery instant — the very
+field a redelivery also changes. In that one case AC-A5.1 and AC-A5.3 are formally contradictory
+and we resolve toward AC-A5.1, because carrier redelivery is common and same-minute duplicate
+spend is rare. The suppression is **not invisible** (`_withDedupGuard` writes the
+`duplicate_suppressed` diagnostic, ADR-015) and the recovery is **US-B4 manual entry**.
+
+**Options rejected.**
+
+| Option | Assessment |
+|---|---|
+| **Coarse-bucket the timestamp** (same day, same hour) | **Rejected, and it fails on its own terms.** Every bucket has a boundary, so a redelivery that straddles one silently reproduces KHA-137 — *intermittently*, which is worse than a clean rule because it is unreproducible in the field. And it does not buy what it is for: byte-identical bodies imply the same in-body minute, so both genuine purchases land in the **same** bucket regardless. It keeps the failure mode and not the benefit. |
+| **Keep the timestamp out of the hash but suppress only if the stored row's `receivedAt` is within a window `W`** | **Rejected, by the same arithmetic.** The pair AC-A5.3 wants separated is co-located in time *by construction* (same in-body minute ⇒ deliveries seconds apart), so every `W` ≥ 1 minute suppresses them too; and every finite `W` lets a store-and-forward redelivery through. The window discriminates nothing, and it adds a tunable no evidence can tune. |
+| **Flag rather than suppress on a D1 hash hit** (raised because ADR-017 biases toward flagging) | **Rejected.** It writes two transactions and asks the user, which is exactly what AC-A5.1 forbids — *"exactly one transaction exists"*. It would put a confirmation prompt in front of the user for the **common** case in order to serve the rare one. ADR-017's flag bias governs the *ambiguous* tiers; D1 is the tier defined as unambiguous. |
+
+**Normative — what the implementation must do.**
+
+**(A) The new signature.** `smsTimestampUtc` is **removed from the parameter list**, not merely
+ignored — an unused parameter is an invitation to re-add it:
+
+```dart
+static String compute({
+  required List<int> key,
+  required String normalizedBody,
+  required String sender,
+});
+// material = ['massrofy/content-hmac/v2', normalizedBody,
+//             SmsTextNormalizer.normalize(sender).toLowerCase()].join('\x00')
+```
+
+The scheme tag goes **first** so the digest is self-describing and a future third revision has to
+change it deliberately rather than collide by accident. The **sender is canonicalised the same
+way the body is** — `SmsTextNormalizer.normalize`, then lower-cased — because rule-pack
+`senderPatterns` already compile with `caseSensitive: false`, so the parser treats `D360` and
+`d360` as one bank while the digest treats them as two messages. That is the same class of defect
+(delivery noise defeating dedup) and it is free to close **now**, while digests are being
+invalidated anyway; closing it later would cost a second invalidation. `ingestion_pipeline.dart`
+is the only caller.
+
+**(B) The key-derivation label does not change.** It stays `massrofy/dedup-content-hmac/v1`. That
+label separates *keys by protocol domain* (ADR-017 B5 / KHA-21); it is not a message-format
+version, and bumping it would rotate a Keystore-derived subkey for no security reason.
+
+**(C) Forward-only. No backfill, no migration, no schema change — DB stays at version 7.** Every
+already-stored digest becomes stale. A backfill would be **partial by construction**:
+content-free noise rows (`insertIgnoredNoContent`) retain no body to recompute from, and NFR-P4
+is why. The exposure is bounded to messages ingested *before* the update whose redelivery arrives
+*after* it — hours, not weeks. `content_hmac` stays a plain `TEXT UNIQUE` with no format
+assumption, and a v1 digest can never equal a v2 digest, so the two coexist without false
+suppression. Same posture as v1.2 (KHA-69) and v1.6.
+
+**(D) ADR-006 KHA-133 item (F) — the `sms_provider_id` pre-check in `_withDedupGuard` — must
+land in the same PR. Non-negotiable.** (G).1 of that subsection states the rule already: anything
+that shifts the `content_hmac` of stored messages converts a re-scan's benign duplicates into
+`failedWithError` stalls, and "then (F) must land in the same PR". **This change shifts every
+stored digest, so it makes that hazard live rather than latent** — the first historical-import
+resume or bank-scoped re-scan over pre-fix messages would miss on `content_hmac`, hit the
+`sms_provider_id` `UNIQUE` constraint, throw, set `advancingIsSafe = false` and call
+`pauseImport()`. Shipping the hash change without (F) trades a doubling bug for a stalled
+pipeline.
+
+**(E) Regression tests, at minimum.** (i) AC-A5.1 with the redelivery given a **different**
+`receivedAt` — this is the test that must fail before the fix; (ii) the existing AC-A5.3 and
+AC-A5.2 tests unchanged and still green; (iii) sender case/whitespace variation hashing equal;
+(iv) a re-scan of a pre-fix row (stale v1 digest, same provider id) counted as
+`suppressedAsExactDuplicate` rather than `failedWithError`, which is (D)'s test.
+
+**(F) Doc comments that assert the old formula must be corrected in the same PR**, or the next
+reader re-derives the bug: `content_hmac.dart` (library comment and `compute`),
+`raw_message_table.dart` (`contentHmac` column), `domain_separated_key.dart:10`, and
+`ingestion_pipeline.dart`'s `_withDedupGuard` comment.
 
 ---
 
