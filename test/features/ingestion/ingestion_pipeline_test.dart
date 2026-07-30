@@ -17,6 +17,7 @@ library;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:massrofy/core/logging/diagnostic_ring_buffer.dart';
 import 'package:massrofy/core/logging/safe_logger.dart';
+import 'package:massrofy/core/text/sms_sanitizer.dart';
 import 'package:massrofy/data/dao/audit_log_dao.dart';
 import 'package:massrofy/data/dao/ingest_watermark_dao.dart';
 import 'package:massrofy/data/dao/raw_message_dao.dart';
@@ -285,30 +286,160 @@ void main() {
       expect(await transactionDao.all(), hasLength(1));
     });
 
-    test('a carrier redelivery — same content, NEW provider id — is also '
-        'suppressed (AC-A5.1, the content-HMAC key)', () async {
+    test(
+      'a carrier redelivery — same content, NEW provider id, arriving '
+      '43 s LATER — is also suppressed (AC-A5.1, the content-HMAC key)',
+      () async {
+        final SmsFixture purchase = d360Fixtures.first;
+        final IngestionPipeline pipeline = buildPipeline(
+          FakeSmsSource(<RawSmsRecord>[]),
+        );
+
+        final RawSmsRecord first = asRecord(purchase, 1);
+        // Same body, same sender; different `_id` **and a different
+        // `receivedAt`**. Both differences are essential and this test used to
+        // have only the first (KHA-137):
+        //
+        //  - a new `_id`, because a redelivery lands as a new inbox row, so
+        //    the `sms_provider_id` key cannot help — that is why ADR-017 D1
+        //    has two keys rather than one;
+        //  - a **later** `receivedAt`, because a redelivery is *defined* by
+        //    arriving at a different instant. Holding it fixed (as this test
+        //    originally did) is the one thing a real redelivery cannot do, so
+        //    the old test passed against a `content_hmac` that folded the
+        //    delivery time in and therefore could never have caught the field
+        //    failure. QA's device repro measured the real gap at 43,287 ms.
+        //
+        // 43 s is used literally: this is the shape that reproduced the bug.
+        final RawSmsRecord redelivered = RawSmsRecord(
+          providerId: 2,
+          address: first.address,
+          body: first.body,
+          receivedAt: first.receivedAt.add(const Duration(seconds: 43)),
+        );
+
+        final IngestionRunResult result = await pipeline.processAll(
+          <RawSmsRecord>[first, redelivered],
+          advanceWatermark: true,
+        );
+
+        expect(await transactionDao.all(), hasLength(1));
+        // Not just "one transaction" — one transaction *because the second was
+        // recognised as a duplicate*. Without this, the assertion above would
+        // also pass if the second message had failed to parse for some
+        // unrelated reason.
+        expect(result.suppressedAsExactDuplicate, 1);
+      },
+    );
+
+    test('the redelivery gap does not matter — an hour later is still one '
+        'transaction (AC-A5.1)', () async {
+      // A store-and-forward retry can be far more than a minute late. Any
+      // window-based mitigation would fail here, which is part of why the
+      // KHA-137 decision rejected one; this pins that the digest is genuinely
+      // time-independent rather than merely tolerant of small gaps.
       final SmsFixture purchase = d360Fixtures.first;
       final IngestionPipeline pipeline = buildPipeline(
         FakeSmsSource(<RawSmsRecord>[]),
       );
-
       final RawSmsRecord first = asRecord(purchase, 1);
-      // Same body, same sender, same timestamp; different `_id`. The
-      // provider-id key alone would miss this entirely, which is why
-      // ADR-017 D1 has two keys rather than one.
-      final RawSmsRecord redelivered = RawSmsRecord(
-        providerId: 2,
-        address: first.address,
-        body: first.body,
-        receivedAt: first.receivedAt,
-      );
 
-      await pipeline.processAll(<RawSmsRecord>[
-        first,
-        redelivered,
-      ], advanceWatermark: true);
+      final IngestionRunResult result = await pipeline
+          .processAll(<RawSmsRecord>[
+            first,
+            RawSmsRecord(
+              providerId: 2,
+              address: first.address,
+              body: first.body,
+              receivedAt: first.receivedAt.add(const Duration(hours: 1)),
+            ),
+          ], advanceWatermark: true);
 
       expect(await transactionDao.all(), hasLength(1));
+      expect(result.suppressedAsExactDuplicate, 1);
+    });
+
+    test('a PRE-FIX row (stale v1 digest, same provider id) is re-scanned as a '
+        'counted duplicate, not a pipeline stall (KHA-137 (D))', () async {
+      // The migration hazard KHA-137's decision calls non-negotiable, tested
+      // end to end rather than argued.
+      //
+      // v2 shifts *every* stored digest, so the first re-scan over a message
+      // ingested before the update misses on `content_hmac`. If that were the
+      // only pre-check, the write would then hit `sms_provider_id UNIQUE`,
+      // throw, and the run would report `failedWithError` — which sets
+      // `advancingIsSafe = false` and pauses the import. A benign duplicate
+      // would be shown to the user as a stalled pipeline.
+      //
+      // KHA-133 item (F)'s `findBySmsProviderId` pre-check is what prevents
+      // that, and this asserts the two changes actually compose. The stale row
+      // is planted with a digest that is deliberately NOT recomputable under
+      // v2 — that is the whole point: it stands in for a v1 digest.
+      final SmsFixture purchase = d360Fixtures.first;
+      final RawSmsRecord record = asRecord(purchase, 1);
+
+      await rawMessageDao.insert(
+        smsProviderId: '1',
+        sender: record.address,
+        receivedAt: record.receivedAt,
+        sanitizedText: SmsSanitizer.sanitize(record.body),
+        contentHmac: 'stale-v1-digest-from-before-the-KHA-137-update',
+        bankId: 'd360',
+        classification: 'financial_parsed',
+      );
+
+      final IngestionRunResult rescan = await buildPipeline(
+        FakeSmsSource(<RawSmsRecord>[record]),
+      ).processAll(<RawSmsRecord>[record], advanceWatermark: true);
+
+      expect(
+        rescan.failedWithError,
+        0,
+        reason:
+            'a stale digest must not become an unhandled UNIQUE violation — '
+            'that is the stall KHA-137 (D) exists to prevent',
+      );
+      expect(rescan.suppressedAsExactDuplicate, 1);
+      expect(rescan.transactionsWritten, 0);
+    });
+
+    test('a redelivery whose SENDER differs only in CASE is still suppressed '
+        '(KHA-137 — the sender is canonicalised too)', () async {
+      // `senderPatterns` compile with `caseSensitive: false`, so the parser
+      // reads `D360` and `d360` as one bank. Before KHA-137 the digest read
+      // them as two messages, so the two layers disagreed about what "the
+      // same message" is — the same class of defect as the timestamp, one
+      // level down.
+      //
+      // **Scope note, measured rather than assumed.** `ContentHmac` also runs
+      // the sender through `SmsTextNormalizer.normalize`, which strips bidi
+      // and zero-width marks. That half is NOT asserted here, because it is
+      // unreachable from this seam: a sender carrying, say, a U+200F prefix
+      // fails `senderPatterns` first and the message is discarded as
+      // non-financial before any digest is computed. The normalisation is
+      // still right (it costs nothing and keeps the sender and body halves
+      // consistent), but the property that would need a test is
+      // sender *recognition*, not dedup — a different layer, pre-existing,
+      // and out of KHA-137's scope.
+      final SmsFixture purchase = d360Fixtures.first;
+      final IngestionPipeline pipeline = buildPipeline(
+        FakeSmsSource(<RawSmsRecord>[]),
+      );
+      final RawSmsRecord first = asRecord(purchase, 1);
+
+      final IngestionRunResult result = await pipeline
+          .processAll(<RawSmsRecord>[
+            first,
+            RawSmsRecord(
+              providerId: 2,
+              address: first.address.toLowerCase(),
+              body: first.body,
+              receivedAt: first.receivedAt.add(const Duration(seconds: 43)),
+            ),
+          ], advanceWatermark: true);
+
+      expect(await transactionDao.all(), hasLength(1));
+      expect(result.suppressedAsExactDuplicate, 1);
     });
 
     test(

@@ -17,12 +17,42 @@
 ///
 /// So the assertion that matters is the **negative control** in the first test:
 /// with the signal never raised, no transaction appears no matter how long the
-/// container is pumped. That is the failing state QA reproduced on the device. If
-/// someone later deletes the `ref.watch(foregroundSmsSignalProvider)` line from
-/// `app.dart`, or the `SmsForegroundBridge.signalSmsReceived()` call from
-/// `SmsReceiver.kt`, the positive test below goes red rather than the app
-/// quietly regressing to a two-minute delay nobody notices in CI.
+/// container is pumped. That is the failing state QA reproduced on the device.
+///
+/// ## Exactly what the provider tests below do and do not cover (KHA-138)
+///
+/// An earlier version of this comment claimed that deleting
+/// `ref.watch(foregroundSmsSignalProvider)` from `app.dart` would turn the
+/// positive test below red. **It would not, and QA proved it by mutation: the
+/// whole suite stayed green with that line commented out.** The claim was wrong
+/// in a specific and instructive way, so it is worth stating rather than
+/// quietly correcting.
+///
+/// The provider tests arm the graph **by hand**, in `armAsAppDartDoes` —
+/// two `container.listen` calls that reproduce what `app.dart` does. They
+/// therefore prove that *the providers compose correctly once something
+/// subscribes to them*, and nothing at all about whether anything in the
+/// shipped app ever subscribes. They never read `app.dart`. That is precisely
+/// the trap `docs/lessons.md` names: *"verify a reachability claim by grepping
+/// for the construction site, never from the fact that the widget exists in the
+/// tree."*
+///
+/// | Claim | Covered by |
+/// |---|---|
+/// | the providers compose: a raised signal ends in a written transaction | the positive test below (`container.listen` arms them by hand) |
+/// | nothing sweeps *without* a signal | the negative control below — load-bearing, and the reason the positive test is not vacuous |
+/// | the subscription is not opened while locked / without permission | the two guard tests below |
+/// | **`app.dart` actually subscribes, in the unlocked branch** | **the `app.dart` source guard below** — added by KHA-138; nothing covered this before |
+/// | `SmsReceiver.kt` actually raises the signal | `test/platform/sms_foreground_bridge_test.dart`, not this file |
+///
+/// The last two are source-shape guards rather than behavioural tests, for the
+/// same reason the Kotlin one is: neither a `BroadcastReceiver` firing nor a
+/// `MassrofyApp` bound to a real `EventChannel` exists inside `flutter test`.
+/// A source guard is weaker than executing the wire, and it is much stronger
+/// than the nothing that was there.
 library;
+
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:massrofy/core/money/money.dart';
@@ -312,5 +342,146 @@ void main() {
 
     expect(revoked.read(foregroundSmsSignalProvider).value, isNull);
     expect(await liveTransactions(), 0);
+  });
+
+  // =======================================================================
+  // KHA-138 — the production call site, guarded at the source
+  // =======================================================================
+  //
+  // Everything above arms the providers by hand. This group is the only thing
+  // in the repo that checks the *shipped app* arms them, which is the gap QA's
+  // mutation exposed: with `ref.watch(foregroundSmsSignalProvider)` deleted
+  // from `app.dart`, all 1540 tests stayed green while the app on a device
+  // regressed to the two-minute delay KHA-122 was filed for.
+  //
+  // Same technique and same justification as
+  // `test/platform/sms_foreground_bridge_test.dart`, which guards the Kotlin
+  // half — see that file's header. Executing the wire needs a `MassrofyApp`
+  // bound to a real `EventChannel` on a real engine, which `flutter test` does
+  // not have.
+  group('KHA-138 — app.dart really does subscribe, in the unlocked branch', () {
+    const String appDartPath = 'lib/app.dart';
+
+    /// [source] with all `//` and `/* */` comments removed.
+    ///
+    /// **Not optional here, unlike in some source guards.** `app.dart`'s
+    /// comment block explaining KHA-122 names `foregroundSmsSignalProvider`
+    /// four times. A `contains` over the raw text would therefore pass on a
+    /// file where the code had been deleted and only the explanation left
+    /// behind — the single most likely way this actually regresses, since a
+    /// developer removing a line rarely removes the paragraph above it.
+    String codeOnly(String source) => source
+        .replaceAll(RegExp(r'/\*.*?\*/', dotAll: true), '')
+        .split('\n')
+        .map((String line) {
+          final int comment = line.indexOf('//');
+          return comment < 0 ? line : line.substring(0, comment);
+        })
+        .join('\n');
+
+    /// The body of `app.dart`'s `if (unlocked) { ... }`, by brace matching.
+    ///
+    /// Scoping to the branch rather than to the whole file is the point.
+    /// A `watch` moved *outside* the branch would keep the `EventChannel`
+    /// subscription open while the app is locked — which AC-A1.4 forbids and
+    /// which the guard tests above assert against at the provider level. So
+    /// "present in app.dart" is the wrong property; "present in the unlocked
+    /// branch" is the right one, and only the second is checked here.
+    String unlockedBranch(String code) {
+      const String marker = 'if (unlocked) {';
+      final int start = code.indexOf(marker);
+      expect(
+        start,
+        isNot(-1),
+        reason:
+            'could not find "$marker" in $appDartPath. If the gate was '
+            'restructured, update this test — do not delete it: it is the '
+            'only automated check that KHA-122 is wired into the app at all.',
+      );
+
+      int depth = 0;
+      final int open = start + marker.length - 1;
+      for (int i = open; i < code.length; i++) {
+        if (code[i] == '{') depth++;
+        if (code[i] == '}') {
+          depth--;
+          if (depth == 0) return code.substring(open + 1, i);
+        }
+      }
+      fail('unbalanced braces after "$marker" in $appDartPath');
+    }
+
+    late String branch;
+
+    setUp(() {
+      final File file = File(appDartPath);
+      // Guard the guard: a moved file must fail loudly rather than assert
+      // nothing about an empty string.
+      expect(
+        file.existsSync(),
+        isTrue,
+        reason: 'expected to find $appDartPath',
+      );
+      branch = unlockedBranch(codeOnly(file.readAsStringSync()));
+    });
+
+    test('the KHA-122 signal provider is watched inside the unlocked '
+        'branch', () {
+      expect(
+        branch,
+        contains('ref.watch(foregroundSmsSignalProvider)'),
+        reason:
+            'this is KHA-122\'s entire production call site. Without it the '
+            'EventChannel is never subscribed, SmsForegroundBridge emits into '
+            'nothing, and an SMS arriving while the app sits open and idle is '
+            'not ingested until the user backgrounds and reopens — with Home '
+            'stating "All caught up" in the meantime. Every provider test in '
+            'this file still passes in that state, which is why this '
+            'assertion exists (KHA-138).',
+      );
+    });
+
+    test('the resume/unlock sweep provider is watched there too', () {
+      // The signal provider only *invalidates* the sweep provider. If nothing
+      // watches the sweep, an invalidation re-runs nothing — so deleting this
+      // line breaks KHA-122 just as completely, and just as silently.
+      expect(
+        branch,
+        contains('ref.watch(foregroundSweepProvider)'),
+        reason:
+            'foregroundSmsSignalProvider invalidates this one; an invalidated '
+            'provider with no listener is never rebuilt, so the signal would '
+            'arrive and nothing would sweep',
+      );
+    });
+
+    test('neither watch has escaped to the locked path (AC-A1.4)', () {
+      // The inverse property, and the reason the two tests above are not
+      // sufficient on their own. A *duplicate* watch — one inside the branch
+      // and one hoisted above it — would satisfy both of them while holding
+      // the EventChannel subscription open under the lock screen, which
+      // AC-A1.4 forbids and ADR-005 makes pointless (no unwrapped key, so
+      // nothing could be written even if a signal arrived).
+      //
+      // Counting rather than searching is what catches that: every occurrence
+      // in the file must be an occurrence in the branch.
+      int count(String haystack, String needle) =>
+          haystack.split(needle).length - 1;
+
+      final String code = codeOnly(File(appDartPath).readAsStringSync());
+      for (final String call in <String>[
+        'ref.watch(foregroundSmsSignalProvider)',
+        'ref.watch(foregroundSweepProvider)',
+      ]) {
+        expect(
+          count(code, call),
+          count(branch, call),
+          reason:
+              'every "$call" in $appDartPath must be inside the unlocked '
+              'branch. One outside it would subscribe while the app is '
+              'locked (AC-A1.4).',
+        );
+      }
+    });
   });
 }

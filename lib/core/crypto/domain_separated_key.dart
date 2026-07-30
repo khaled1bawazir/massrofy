@@ -7,14 +7,17 @@
 /// ADR-010's `auditChainKey` seeds the audit trail's tamper-evidence chain
 /// (`AuditLogDao._computeHash`: `HMAC_k(prevHash '|' canonicalPayload)`).
 /// ADR-017's D1 dedup also needs a Keystore-held HMAC key
-/// (`ContentHmac.compute`: `HMAC_k(normalisedBody '\x00' sender '\x00'
-/// millis)`). P2 originally passed `auditChainKey` straight into both —
-/// "one secret, two uses" — which review caught as exactly the wrong
-/// instinct for a mechanism whose entire job is tamper-evidence: the two
-/// protocols only stayed collision-free by the accident that one input
-/// encoding ends in JSON's `}` and the other ends in the digits of a
-/// timestamp. That is not a property either protocol was designed to rely
-/// on, so it is not one this codebase should ship relying on.
+/// (`ContentHmac.compute`: `HMAC_k(scheme '\x00' normalisedBody '\x00'
+/// normalisedSender)` — the delivery timestamp was dropped from that material
+/// by the KHA-137 decision; see `ContentHmac`). P2 originally passed
+/// `auditChainKey` straight into both — "one secret, two uses" — which review
+/// caught as exactly the wrong instinct for a mechanism whose entire job is
+/// tamper-evidence: the two protocols only stayed collision-free by the
+/// accident that one input encoding ends in JSON's `}` and the other ends in
+/// the digits of a timestamp. That is not a property either protocol was
+/// designed to rely on, so it is not one this codebase should ship relying on
+/// — and KHA-137 has since removed that trailing timestamp entirely, which is
+/// precisely why the accident was never safe to depend on.
 ///
 /// The fix keeps the single stored secret (still one Keystore-wrapped root
 /// key, still one rotation/lifecycle story) but derives a distinct subkey

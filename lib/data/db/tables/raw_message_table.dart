@@ -35,9 +35,22 @@ class RawMessages extends Table {
   /// happens before this DAO is ever called, in the P2 ingestion pipeline.)
   TextColumn get sanitizedBody => text().nullable()();
 
-  /// `HMAC-SHA256(k, normalisedBody‖sender‖smsTimestamp)`, `UNIQUE` — the
-  /// D1-exact carrier-retry dedup key (ADR-017). Storing an HMAC rather
-  /// than the text keeps this dedup index non-reversible.
+  /// `HMAC-SHA256(k, "massrofy/content-hmac/v2"‖normalisedBody‖
+  /// normalisedSender)`, `UNIQUE` — the D1-exact carrier-retry dedup key
+  /// (ADR-017, v2 per the KHA-137 decision). Storing an HMAC rather than the
+  /// text keeps this dedup index non-reversible.
+  ///
+  /// **No `smsTimestamp` component, deliberately** — a redelivery arrives at
+  /// a different instant by definition, so a timestamped digest could never
+  /// catch the one case D1 exists for (KHA-137). See `ContentHmac`.
+  ///
+  /// The column is a plain `TEXT UNIQUE` with **no format assumption**, which
+  /// is what lets v1 and v2 digests coexist here after the update: the scheme
+  /// tag leads the material, so a v1 digest can never equal a v2 one, so
+  /// stale pre-fix rows simply never match rather than falsely suppressing.
+  /// Forward-only — no backfill, no migration, no schema change (a backfill
+  /// would be partial by construction anyway: `insertIgnoredNoContent` rows
+  /// retain no body to recompute from, and NFR-P4 is why).
   TextColumn get contentHmac => text().unique()();
 
   TextColumn get bankId => text().nullable()();

@@ -24,23 +24,65 @@
 /// docstring claims: *"an internal transfer split across two banks"* is listed as
 /// one of the interesting cases the sweep covers, and it does not.
 ///
-/// So the generated sweep here **plants a real cross-bank pair in every run**
-/// (`_plantTransferPair`), and there is a direct fixture test that fails if the
-/// pair is not excluded. If the shared analysis were ever dropped — if
-/// `InstrumentBreakdown.of` re-derived the pairing per slice, or stopped passing
-/// `transfers:` into `BankTreeBuilder` — the outgoing leg would start counting as
-/// spend on its instrument's row while the grand total kept excluding it, and the
-/// footer identity would break. `period_totals.dart` calls that *"the most
-/// plausible way to reintroduce AC-B11.1 as a bug"*; these tests are what would
-/// catch it.
+/// So the generated sweep here **plants a real cross-bank pair in every run**,
+/// and there is a direct fixture test that fails if the pair is not excluded.
 ///
-/// ## The three properties, and why the third is the one that matters
+/// ## KHA-139 — two things this comment used to claim, and did not do
+///
+/// QA mutation-tested both claims and both were false. They are recorded here
+/// rather than quietly deleted, because each is a trap the next person writing
+/// a reconciliation test will walk into.
+///
+/// **1. The planted pair was inert.** Both legs carried `affectsSpend: false`.
+/// `SpendClassification.of` consults the internal-transfer analysis only in its
+/// *first* branch (`transferState == internal`); the *third* branch,
+/// `_spendOrVeto`, sees `!affectsSpend` and returns
+/// `MovementClass.excluded / packDeclaredNonSpend` — **before**
+/// `InternalTransferDetector` is reached at all. So the pair vanished from the
+/// total because a pack flag said so, not because it was a pair, and a lone
+/// `transferOut` with no counterpart would have behaved identically. 200 runs
+/// exercised the flag and never the transfer logic.
+///
+/// It was also not what the app ships: `assets/rule_packs/sa-core.json` gives
+/// `transfer_out` `"affectsSpend": true` on both banks — correctly, because an
+/// outgoing transfer to a third party *is* spending and only the **internal**
+/// determination should remove it. The fixtures now match the pack, and both
+/// legs share a `referenceNumber`, which is what promotes the pair to
+/// `InternalTransferState.internal` via `InternalTransferEvidence.referenceMatch`.
+/// The exclusion is therefore now the analysis's doing, and the tests assert
+/// that state directly rather than inferring it from an arithmetic result that
+/// several unrelated mechanisms could produce.
+///
+/// **2. Removing `transfers:` from `InstrumentBreakdown.of`'s call to
+/// `BankTreeBuilder.build` is NOT caught by any test here, and cannot be.**
+/// This comment used to say it was. `InstrumentBreakdown.of` hands
+/// `BankTreeBuilder.build` the **whole** live list, and `build` falls back to
+/// `transfers ?? InternalTransferDetector.analyze(transactions)` — so omitting
+/// the parameter re-derives the *same* analysis over the *same* set and gets
+/// the same answer. Verified by mutation: commenting it out leaves
+/// `instrument_breakdown_test.dart`, `totals_reconciliation_test.dart` and
+/// `p5b_reconciliation_widget_test.dart` all green. The parameter is a
+/// consistency and efficiency aid, not a correctness requirement.
+///
+/// The *related* regression that genuinely would break — and that these tests
+/// do catch — is analysing a **narrower** set: if the pairing were ever
+/// re-derived per instrument slice, each slice would hold only one leg, the
+/// detector would find no counterpart, and the outgoing leg would count as
+/// spend on its own row while the grand total (computed over the whole set)
+/// kept excluding it. `period_totals.dart` calls that *"the most plausible way
+/// to reintroduce AC-B11.1 as a bug"*, and it is a different mutation from the
+/// one the old comment named.
+///
+/// ## The four properties, and why the third is the one that matters
 ///
 ///  1. Per-instrument figures equal hand-computed sums (an independent oracle).
 ///  2. The cash row exists and holds exactly what has no instrument.
 ///  3. **Instruments + cash == the period total**, over a hand fixture *and* over
 ///     200 generated ledgers. This is AC-E3.2 verbatim, and it is the one a naive
 ///     implementation fails the moment the user pays for anything in cash.
+///  4. A `candidate` pair — paired legs with no shared reference — is **still
+///     counted** as spend on both sides (AC-B11.2), and the footer closes around
+///     it. Nothing pinned that at the breakdown level before.
 library;
 
 import 'dart:math';
@@ -51,6 +93,7 @@ import 'package:massrofy/core/money/sign_convention.dart';
 import 'package:massrofy/features/ledger/bank_tree.dart';
 import 'package:massrofy/features/ledger/instrument_breakdown.dart';
 import 'package:massrofy/features/ledger/instrument_identity.dart';
+import 'package:massrofy/features/ledger/internal_transfer.dart';
 import 'package:massrofy/features/ledger/ledger_transaction.dart';
 import 'package:massrofy/features/ledger/period_totals.dart';
 import 'package:massrofy/features/ledger/transaction_types.dart';
@@ -149,14 +192,34 @@ void main() {
     // Cash — no instrument at all. THE row that makes a naive card breakdown
     // disagree with the period total.
     tx(id: 5, amount: '60.00'),
-    // The cross-bank internal transfer, both legs, same amount, minutes apart —
-    // which is what `InternalTransferDetector` pairs on.
+    // The cross-bank internal transfer, both legs, same amount, minutes apart,
+    // **sharing a reference number** — which is what `InternalTransferDetector`
+    // pairs on, and what promotes the pair to `InternalTransferState.internal`
+    // (`InternalTransferEvidence.referenceMatch`) rather than leaving it a
+    // still-counted `candidate`.
+    //
+    // **KHA-139 — every value here is load-bearing, and two of them used to be
+    // wrong.** The legs previously carried `affectsSpend: false` on *both*
+    // sides and no reference. That made the fixture inert: `_spendOrVeto` saw
+    // `!affectsSpend` and returned `packDeclaredNonSpend` **before** the
+    // internal-transfer analysis was ever consulted, so the pair was excluded
+    // by a pack flag rather than by being a transfer. A lone `transferOut` with
+    // no counterpart would have behaved identically, and this file's whole
+    // reason to exist is that the counterpart matters.
+    //
+    // These values now match what `assets/rule_packs/sa-core.json` actually
+    // ships (`baj-transfer-out-ar` / `baj-transfer-in-ar`, and their D360
+    // equivalents): the outgoing leg IS spend as far as the pack is concerned
+    // — correctly, since an outgoing transfer to a third party is spending —
+    // and only the *internal* determination removes it. Both rules also
+    // extract `referenceNumber`, so a shared reference is production
+    // behaviour, not a convenience for the test.
     tx(
       id: 6,
       amount: '750.00',
       type: TransactionType.transferOut,
-      affectsSpend: false,
       at: DateTime.utc(2026, 7, 15, 10),
+      reference: 'TRF-2026-0715-A',
       on: account10,
     ),
     tx(
@@ -166,6 +229,7 @@ void main() {
       type: TransactionType.transferIn,
       affectsSpend: false,
       at: DateTime.utc(2026, 7, 15, 10, 5),
+      reference: 'TRF-2026-0715-A',
       on: account22,
     ),
   ];
@@ -291,6 +355,33 @@ void main() {
         'the gap P5a\'s corpus never exercised', () {
       final InstrumentBreakdown breakdown = build();
 
+      // **First, prove the exclusion is the ANALYSIS's doing** (KHA-139).
+      // Without this, everything below passes just as happily when the legs
+      // carry `affectsSpend: false` — and then the test is only checking that
+      // a pack flag works, which no part of this file is about. The outgoing
+      // leg IS spend by the pack's reckoning; `internal` is what removes it.
+      final InternalTransferAnalysis analysis =
+          InternalTransferDetector.analyze(ledger);
+      final LedgerTransaction outLeg = ledger.firstWhere(
+        (LedgerTransaction t) => t.id == 6,
+      );
+      expect(
+        outLeg.affectsSpend,
+        isTrue,
+        reason:
+            'matching sa-core.json: the pack calls an outgoing transfer spend, '
+            'because to a third party it is',
+      );
+      expect(
+        analysis.stateFor(outLeg),
+        InternalTransferState.internal,
+        reason:
+            'the shared reference number is what proves the pair (AC-B11.1). '
+            'If this is `candidate`, the legs are still counted as spend and '
+            'every figure below is being produced by something other than the '
+            'transfer logic.',
+      );
+
       // If the shared analysis were dropped, `BankTreeBuilder` would re-derive
       // the pairing from each instrument's own slice, find no counterpart, and
       // count the 750.00 outgoing leg as spend on account #10. Both assertions
@@ -308,6 +399,73 @@ void main() {
       );
       expect(breakdown.reconciles, isTrue);
       expect(breakdown.total.base, Money.parse('3360.00', currency: 'SAR'));
+    });
+
+    test('**AC-B11.2 — a CANDIDATE pair is still counted as spend**, and the '
+        'footer closes around it', () {
+      // The other half of the transfer contract, and the half that pins the
+      // difference between the two states at the breakdown level (KHA-139).
+      //
+      // Same two legs, same amounts, same window, same two banks — **no shared
+      // reference**. `_evidenceFor` falls through to `amountAndTime`, which is
+      // suggestive and not proof, so the detector rates the pair `candidate`.
+      // `internal_transfer.dart` is explicit that a candidate is *"still
+      // counted, and flagged for review"*: netting a pair the app cannot prove
+      // would silently delete real spending from the user's total on a guess.
+      //
+      // So the outgoing leg's 750.00 must reappear — on account #10's row AND
+      // in the period total — and the footer must still close around it. That
+      // last part is what makes this a breakdown test rather than a duplicate
+      // of the detector's own unit tests.
+      final List<LedgerTransaction> unproven = <LedgerTransaction>[
+        for (final LedgerTransaction txn in ledger)
+          if (txn.id != 6 && txn.id != 7) txn,
+        tx(
+          id: 6,
+          amount: '750.00',
+          type: TransactionType.transferOut,
+          at: DateTime.utc(2026, 7, 15, 10),
+          on: account10,
+        ),
+        tx(
+          id: 7,
+          amount: '750.00',
+          direction: MovementDirection.credit,
+          type: TransactionType.transferIn,
+          affectsSpend: false,
+          at: DateTime.utc(2026, 7, 15, 10, 5),
+          on: account22,
+        ),
+      ];
+
+      final InternalTransferAnalysis analysis =
+          InternalTransferDetector.analyze(unproven);
+      expect(
+        analysis.stateFor(
+          unproven.firstWhere((LedgerTransaction t) => t.id == 6),
+        ),
+        InternalTransferState.candidate,
+        reason:
+            'amount + time alone is evidence, not proof — dropping the shared '
+            'reference must demote the pair rather than leave it internal',
+      );
+
+      final InstrumentBreakdown breakdown = build(unproven);
+
+      expect(
+        breakdown.instruments
+            .firstWhere((InstrumentSlice s) => s.summary.instrument.id == 10)
+            .summary
+            .totals
+            .base,
+        Money.parse('1750.00', currency: 'SAR'),
+        reason: '1000.00 bill payment + the 750.00 unproven transfer leg',
+      );
+      // 3360.00 + 750.00 — the candidate leg is back in the period total too,
+      // which is the whole point: the two sides moved together.
+      expect(breakdown.total.base, Money.parse('4110.00', currency: 'SAR'));
+      expect(sumOfBreakdown(breakdown), breakdown.total.base);
+      expect(breakdown.reconciles, isTrue);
     });
 
     test('a soft-deleted transaction leaves both sides at once', () {
@@ -423,13 +581,22 @@ void main() {
         // **The planted cross-bank pair — the gap this file exists to close.**
         //
         // Two instruments on two *different* banks, equal amounts, minutes apart,
-        // opposite directions. `InternalTransferDetector` pairs them only when the
-        // analysis runs over the whole set, which is precisely the property
-        // AC-E3.2 depends on.
-        final LedgerInstrument outLeg = generatedInstruments.firstWhere(
+        // opposite directions, sharing a reference number. `InternalTransferDetector`
+        // pairs them only when the analysis runs over the whole set, which is
+        // precisely the property AC-E3.2 depends on.
+        //
+        // **KHA-139:** the outgoing leg carries `affectsSpend: true`, matching
+        // `sa-core.json`'s `transfer_out`. With the `false` it used to have,
+        // `_spendOrVeto` vetoed it before `InternalTransferDetector` was
+        // consulted at all, so 200 runs of this loop exercised the pack flag
+        // and never once the transfer analysis — the exact gap the docstring
+        // claimed to have closed. The shared reference is what carries it past
+        // `candidate` (which is deliberately still spend, AC-B11.2) to
+        // `internal`.
+        final LedgerInstrument outInstrument = generatedInstruments.firstWhere(
           (LedgerInstrument i) => i.bankId == generatedBanks.first.id,
         );
-        final LedgerInstrument inLeg = generatedInstruments.firstWhere(
+        final LedgerInstrument inInstrument = generatedInstruments.firstWhere(
           (LedgerInstrument i) => i.bankId == generatedBanks[1].id,
         );
         final String transferAmount =
@@ -440,15 +607,17 @@ void main() {
           1 + random.nextInt(28),
           9,
         );
+        final String transferReference = 'TRF-RUN-$run';
+        final LedgerTransaction outLeg = tx(
+          id: 5000,
+          amount: transferAmount,
+          type: TransactionType.transferOut,
+          at: transferAt,
+          reference: transferReference,
+          on: outInstrument,
+        );
         transactions.addAll(<LedgerTransaction>[
-          tx(
-            id: 5000,
-            amount: transferAmount,
-            type: TransactionType.transferOut,
-            affectsSpend: false,
-            at: transferAt,
-            on: outLeg,
-          ),
+          outLeg,
           tx(
             id: 5001,
             amount: transferAmount,
@@ -456,10 +625,21 @@ void main() {
             type: TransactionType.transferIn,
             affectsSpend: false,
             at: transferAt.add(const Duration(minutes: 4)),
-            on: inLeg,
+            reference: transferReference,
+            on: inInstrument,
           ),
         ]);
-        runsWithPlantedPair += 1;
+
+        // **Guard the guard, properly** (KHA-139). This used to be
+        // `runsWithPlantedPair += 1` beside the planting, checked against 200
+        // at the end — i.e. `200 == 200`, which counts *plantings* and would
+        // survive a refactor that put both legs on the same bank or stopped the
+        // detector pairing them. Counting *detections* is the only version that
+        // guards anything.
+        if (InternalTransferDetector.analyze(transactions).stateFor(outLeg) ==
+            InternalTransferState.internal) {
+          runsWithPlantedPair += 1;
+        }
 
         final InstrumentBreakdown breakdown = InstrumentBreakdown.of(
           transactions,
@@ -493,10 +673,18 @@ void main() {
         );
       }
 
-      // Guards the guard: if a future refactor stopped planting the pair, the
-      // reconciliation assertions above would still pass and this suite would
-      // silently regress to P5a\'s narrower coverage.
-      expect(runsWithPlantedPair, 200);
+      // If a future refactor stopped planting the pair — or planted one the
+      // detector cannot rate `internal` — the reconciliation assertions above
+      // would still pass, and this suite would silently regress to P5a's
+      // narrower coverage. This is the assertion that stops that, and unlike
+      // its predecessor it can actually fail.
+      expect(
+        runsWithPlantedPair,
+        200,
+        reason:
+            'every run must contain a cross-bank pair that the ANALYSIS rates '
+            'internal — not merely a pair that was planted',
+      );
     });
   });
 }
