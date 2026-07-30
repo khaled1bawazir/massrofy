@@ -10,7 +10,7 @@
     "docs/PRD.md §3.4. No genuine bank SMS was copied into this file, and none may be.",
     "Bank names are real (they are public companies), but every template, amount,",
     "merchant, account suffix, reference number and date in the matching fixture corpus",
-    "is invented. See test/fixtures/sms_corpus/.",
+    "is invented. See test/fixtures/synthetic_sms_corpus.dart.",
     "",
     "Rules are matched in DESCENDING priority, first match wins (§5.2). The ignore rules",
     "sit at 900 so an OTP that happens to contain a transaction keyword is recognised as",
@@ -58,27 +58,62 @@
     "ever an input to name lookup — a wrong one shows a wrong label, it cannot lose a",
     "message. Correct them freely; never repoint a `bankId`, which is persisted.",
     "",
-    "=== The five banks below carry `messageRules: []`, and that is correct ====",
+    "=== A sender with `messageRules: []` is a COMPLETE state, not a stub =====",
     "",
-    "nera, AlRajhi, STC Bank, SAIB and SAB declare a confirmed sender and NO parsing",
-    "templates, because no real message-body sample exists for them yet and NFR-M3",
-    "forbids inventing one that pretends to be real. That is a complete, shippable state,",
-    "not a stub — AC-A6.5 (PRD Addendum A, approved): a sender that passes gate 1 with no",
-    "matching template lands in the Needs Review queue with its sanitised text, where",
-    "US-A4/S-19 completes it by hand. Concretely, an empty `messageRules` list makes the",
-    "engine's rule loop iterate zero times and fall through to its step 4 branch —",
+    "A bank may declare a confirmed sender and NO parsing templates. That is a complete,",
+    "shippable state — AC-A6.5 (PRD Addendum A, approved): a sender that passes gate 1",
+    "with no matching template lands in the Needs Review queue with its sanitised text,",
+    "where US-A4/S-19 completes it by hand. Concretely, an empty `messageRules` list makes",
+    "the engine's rule loop iterate zero times and fall through to its step 4 branch —",
     "`UnparsedMessage(noRuleMatched)` — which is the same path a configured bank takes",
     "when it changes a template. So a recognised sender is useful IMMEDIATELY with zero",
     "rules written, and `test/features/ingestion/sender_only_bank_review_test.dart`",
     "proves it end to end rather than at the data level only.",
     "",
-    "Adding real templates for these five is separate follow-up work, gated on real",
-    "(synthetic-ified) samples. Do not invent them here to make the file look finished."
+    "`saib` is in exactly that state today, deliberately: no message sample of any kind",
+    "has been observed for it. Do not invent templates for it to make this file look",
+    "finished — a guessed extraction regex silently writes a WRONG AMOUNT, which is the",
+    "one failure this product cannot survive. A missing template only costs a manual",
+    "completion, which the user can see and fix.",
+    "",
+    "=== KHA-136 / KHA-145: templates written from live structural specs =======",
+    "",
+    "On 2026-07-30 the human read the shapes of their real messages off their own device",
+    "and described them STRUCTURALLY on KHA-136 — field names, field order, language,",
+    "delimiter style, which sub-fields exist, which fields are sometimes absent. No real",
+    "message text, amount, name, merchant or account number was recorded anywhere,",
+    "including in that issue (NFR-M3). Every pattern below was authored from those",
+    "descriptions, and every matching fixture value in",
+    "`test/fixtures/synthetic_sms_corpus.dart` is invented.",
+    "",
+    "What that round covered, and what it deliberately did NOT:",
+    "  - `nera`      — one card-purchase type. No OTP/marketing sample, so no ignore rule.",
+    "  - `stc-bank`  — SARIE inward transfer, internal transfer out, a P2P `Pay X`",
+    "                  payment, and OTPs (two ignore rules — see stc-payment-otp).",
+    "  - `sab`       — the SAME purchase type in BOTH English and Arabic (this bank sends",
+    "                  either), an Arabic incoming-transfer deposit, and an Arabic",
+    "                  biometric-login notification (ignore).",
+    "  - `al-rajhi`  — an OTP only. It gets an ignore rule and NO transaction rule,",
+    "                  because no transaction sample was obtained. That gap is expected",
+    "                  and is tracked, not papered over.",
+    "  - `bank-aljazira` / `d360` — already templated, and STILL missing message types:",
+    "                  a second (wallet/channel-branded) Arabic POS variant and a",
+    "                  beneficiary notification for Aljazira; an incoming-transfer",
+    "                  notification, an Ecommerce purchase and an Arabic OTP for D360.",
+    "                  \"Configured\" never meant \"complete\" (KHA-145).",
+    "",
+    "`requiredFields` stays at [amount, occurredAt] on every transaction rule, matching",
+    "the rules that were already here. That is deliberate and KHA-145 is the reason: the",
+    "Aljazira variant below reached the review queue as \"some details were missing\"",
+    "because a real message did not carry every field a rule demanded. A field that is",
+    "sometimes absent (a running balance, a card network, a wallet tag, a reference)",
+    "must be OPTIONAL in the regex and absent from `requiredFields` — it then reads as",
+    "explicitly unknown (AC-B1.3) instead of blocking the parse."
   ],
 
   "schemaVersion": 1,
   "packId": "sa-core",
-  "packVersion": "2026.07.30",
+  "packVersion": "2026.07.30.1",
   "locales": ["ar", "en"],
 
   "banks": [
@@ -96,6 +131,27 @@
           "intent": "ignore",
           "match": {
             "anyOf": ["رمز التحقق", "رمز الدخول", "كلمة المرور المؤقتة", "OTP"]
+          }
+        },
+        {
+          "_note": [
+            "KHA-145. A beneficiary-registration / pending-activation notice: it names a",
+            "payee and often a waiting period, and it moves NO money. Without this rule it",
+            "sits in Needs Review forever, where the only honest thing the user can do is",
+            "delete it one by one.",
+            "",
+            "`intent: ignore` is not the same as dropping it. Per NFR-P4 / ADR-015 the",
+            "engine still writes a counter row with `sanitizedBody = NULL`, so the",
+            "parser-health panel can say \"we saw 6 of these this month\" while retaining",
+            "not one character of the text. Recognised-and-discarded, never silently gone."
+          ],
+          "ruleId": "baj-beneficiary-notification-ar",
+          "priority": 900,
+          "messageType": "beneficiary_notification",
+          "intent": "ignore",
+          "match": {
+            "anyOf": ["إضافة مستفيد", "تسجيل المستفيد", "المستفيد الجديد", "بانتظار التفعيل", "بانتظار تفعيل"],
+            "noneOf": ["شراء", "سحب نقدي", "خصم من حساب"]
           }
         },
         {
@@ -227,6 +283,58 @@
             "instrumentRef": { "group": "card", "kind": "card", "maskPolicy": "last4" },
             "instrumentRefNetwork": { "group": "net", "transform": ["trim"] },
             "occurredAt": { "group": "dt", "format": "dd-MM-yy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "_note": [
+            "KHA-145 — the SECOND Aljazira POS channel. Real messages of this shape were",
+            "sitting in the user's Needs Review queue reading \"Some details were missing",
+            "from this message\", which is the tell: they passed `baj-pos-purchase-ar`'s",
+            "gate (they do say شراء / بطاقة / لدى) and then failed its extraction, because",
+            "this channel prints a DIFFERENT date format and adds an available-balance and",
+            "a total-amount-due line the older template never had.",
+            "",
+            "Priority 555 — above `baj-pos-purchase-ar` (550) — is the whole fix. Both",
+            "gates match this message; first match wins; so the specific variant must be",
+            "tried first or the generic rule swallows it and fails again. The gate keys on",
+            "the balance/amount-due lines rather than on a payment-brand name: the brand",
+            "is exactly the part a bank can rebrand next quarter, while an account summary",
+            "line is the structural difference.",
+            "",
+            "`الرصيد المتاح` and `إجمالي المستحق` are BOTH optional in the regex even",
+            "though the gate needs one of them, because a variant that drops one must",
+            "still parse rather than regress into review — the KHA-145 failure mode.",
+            "The total-amount-due figure is captured and deliberately NOT extracted: it is",
+            "a statement balance, not a movement, and `ParsedFields` has no field for it.",
+            "Writing it into `remainingBalance` alongside the available balance would put",
+            "two different numbers in one slot.",
+            "",
+            "`(?:ال)?` in front of the Arabic labels absorbs the definite article: this",
+            "channel prints `المبلغ:` where the older template prints `مبلغ:`, and that one",
+            "two-letter prefix is enough on its own to make an extraction regex miss."
+          ],
+          "ruleId": "baj-pos-purchase-wallet-ar",
+          "priority": 555,
+          "messageType": "pos_purchase",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["شراء", "بطاقة", "لدى"],
+            "anyOf": ["الرصيد المتاح", "إجمالي المستحق"],
+            "noneOf": ["شراء عبر الإنترنت", "رمز التحقق", "عرض خاص", "استرجاع"]
+          },
+          "regex": "بطاقة\\s*:\\s*(?<card>[\\*x0-9]{3,})\\s*(?:ال)?مبلغ\\s*:\\s*(?<amt>[0-9.,]+)\\s*(?<cur>[A-Za-z]{3})\\s*لدى\\s*:\\s*(?<mer>.+?)\\s*(?:ال)?تاريخ\\s*:\\s*(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2})(?:\\s*الرصيد المتاح\\s*:\\s*(?<bal>[0-9.,]+)\\s*(?<balCur>[A-Za-z]{3}))?(?:\\s*إجمالي المستحق\\s*:\\s*(?<due>[0-9.,]+)\\s*(?<dueCur>[A-Za-z]{3}))?",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "merchant": { "group": "mer", "transform": ["trim", "collapseWs"] },
+            "instrumentRef": { "group": "card", "kind": "card", "maskPolicy": "last4" },
+            "remainingBalance": { "group": "bal", "transform": ["normalizeNumerals"] },
+            "remainingBalanceCurrency": { "group": "balCur", "transform": ["upper"] },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm", "timezone": "Asia/Riyadh" }
           },
           "sign": "debit",
           "affectsSpend": true,
@@ -417,6 +525,24 @@
           }
         },
         {
+          "_note": [
+            "KHA-145. D360 writes its transaction messages in English but sends the",
+            "verification code for an online purchase in ARABIC, so `d360-otp`'s English",
+            "keyword list never saw it. The message quotes the purchase it is confirming —",
+            "merchant, amount and all — which makes it the exact AC-A2.1 hazard: at any",
+            "lower priority a rule could read a security code as a second purchase and",
+            "double the user's spend for that day. 900 puts it above every transaction",
+            "rule, and the corpus pins a fixture whose body contains a full purchase."
+          ],
+          "ruleId": "d360-otp-ar",
+          "priority": 900,
+          "messageType": "otp",
+          "intent": "ignore",
+          "match": {
+            "anyOf": ["رمز التحقق", "رمز الأمان", "كلمة المرور المؤقتة", "رمز الدخول"]
+          }
+        },
+        {
           "ruleId": "d360-marketing",
           "priority": 890,
           "messageType": "marketing",
@@ -504,6 +630,47 @@
           "redact": []
         },
         {
+          "_note": [
+            "KHA-145 — D360's Ecommerce purchase, a THIRD purchase shape alongside the",
+            "`purchase of …` (POS) and `online purchase of …` (FX) templates already here.",
+            "It is a label:value layout with an explicit `Ecommerce` channel tag and, in",
+            "the sample described, no conversion or fee block at all — so it is a distinct",
+            "template, not a widening of `d360-online-purchase-en`, whose regex requires",
+            "the parenthesised converted amount, the FX fee and the rate.",
+            "",
+            "`messageType` is `online_purchase` and not a new `ecommerce_purchase` string:",
+            "the type vocabulary is closed (`lib/features/ledger/transaction_types.dart`),",
+            "and a type this build does not know is excluded from spend totals until",
+            "something classifies it. An unrecognised type would make a real purchase",
+            "invisible in the one number the product exists to show.",
+            "",
+            "Card network and card type are optional in the regex: a card can be printed",
+            "with neither, and requiring them would push a genuine purchase into review."
+          ],
+          "ruleId": "d360-ecommerce-purchase-en",
+          "priority": 565,
+          "messageType": "online_purchase",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["ecommerce", "card\\s*:"],
+            "noneOf": ["verification code", "رمز التحقق", "one-time password"]
+          },
+          "regex": "ecommerce\\s*card\\s*:\\s*(?:(?<net>[A-Za-z]+)\\s+(?<ctype>Credit|Debit|Prepaid)\\s+)?(?<card>[\\*x0-9]{3,})\\s*amount\\s*:\\s*(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s*merchant\\s*:\\s*(?<mer>.+?)\\s*date\\s*:\\s*(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "merchant": { "group": "mer", "transform": ["trim", "collapseWs"] },
+            "instrumentRef": { "group": "card", "kind": "card", "maskPolicy": "last4" },
+            "instrumentRefNetwork": { "group": "net", "transform": ["lower"] },
+            "instrumentRefType": { "group": "ctype", "transform": ["lower"] },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
           "ruleId": "d360-online-purchase-en",
           "priority": 560,
           "messageType": "online_purchase",
@@ -574,6 +741,49 @@
           },
           "sign": "debit",
           "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "_note": [
+            "KHA-145 — D360's incoming-transfer NOTIFICATION, a second inbound shape",
+            "alongside `d360-transfer-in-en`. It leads with the sending bank, names the",
+            "sender and the sender's masked IBAN, and carries no `Ref` field, so the",
+            "existing rule's regex cannot read it.",
+            "",
+            "sign `credit`, affectsSpend `false`. Money arriving is not spending, and if",
+            "the counterparty turns out to be the user themselves the P3 internal-transfer",
+            "pairing (US-B10/B11) nets it against the matching outbound leg. Getting this",
+            "flag wrong is not cosmetic: `true` here would ADD every incoming transfer to",
+            "the spend total, which for a salary-sized credit is the largest possible",
+            "error in the only number the product exists to show.",
+            "",
+            "The IBAN is captured and deliberately NOT extracted. It identifies the",
+            "COUNTERPARTY, and the only instrument fields available (`instrumentRef` /",
+            "`settlementRef`) mean \"the user's own card or account\" — a transaction is",
+            "attributed to whatever they name (AC-B13.1/2, `instrument_identity.dart`).",
+            "Writing a stranger's IBAN there would invent an account in the user's own",
+            "bank tree and attribute their money to it. Better a field we cannot store",
+            "than a field stored in the wrong place."
+          ],
+          "ruleId": "d360-transfer-in-notification-en",
+          "priority": 532,
+          "messageType": "transfer_in",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["incoming transfer", "from bank"],
+            "noneOf": ["incoming transfer of", "verification code", "رمز التحقق"]
+          },
+          "regex": "from bank\\s*:\\s*(?<cpbank>.+?)\\s*amount\\s*:\\s*(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s*sender\\s*:\\s*(?<cp>.+?)\\s*(?:iban\\s*:\\s*(?<iban>[A-Za-z0-9\\*…]+)\\s*)?date\\s*:\\s*(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "counterpartyName": { "group": "cp", "transform": ["trim", "collapseWs"] },
+            "counterpartyBankName": { "group": "cpbank", "transform": ["trim", "collapseWs"] },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "credit",
+          "affectsSpend": false,
           "requiredFields": ["amount", "occurredAt"],
           "redact": []
         },
@@ -701,30 +911,249 @@
     },
 
     {
+      "_note": [
+        "KHA-136. ONE message type was observed for nera: an English card purchase in a",
+        "label:value layout, whose `Card:` value is a semicolon-joined list of sub-fields",
+        "ending in the masked number, with an OPTIONAL running balance line.",
+        "",
+        "One type is therefore all this bank gets. No OTP, marketing or balance-info",
+        "sample was seen, so nera has no `ignore` rules — an ignore rule keyed on guessed",
+        "keywords would either never fire (dead weight) or fire on something it should",
+        "not (a discarded transaction). Everything unmatched still reaches Needs Review",
+        "(AC-A6.5), which is the honest place for a message nobody has described yet."
+      ],
       "bankId": "nera",
       "displayName": { "ar": "نيرا", "en": "nera" },
       "aliases": [],
       "senderPatterns": ["^nera$"],
-      "messageRules": []
+      "messageRules": [
+        {
+          "_note": [
+            "The `Card:` sub-fields are semicolon-joined and their COUNT varies — a wallet",
+            "tag may or may not be present in front of the network. So `net` is written as",
+            "\"everything up to the LAST semicolon\" (`[^:]+` is greedy and backtracks to",
+            "it) and the masked number is what follows. That reads a two-part or a",
+            "three-part list with one pattern instead of guessing the arity.",
+            "",
+            "`Balance:` is optional — the structural spec says a running balance is not on",
+            "every message — and it lands in `remainingBalance`, which `ParsedFields`",
+            "documents as informational and never treats as spend. Two fixtures pin both",
+            "shapes, because \"optional\" that is only ever tested present is not optional."
+          ],
+          "ruleId": "nera-pos-purchase-en",
+          "priority": 550,
+          "messageType": "pos_purchase",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["purchase", "card\\s*:", "amount\\s*:"],
+            "noneOf": ["OTP", "verification code", "one-time password", "security code"]
+          },
+          "regex": "purchase\\s*card\\s*:\\s*(?<net>[^:]+);\\s*(?<card>[\\*x0-9]{3,})\\s*amount\\s*:\\s*(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s*merchant\\s*:\\s*(?<mer>.+?)\\s*(?:balance\\s*:\\s*(?<balCur>[A-Za-z]{3})\\s*(?<bal>[0-9.,]+)\\s*)?date\\s*:\\s*(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "merchant": { "group": "mer", "transform": ["trim", "collapseWs"] },
+            "instrumentRef": { "group": "card", "kind": "card", "maskPolicy": "last4" },
+            "instrumentRefNetwork": { "group": "net", "transform": ["trim", "lower"] },
+            "remainingBalance": { "group": "bal", "transform": ["normalizeNumerals"] },
+            "remainingBalanceCurrency": { "group": "balCur", "transform": ["upper"] },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm:ss", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        }
+      ]
     },
 
     {
+      "_note": [
+        "KHA-136. The ONLY AlRajhi sample obtained was an OTP — a two-line English",
+        "\"OTP Code / Reason\" message. So this bank gets an ignore rule and NOTHING else.",
+        "",
+        "That is a deliberate, useful half-step, not an oversight: the OTPs stop",
+        "accumulating in Needs Review (they become counter-only rows, NFR-P4), while a",
+        "genuine AlRajhi transaction — whose shape nobody has yet described — still lands",
+        "in the queue where the user can see and complete it. Writing a transaction",
+        "template here from imagination is the one thing that would be worse than",
+        "waiting: an extraction regex that half-fits produces a WRONG amount silently,",
+        "whereas a missing one produces a visible review item."
+      ],
       "bankId": "al-rajhi",
       "displayName": { "ar": "مصرف الراجحي", "en": "AlRajhi Bank" },
       "aliases": ["Al Rajhi", "AlRajhi", "الراجحي"],
       "senderPatterns": ["^Al\\s*Rajhi\\s*Bank$"],
-      "messageRules": []
+      "messageRules": [
+        {
+          "ruleId": "rajhi-otp-en",
+          "priority": 900,
+          "messageType": "otp",
+          "intent": "ignore",
+          "match": {
+            "anyOf": ["OTP", "one-time password", "verification code", "security code", "رمز التحقق"]
+          }
+        }
+      ]
     },
 
     {
+      "_note": [
+        "KHA-136. Four message types were described for STC Bank, all English, all in a",
+        "one-label-per-line layout with NO colons — the labels themselves are the",
+        "delimiters, which is why these regexes key on `amount`, `from`, `to account`",
+        "and so on as words rather than on punctuation.",
+        "",
+        "The important one is the P2P pair. A `Pay X` payment arrives as TWO separate",
+        "SMS — the payment confirmation and its own OTP — for ONE logical transaction,",
+        "and the OTP half quotes the payee and the amount. If both became transactions",
+        "the user's spend would be exactly doubled for that payment. They are not merged",
+        "into one rule (the engine parses one message at a time, and pairing two SMS is",
+        "not something a rule pack can express); instead `stc-payment-otp` recognises",
+        "the OTP half at priority 910 and discards its body, so the pair yields exactly",
+        "one transaction. `stc-p2p-payment-en` also carries the OTP keywords in its",
+        "`noneOf` — belt and braces, because the cost of getting this wrong is a",
+        "double-counted amount and the cost of the extra clause is nothing."
+      ],
       "bankId": "stc-bank",
       "displayName": { "ar": "بنك stc", "en": "STC Bank" },
       "aliases": [],
       "senderPatterns": ["^STC\\s*Bank$"],
-      "messageRules": []
+      "messageRules": [
+        {
+          "_note": [
+            "The OTP half of a `Pay X` pair: it names the payee and the amount, so it is",
+            "the most dangerous message this bank sends. Priority 910 puts it above the",
+            "generic OTP rule purely so the parser-health panel can count the two",
+            "separately; both are `ignore`, so a mix-up would be harmless — which is",
+            "exactly why the ordering that DOES matter (ignore above transaction) is",
+            "asserted in `rule_pack_corpus_test.dart` rather than left to reading."
+          ],
+          "ruleId": "stc-payment-otp",
+          "priority": 910,
+          "messageType": "otp",
+          "intent": "ignore",
+          "match": {
+            "allOf": ["pay"],
+            "anyOf": ["OTP", "one-time password", "verification code", "security code", "confirmation code"]
+          }
+        },
+        {
+          "ruleId": "stc-otp",
+          "priority": 900,
+          "messageType": "otp",
+          "intent": "ignore",
+          "match": {
+            "anyOf": ["OTP", "one-time password", "verification code", "security code"]
+          }
+        },
+        {
+          "_note": [
+            "SARIE is Saudi Arabia's interbank transfer system, so this is money arriving",
+            "from ANOTHER bank. credit, and affectsSpend false — see the note on",
+            "`d360-transfer-in-notification-en` for why that flag is the one to get right.",
+            "The gate keys on `sarie` alone: it is unambiguous, it appears in no other",
+            "message type, and a narrow gate on a distinctive token beats a wide gate that",
+            "has to be fenced off with exclusions."
+          ],
+          "ruleId": "stc-transfer-in-sarie-en",
+          "priority": 540,
+          "messageType": "transfer_in",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["sarie"],
+            "noneOf": ["OTP", "verification code", "one-time password"]
+          },
+          "regex": "sarie.*?amount\\s+(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s+from\\s+(?<cp>.+?)\\s+from bank\\s+(?<cpbank>.+?)\\s+to account\\s+(?<acct>[\\*x0-9]{3,})\\s+date\\s+(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2})(?:\\s+reference\\s+(?<ref>[A-Za-z0-9\\-]+))?",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "instrumentRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "counterpartyName": { "group": "cp", "transform": ["trim", "collapseWs"] },
+            "counterpartyBankName": { "group": "cpbank", "transform": ["trim", "collapseWs"] },
+            "referenceNumber": { "group": "ref", "transform": ["trim"] },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "credit",
+          "affectsSpend": false,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "_note": [
+            "An instant transfer out to a named recipient. `affectsSpend: true` matches",
+            "every other `transfer_out` rule in this pack: money leaving toward a named",
+            "counterparty IS spend unless the counterparty turns out to be the user, and",
+            "that is a property of the PAIR, which P3's internal-transfer matcher decides",
+            "(US-B11, AC-B11.2). A single rule looking at a single message cannot know it,",
+            "and guessing `false` here would silently hide real payments from the total.",
+            "",
+            "The gate requires the `amount` label as well as `transfer out`, so a message",
+            "that merely mentions a transfer without this layout falls through to Needs",
+            "Review instead of matching and then failing extraction — a review item that",
+            "says \"we did not understand this\" is more honest than one that says \"details",
+            "were missing\" about a rule that never applied."
+          ],
+          "ruleId": "stc-transfer-out-en",
+          "priority": 535,
+          "messageType": "transfer_out",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["transfer out", "amount"],
+            "noneOf": ["OTP", "verification code", "one-time password", "sarie"]
+          },
+          "regex": "transfer out\\s+amount\\s+(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s+to\\s+(?<cp>.+?)\\s+date\\s+(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2})(?:\\s+reference\\s+(?<ref>[A-Za-z0-9\\-]+))?",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "counterpartyName": { "group": "cp", "transform": ["trim", "collapseWs"] },
+            "referenceNumber": { "group": "ref", "transform": ["trim"] },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "_note": [
+            "The transaction half of the `Pay X` pair described in this bank's note above.",
+            "`transfer_out` rather than a new type: it is money leaving to a named person,",
+            "which is what `transfer_out` means, and the type vocabulary is closed."
+          ],
+          "ruleId": "stc-p2p-payment-en",
+          "priority": 530,
+          "messageType": "transfer_out",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["pay", "amount", "reference"],
+            "noneOf": ["OTP", "verification code", "one-time password", "security code", "confirmation code", "transfer out", "sarie"]
+          },
+          "regex": "pay\\s+(?<cp>.+?)\\s+amount\\s+(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s+date\\s+(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2})\\s+reference\\s+(?<ref>[A-Za-z0-9\\-]+)",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "counterpartyName": { "group": "cp", "transform": ["trim", "collapseWs"] },
+            "referenceNumber": { "group": "ref", "transform": ["trim"] },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        }
+      ]
     },
 
     {
+      "_note": [
+        "KHA-136. No SAIB message of ANY kind was visible during the sampling round, so",
+        "this bank keeps its confirmed sender and zero templates — see the",
+        "\"a sender with messageRules: [] is a COMPLETE state\" section at the top of this",
+        "file. It is the control case for that claim, and",
+        "`test/features/ingestion/sender_only_bank_review_test.dart` still proves it end",
+        "to end. Revisit when the user has SAIB activity to describe."
+      ],
       "bankId": "saib",
       "displayName": { "ar": "البنك السعودي للاستثمار", "en": "SAIB" },
       "aliases": ["Saudi Investment Bank", "The Saudi Investment Bank"],
@@ -733,11 +1162,153 @@
     },
 
     {
+      "_note": [
+        "KHA-136. SAB is the BILINGUAL case, and it is the reason this pack cannot",
+        "assume one language per bank: the SAME purchase type was observed from this one",
+        "sender in English AND in Arabic, with different punctuation conventions in each",
+        "(semicolon-joined card sub-fields in English, a parenthesised network in",
+        "Arabic). Both get their own rule. Writing only the language that happened to",
+        "arrive first would have left half of this bank's purchases in Needs Review with",
+        "nothing in the app to explain why some parse and some do not.",
+        "",
+        "The two purchase rules sit at 550/549 — adjacent, and both above everything",
+        "else — because their gates are mutually exclusive by script, so the ordering",
+        "between them is documentation rather than logic."
+      ],
       "bankId": "sab",
       "displayName": { "ar": "البنك السعودي الأول", "en": "SAB" },
       "aliases": ["Saudi Awwal Bank"],
       "senderPatterns": ["^SAB$"],
-      "messageRules": []
+      "messageRules": [
+        {
+          "_note": [
+            "A biometric/login confirmation. Not a transaction, and it must be recognised",
+            "as such at a HIGH priority rather than left unmatched: it is security-shaped",
+            "text from a financial sender, and the next loosely-written rule anyone adds",
+            "to this bank is exactly the kind that would try to read one as a movement."
+          ],
+          "ruleId": "sab-login-notification-ar",
+          "priority": 900,
+          "messageType": "security_notification",
+          "intent": "ignore",
+          "match": {
+            "anyOf": ["تسجيل الدخول", "البصمة", "بصمة", "تسجيل دخول"],
+            "noneOf": ["شراء", "حوالة واردة"]
+          }
+        },
+        {
+          "_note": [
+            "English POS purchase. The `Card:` value is a semicolon-joined list — masked",
+            "number first, then the network, then a wallet tag — and BOTH trailing",
+            "sub-fields are optional, so a message that prints only the number still",
+            "parses. The wallet tag is captured and not extracted: `InstrumentReference`",
+            "has `network` and `cardType` (credit|debit|prepaid) and a wallet is neither.",
+            "",
+            "`Balance:` is optional. The structural spec is explicit that not every SAB",
+            "purchase carries a running balance, and that is precisely the shape of the",
+            "KHA-145 defect on the other bank — a field required by a rule but absent",
+            "from a real message routes a genuine purchase to Needs Review forever."
+          ],
+          "ruleId": "sab-pos-purchase-en",
+          "priority": 550,
+          "messageType": "pos_purchase",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["purchase", "card\\s*:", "amount\\s*:"],
+            "noneOf": ["OTP", "verification code", "one-time password", "security code"]
+          },
+          "regex": "purchase\\s*card\\s*:\\s*(?<card>[\\*x0-9]{3,})\\s*(?:;\\s*(?<net>[^;:]+?)\\s*)?(?:;\\s*(?<wallet>[^;:]+?)\\s*)?amount\\s*:\\s*(?<cur>[A-Za-z]{3})\\s*(?<amt>[0-9.,]+)\\s*merchant\\s*:\\s*(?<mer>.+?)\\s*(?:balance\\s*:\\s*(?<balCur>[A-Za-z]{3})\\s*(?<bal>[0-9.,]+)\\s*)?date\\s*:\\s*(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "merchant": { "group": "mer", "transform": ["trim", "collapseWs"] },
+            "instrumentRef": { "group": "card", "kind": "card", "maskPolicy": "last4" },
+            "instrumentRefNetwork": { "group": "net", "transform": ["trim", "lower"] },
+            "remainingBalance": { "group": "bal", "transform": ["normalizeNumerals"] },
+            "remainingBalanceCurrency": { "group": "balCur", "transform": ["upper"] },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm:ss", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "_note": [
+            "The SAME purchase type in Arabic. Same fields, Arabic labels, and the",
+            "network in parentheses instead of semicolon-joined — so it needs its own",
+            "pattern, not a widened English one. The Arabic labels are matched by their",
+            "STEMS (`بطاقة`, `مبلغ`, `رصيد`, `تاريخ`) so the definite article `ال` a bank",
+            "may or may not print costs nothing.",
+            "",
+            "The network here is extracted verbatim in Arabic, per this file's standing",
+            "note: canonicalising it onto visa|mada|mastercard is P3 entity-resolution",
+            "work, and the parser's job is to report what the message said. It is safe",
+            "for it to differ between languages because the network is an ATTRIBUTE of an",
+            "instrument, never part of its identity — identity is bank + kind + digits",
+            "(`instrument_identity.dart`), so the same card seen in both languages stays",
+            "one card."
+          ],
+          "ruleId": "sab-pos-purchase-ar",
+          "priority": 549,
+          "messageType": "pos_purchase",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["شراء", "بطاقة", "لدى"],
+            "noneOf": ["رمز التحقق", "استرجاع", "حوالة واردة"]
+          },
+          "regex": "بطاقة\\s*:\\s*(?<card>[\\*x0-9]{3,})\\s*(?:\\(\\s*(?<net>[^)]+?)\\s*\\)\\s*)?(?:ال)?مبلغ\\s*:\\s*(?<amt>[0-9.,]+)\\s*(?<cur>[A-Za-z]{3})\\s*لدى\\s*:\\s*(?<mer>.+?)\\s*(?:(?:ال)?رصيد\\s*:\\s*(?<bal>[0-9.,]+)\\s*(?<balCur>[A-Za-z]{3})\\s*)?(?:ال)?تاريخ\\s*:\\s*(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2}:[0-9]{2})",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "merchant": { "group": "mer", "transform": ["trim", "collapseWs"] },
+            "instrumentRef": { "group": "card", "kind": "card", "maskPolicy": "last4" },
+            "instrumentRefNetwork": { "group": "net", "transform": ["trim"] },
+            "remainingBalance": { "group": "bal", "transform": ["normalizeNumerals"] },
+            "remainingBalanceCurrency": { "group": "balCur", "transform": ["upper"] },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm:ss", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "debit",
+          "affectsSpend": true,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        },
+        {
+          "_note": [
+            "Arabic incoming-transfer deposit. credit / affectsSpend false, for the",
+            "reasons spelled out on `d360-transfer-in-notification-en`.",
+            "",
+            "The masked account it names is the USER'S receiving account, so that one IS",
+            "extracted as `instrumentRef`. The sender's IBAN is captured and NOT extracted",
+            "— it belongs to the counterparty, and there is no field for it that would not",
+            "misattribute it to the user. The IBAN, the sender bank and the reference are",
+            "all optional in the pattern: any of them missing must cost a nullable field,",
+            "never the transaction."
+          ],
+          "ruleId": "sab-transfer-in-ar",
+          "priority": 530,
+          "messageType": "transfer_in",
+          "intent": "transaction",
+          "match": {
+            "allOf": ["حوالة واردة"],
+            "noneOf": ["رمز التحقق", "شراء"]
+          },
+          "regex": "حساب\\s*:\\s*(?<acct>[\\*x0-9]{3,})\\s*من\\s*:\\s*(?<cp>.+?)\\s*(?:(?:الايبان|الآيبان|IBAN)\\s*:\\s*(?<iban>[A-Za-z0-9\\*…]+)\\s*)?(?:(?:ال)?بنك\\s*:\\s*(?<cpbank>.+?)\\s*)?(?:ال)?مبلغ\\s*:\\s*(?<amt>[0-9.,]+)\\s*(?<cur>[A-Za-z]{3})\\s*(?:ال)?تاريخ\\s*:\\s*(?<dt>[0-9]{2}/[0-9]{2}/[0-9]{4}\\s+[0-9]{2}:[0-9]{2}:[0-9]{2})(?:\\s*(?:ال)?مرجع\\s*:\\s*(?<ref>[A-Za-z0-9\\-]+))?",
+          "extract": {
+            "amount": { "group": "amt", "transform": ["normalizeNumerals"] },
+            "currency": { "group": "cur", "transform": ["upper"] },
+            "instrumentRef": { "group": "acct", "kind": "account", "maskPolicy": "last4" },
+            "counterpartyName": { "group": "cp", "transform": ["trim", "collapseWs"] },
+            "counterpartyBankName": { "group": "cpbank", "transform": ["trim", "collapseWs"] },
+            "referenceNumber": { "group": "ref", "transform": ["trim"] },
+            "occurredAt": { "group": "dt", "format": "dd/MM/yyyy HH:mm:ss", "timezone": "Asia/Riyadh" }
+          },
+          "sign": "credit",
+          "affectsSpend": false,
+          "requiredFields": ["amount", "occurredAt"],
+          "redact": []
+        }
+      ]
     }
   ]
 }

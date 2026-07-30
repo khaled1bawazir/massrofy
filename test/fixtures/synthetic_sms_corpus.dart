@@ -9,13 +9,20 @@
 /// Every message below is **fabricated**. The structural shapes — which
 /// fields appear for which transaction type, which language each bank writes
 /// in, where a converted amount and an FX fee sit, which types carry a
-/// reference number — come from the prose descriptions in `docs/PRD.md` §3.4,
-/// which itself deliberately reproduces no real text. Every amount, merchant,
-/// counterparty, account suffix, reference number and date here was invented
-/// for this file.
+/// reference number — come from two prose sources, neither of which
+/// reproduces any real text:
 ///
-/// The two bank *names* are real, because they are public companies named in
-/// the PRD. Nothing else is.
+///  1. `docs/PRD.md` §3.4, for the two banks sampled before the build began;
+///  2. Linear **KHA-136** / **KHA-145** (2026-07-30), where the human read the
+///     shapes of their own messages off their own device and described them
+///     structurally — field names, field order, language, delimiter style,
+///     and crucially which fields are only *sometimes* present.
+///
+/// Every amount, merchant, counterparty, account suffix, reference number and
+/// date here was invented for this file.
+///
+/// The bank *names* are real, because they are public companies. Nothing else
+/// is.
 ///
 /// ## What this corpus is for
 ///
@@ -590,6 +597,73 @@ const List<SmsFixture> aljaziraFixtures = <SmsFixture>[
         'في:28-07-26 14:32',
     expect: ExpectedOutcome.unparsed,
   ),
+
+  // --- KHA-145 additions: the second POS channel, and a notification -------
+  //
+  // Structure from the live KHA-136 sampling round; every value invented.
+  // Sender is the human-confirmed `Jazira Bank` (KHA-128), which is what a
+  // real device shows.
+
+  // --- 19 POS purchase through the second (wallet/channel) template --------
+  //
+  // The KHA-145 defect, reproduced and fixed. Real messages of this shape sat
+  // in Needs Review saying "Some details were missing from this message":
+  // they satisfy `baj-pos-purchase-ar`'s gate (شراء / بطاقة / لدى) and then
+  // fail its extraction, because this channel writes `التاريخ:` with a
+  // four-digit year instead of `في:` with a two-digit one, prefixes its
+  // labels with the definite article, and adds an available-balance and a
+  // total-amount-due line.
+  //
+  // The channel name in the header is deliberately generic here: the rule
+  // does not key on a payment brand at all (its regex starts at the card
+  // label), because a brand is exactly the part a bank rebrands next quarter.
+  //
+  // `remainingBalance` carries the available balance. The total amount due is
+  // matched and NOT extracted — it is a statement figure, not a movement, and
+  // putting two different numbers in one field would be worse than dropping
+  // one of them.
+  SmsFixture(
+    id: 'baj-19-pos-purchase-wallet',
+    sender: 'Jazira Bank',
+    body:
+        'شراء عبر محفظة الجوال\n'
+        'البطاقة: ****4821\n'
+        'المبلغ: 88.00 SAR\n'
+        'لدى: SAMPLE COFFEE HOUSE\n'
+        'التاريخ: 30/07/2026 08:05\n'
+        'الرصيد المتاح: 1234.56 SAR\n'
+        'إجمالي المستحق: 210.00 SAR',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'pos_purchase',
+    ruleId: 'baj-pos-purchase-wallet-ar',
+    amount: '88',
+    currency: 'SAR',
+    merchant: 'SAMPLE COFFEE HOUSE',
+    instrumentMasked: '****4821',
+    instrumentKind: 'card',
+    remainingBalance: '1234.56',
+    occurredAtUtc: '2026-07-30T05:05:00.000Z',
+    direction: 'debit',
+    affectsSpend: true,
+  ),
+
+  // --- 20 Beneficiary registration / pending activation (ignore) -----------
+  //
+  // Moves no money, names a payee, and used to sit in Needs Review forever.
+  // `ignore` does not mean "dropped": a counter row with no body is still
+  // written (NFR-P4), so the parser-health panel can report how many of these
+  // arrived without retaining one character of them.
+  SmsFixture(
+    id: 'baj-20-beneficiary-notification',
+    sender: 'Jazira Bank',
+    body:
+        'تم تسجيل المستفيد الجديد SAMPLE PAYEE NAME بانتظار التفعيل '
+        'خلال 24 ساعة.',
+    expect: ExpectedOutcome.ignored,
+    messageType: 'beneficiary_notification',
+    ruleId: 'baj-beneficiary-notification-ar',
+    classification: 'ignored_info',
+  ),
 ];
 
 /// D360 — **English** templates, per PRD §3.4 ("the other bank's are fully
@@ -908,6 +982,547 @@ const List<SmsFixture> d360Fixtures = <SmsFixture>[
     body: 'D360: Your card was used for a contactless payment. Details in app.',
     expect: ExpectedOutcome.unparsed,
   ),
+
+  // --- KHA-145 additions: message TYPES this "configured" bank was missing --
+  //
+  // Structure from the live KHA-136 sampling round; every value invented.
+  // Note the sender is the human-confirmed `D360 Bank` (KHA-128) rather than
+  // the older guessed `D360`, so these fixtures also exercise the sender
+  // string a real device actually delivers.
+
+  // --- 17 Ecommerce purchase (a THIRD purchase shape) ----------------------
+  //
+  // Distinct from both existing purchase templates: a label:value layout with
+  // an explicit `Ecommerce` channel tag and no conversion/fee block at all.
+  // It classifies as `online_purchase` — the type vocabulary is closed
+  // (`transaction_types.dart`), and inventing `ecommerce_purchase` would make
+  // this transaction unknown-typed and therefore excluded from spend totals.
+  SmsFixture(
+    id: 'd360-17-ecommerce-purchase',
+    sender: 'D360 Bank',
+    body:
+        'D360 Bank\n'
+        'Purchase - Ecommerce\n'
+        'Card: Mada Debit ****4472\n'
+        'Amount: SAR 320.00\n'
+        'Merchant: SAMPLE ONLINE STORE\n'
+        'Date: 28/07/2026 21:15',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'online_purchase',
+    ruleId: 'd360-ecommerce-purchase-en',
+    amount: '320',
+    currency: 'SAR',
+    merchant: 'SAMPLE ONLINE STORE',
+    instrumentMasked: '****4472',
+    instrumentKind: 'card',
+    instrumentNetwork: 'mada',
+    instrumentCardType: 'debit',
+    occurredAtUtc: '2026-07-28T18:15:00.000Z',
+    direction: 'debit',
+    affectsSpend: true,
+  ),
+
+  // --- 18 Incoming-transfer NOTIFICATION -----------------------------------
+  //
+  // `direction: credit` and `affectsSpend: false`. Money arriving is not
+  // spending; if the counterparty turns out to be the user themselves, P3's
+  // internal-transfer pairing nets it against the outbound leg (US-B10/B11).
+  // The opposite flag on a salary-sized credit is the largest error the app
+  // could make in the one number it exists to show.
+  //
+  // The sender's IBAN is deliberately NOT extracted: it identifies the
+  // counterparty, and `instrumentRef` means "the user's own account". Hence
+  // `instrumentMasked: null` even though the message clearly names an
+  // identifier — recording it would invent a stranger's account inside the
+  // user's own bank tree.
+  SmsFixture(
+    id: 'd360-18-transfer-in-notification',
+    sender: 'D360 Bank',
+    body:
+        'D360 Bank\n'
+        'Incoming Transfer\n'
+        'From Bank: Sample Bank Three\n'
+        'Amount: SAR 1850.00\n'
+        'Sender: OMAR K ALZAHRANI\n'
+        'IBAN: SA**7654\n'
+        'Date: 29/07/2026 13:05',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'transfer_in',
+    ruleId: 'd360-transfer-in-notification-en',
+    amount: '1850',
+    currency: 'SAR',
+    counterpartyName: 'OMAR K ALZAHRANI',
+    counterpartyBankName: 'Sample Bank Three',
+    occurredAtUtc: '2026-07-29T10:05:00.000Z',
+    direction: 'credit',
+    affectsSpend: false,
+  ),
+
+  // --- 19 Arabic OTP from an English-language bank -------------------------
+  //
+  // The AC-A2.1 hazard in its purest form, and the reason `d360-otp-ar`
+  // exists: D360 writes transactions in English but sends the verification
+  // code for an online purchase in Arabic, quoting the merchant and the
+  // amount. Any rule reading this as a purchase would double that day's
+  // spend. The ignore rule at priority 900 is what makes it a counter-only
+  // row with no body retained (NFR-P4) instead.
+  SmsFixture(
+    id: 'd360-19-otp-ar',
+    sender: 'D360 Bank',
+    body:
+        'D360 Bank: رمز التحقق 883021 لعملية شراء عبر الإنترنت بمبلغ '
+        '320.00 SAR لدى SAMPLE ONLINE STORE. لا تشاركه مع أحد.',
+    expect: ExpectedOutcome.ignored,
+    messageType: 'otp',
+    ruleId: 'd360-otp-ar',
+    classification: 'ignored_otp',
+  ),
+];
+
+// ---------------------------------------------------------------------------
+// KHA-136 — the banks that gained their FIRST templates
+// ---------------------------------------------------------------------------
+//
+// Everything below was authored from the structural descriptions the human
+// read off their own device on 2026-07-30 and wrote down on Linear KHA-136:
+// which fields appear, in what order, in which language, joined by which
+// delimiter, and — the part that matters most for `requiredFields` — which
+// fields are only *sometimes* present. No real message text, amount, name,
+// merchant or account number was recorded anywhere, including in that issue
+// (NFR-M3). Every value here is invented for this file.
+//
+// Each bank gets rules for the types that were actually observed and for no
+// others. That is why `nera` has one type and `al-rajhi` has no transaction
+// rule at all: a guessed extraction regex silently produces a WRONG amount,
+// while a missing rule produces a visible review item the user can complete.
+//
+// Every bank below also carries a **safety-net fixture**, and each one reuses
+// the exact body that `test/features/ingestion/sender_only_bank_review_test`
+// and `test/qa/kha_128_sender_gate_qa_probes_test` feed through the pipeline
+// for that sender. Those two suites assert those bodies reach Needs Review
+// with `no_rule_matched`, which is only true while these gates stay narrow —
+// so pinning the same strings here means a gate widened by accident fails in
+// this fast unit suite first, naming the rule, instead of surfacing three
+// files away as an unexplained pipeline count.
+
+/// nera — **English**, `label: value`, with the card's sub-fields joined by
+/// semicolons and a running balance that is not always present.
+const List<SmsFixture> neraFixtures = <SmsFixture>[
+  // --- 1/2 Card purchase, with the optional balance line present ----------
+  SmsFixture(
+    id: 'nera-01-pos-purchase',
+    sender: 'nera',
+    body:
+        'nera\n'
+        'Purchase\n'
+        'Card: mada;****6034\n'
+        'Amount: SAR 137.50\n'
+        'Merchant: SAMPLE MART RIYADH\n'
+        'Balance: SAR 2410.75\n'
+        'Date: 30/07/2026 14:32:10',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'pos_purchase',
+    ruleId: 'nera-pos-purchase-en',
+    amount: '137.5',
+    currency: 'SAR',
+    merchant: 'SAMPLE MART RIYADH',
+    instrumentMasked: '****6034',
+    instrumentKind: 'card',
+    instrumentNetwork: 'mada',
+    remainingBalance: '2410.75',
+    // 14:32:10 Riyadh. The seconds are pinned too: this template prints them
+    // and a rule that silently dropped them would still look right in a list.
+    occurredAtUtc: '2026-07-30T11:32:10.000Z',
+    direction: 'debit',
+    affectsSpend: true,
+  ),
+
+  // --- 2/2 Same type, NO balance line, and a three-part card field --------
+  //
+  // Two things at once, both deliberate. First, "optional" that is only ever
+  // tested present is not optional: if `Balance:` were required, every
+  // message of this shape would land in Needs Review — the KHA-145 failure
+  // mode on another bank. `remainingBalance` is therefore expected to be
+  // null, not zero (AC-B1.3).
+  //
+  // Second, the card field here carries a wallet tag *and* a network before
+  // the masked number, so the rule must read a two-part or a three-part
+  // semicolon list without knowing which it will get.
+  SmsFixture(
+    id: 'nera-02-pos-purchase-no-balance',
+    sender: 'nera',
+    body:
+        'nera\n'
+        'Purchase\n'
+        'Card: apple pay;mada;****6034\n'
+        'Amount: SAR 42.00\n'
+        'Merchant: SAMPLE PHARMACY 7\n'
+        'Date: 29/07/2026 19:05:44',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'pos_purchase',
+    ruleId: 'nera-pos-purchase-en',
+    amount: '42',
+    currency: 'SAR',
+    merchant: 'SAMPLE PHARMACY 7',
+    instrumentMasked: '****6034',
+    instrumentKind: 'card',
+    // Reported verbatim, wallet tag and all. Canonicalising this onto
+    // visa|mada|mastercard is P3 entity-resolution work; the parser's job is
+    // to say what the message said. It is safe for the two fixtures to
+    // disagree here because the network is an *attribute* of an instrument,
+    // never part of its identity (`instrument_identity.dart`) — so both
+    // fixtures still resolve to the one card ****6034.
+    instrumentNetwork: 'apple pay;mada',
+    occurredAtUtc: '2026-07-29T16:05:44.000Z',
+    direction: 'debit',
+    affectsSpend: true,
+  ),
+
+  // --- Safety net ---------------------------------------------------------
+  //
+  // nera has exactly one template, so anything else it sends must reach the
+  // review queue rather than vanish (AC-A4.4). This is also the fixture that
+  // proves the purchase rule's gate is narrow: it says "payment" and names an
+  // amount, and it still must not become a transaction.
+  SmsFixture(
+    id: 'nera-03-unknown-template',
+    sender: 'nera',
+    body: 'nera: Card payment 61.25 SAR at SAMPLE STORE 12. Ref TS00119.',
+    expect: ExpectedOutcome.unparsed,
+  ),
+];
+
+/// AlRajhi — an **OTP only**. No transaction sample was obtained, so there is
+/// deliberately no transaction fixture here and no transaction rule in the
+/// pack. See the bank's `_note` in `assets/rule_packs/sa-core.json`.
+const List<SmsFixture> alRajhiFixtures = <SmsFixture>[
+  SmsFixture(
+    id: 'rajhi-01-otp',
+    sender: 'AlRajhi Bank',
+    body:
+        'AlRajhi Bank\n'
+        'OTP Code: 483920\n'
+        'Reason: Login',
+    expect: ExpectedOutcome.ignored,
+    messageType: 'otp',
+    ruleId: 'rajhi-otp-en',
+    classification: 'ignored_otp',
+  ),
+
+  // The half of this bank that is still missing, asserted as missing rather
+  // than left unstated: a transaction-shaped message must reach the review
+  // queue, where US-A4/S-19 completes it by hand (AC-A6.5). The day a real
+  // sample arrives, this fixture is the one that turns into a parsed one.
+  SmsFixture(
+    id: 'rajhi-02-transaction-not-yet-templated',
+    sender: 'AlRajhi Bank',
+    body: 'AlRajhi Bank: 240.00 SAR spent, acct ending 7788, 30-07-26 09:14.',
+    expect: ExpectedOutcome.unparsed,
+  ),
+];
+
+/// STC Bank — **English**, one label per line and **no colons**, so the
+/// labels themselves are the delimiters.
+const List<SmsFixture> stcBankFixtures = <SmsFixture>[
+  // --- 1/3 SARIE inward transfer (interbank) ------------------------------
+  //
+  // `direction: credit`, `affectsSpend: false` — money arriving is not
+  // spending, and an internal one is netted at the pair level in P3
+  // (US-B10/B11), never guessed at from one message.
+  SmsFixture(
+    id: 'stc-01-transfer-in-sarie',
+    sender: 'STC Bank',
+    body:
+        'STC Bank\n'
+        'Incoming Transfer (SARIE)\n'
+        'Amount\n'
+        'SAR 3250.00\n'
+        'From\n'
+        'FAISAL A ALSHEHRI\n'
+        'From Bank\n'
+        'Sample Bank Two\n'
+        'To Account\n'
+        '****5566\n'
+        'Date\n'
+        '30/07/2026 09:15\n'
+        'Reference\n'
+        'STCB4471902',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'transfer_in',
+    ruleId: 'stc-transfer-in-sarie-en',
+    amount: '3250',
+    currency: 'SAR',
+    instrumentMasked: '****5566',
+    instrumentKind: 'account',
+    counterpartyName: 'FAISAL A ALSHEHRI',
+    counterpartyBankName: 'Sample Bank Two',
+    referenceNumber: 'STCB4471902',
+    occurredAtUtc: '2026-07-30T06:15:00.000Z',
+    direction: 'credit',
+    affectsSpend: false,
+  ),
+
+  // --- 2/3 Instant transfer out to a named recipient ----------------------
+  //
+  // `affectsSpend: true`, matching every other `transfer_out` in this pack.
+  // Money leaving toward a named counterparty is spend unless that
+  // counterparty is the user, which is a property of the *pair* and cannot be
+  // known from one message (AC-B11.2). Guessing `false` would silently hide
+  // real payments from the total.
+  //
+  // This template names no account at all, so `instrumentMasked` is null —
+  // explicitly unknown, never a blank instrument.
+  SmsFixture(
+    id: 'stc-02-transfer-out',
+    sender: 'STC Bank',
+    body:
+        'STC Bank\n'
+        'Transfer Out\n'
+        'Amount\n'
+        'SAR 150.00\n'
+        'To\n'
+        'NOURAH S ALQAHTANI\n'
+        'Date\n'
+        '30/07/2026 10:05',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'transfer_out',
+    ruleId: 'stc-transfer-out-en',
+    amount: '150',
+    currency: 'SAR',
+    counterpartyName: 'NOURAH S ALQAHTANI',
+    occurredAtUtc: '2026-07-30T07:05:00.000Z',
+    direction: 'debit',
+    affectsSpend: true,
+  ),
+
+  // --- 3/3 The P2P "Pay X" payment — first half of a PAIR -----------------
+  //
+  // One logical transaction arrives as TWO SMS: this one, and its own OTP
+  // (next fixture). Only this half may become a transaction. See
+  // `stc-payment-otp` in the pack, and the combination test in
+  // `rule_pack_corpus_test.dart` that feeds both and asserts exactly one
+  // transaction comes out.
+  SmsFixture(
+    id: 'stc-03-p2p-payment',
+    sender: 'STC Bank',
+    body:
+        'STC Bank\n'
+        'Pay SALEH M ALDOSSARI\n'
+        'Amount\n'
+        'SAR 75.00\n'
+        'Date\n'
+        '30/07/2026 12:40\n'
+        'Reference\n'
+        'STCBP2P8830142',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'transfer_out',
+    ruleId: 'stc-p2p-payment-en',
+    amount: '75',
+    currency: 'SAR',
+    counterpartyName: 'SALEH M ALDOSSARI',
+    referenceNumber: 'STCBP2P8830142',
+    occurredAtUtc: '2026-07-30T09:40:00.000Z',
+    direction: 'debit',
+    affectsSpend: true,
+  ),
+
+  // --- The OTP half of that same pair -------------------------------------
+  //
+  // It quotes the payee, the amount and the same reference as the payment
+  // above. Without an ignore rule that outranks the payment rule, this second
+  // SMS would produce a second 75.00 transaction and double the user's spend
+  // for that payment. It is recognised and discarded — a counter row with no
+  // body (NFR-P4) — not silently dropped.
+  SmsFixture(
+    id: 'stc-04-p2p-payment-otp',
+    sender: 'STC Bank',
+    body:
+        'STC Bank\n'
+        'Pay SALEH M ALDOSSARI\n'
+        'Amount\n'
+        'SAR 75.00\n'
+        'Reference\n'
+        'STCBP2P8830142\n'
+        'OTP 774193\n'
+        'Do not share this code with anyone.',
+    expect: ExpectedOutcome.ignored,
+    messageType: 'otp',
+    ruleId: 'stc-payment-otp',
+    classification: 'ignored_otp',
+  ),
+
+  // --- A standalone security code (the other OTP shape) -------------------
+  SmsFixture(
+    id: 'stc-05-otp',
+    sender: 'STC Bank',
+    body: 'STC Bank: Your verification code is 118240. Do not share it.',
+    expect: ExpectedOutcome.ignored,
+    messageType: 'otp',
+    ruleId: 'stc-otp',
+    classification: 'ignored_otp',
+  ),
+
+  // --- Safety net ---------------------------------------------------------
+  SmsFixture(
+    id: 'stc-06-unknown-template',
+    sender: 'STC Bank',
+    body: 'STC Bank: Wallet debit 18.90 SAR - EXAMPLE VENDOR ONE.',
+    expect: ExpectedOutcome.unparsed,
+  ),
+];
+
+/// SAB — the **bilingual** bank: the same purchase type arrives in English
+/// *and* in Arabic from this one sender, with different punctuation
+/// conventions in each. Both variants are templated; assuming one language
+/// per bank would leave half of them in Needs Review.
+const List<SmsFixture> sabFixtures = <SmsFixture>[
+  // --- 1/4 English POS purchase, balance present, wallet tag present ------
+  SmsFixture(
+    id: 'sab-01-pos-purchase-en',
+    sender: 'SAB',
+    body:
+        'SAB\n'
+        'Purchase\n'
+        'Card: ****7788;Visa;Mobile Wallet\n'
+        'Amount: SAR 249.90\n'
+        'Merchant: SAMPLE ELECTRONICS CO\n'
+        'Balance: SAR 5120.45\n'
+        'Date: 30/07/2026 16:48:02',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'pos_purchase',
+    ruleId: 'sab-pos-purchase-en',
+    amount: '249.9',
+    currency: 'SAR',
+    merchant: 'SAMPLE ELECTRONICS CO',
+    instrumentMasked: '****7788',
+    instrumentKind: 'card',
+    instrumentNetwork: 'visa',
+    remainingBalance: '5120.45',
+    occurredAtUtc: '2026-07-30T13:48:02.000Z',
+    direction: 'debit',
+    affectsSpend: true,
+  ),
+
+  // --- 2/4 Same type, NO balance and no wallet tag ------------------------
+  //
+  // The structural spec is explicit that a running balance is not on every
+  // SAB purchase. This fixture is what stops anyone adding `remainingBalance`
+  // to `requiredFields` — doing so would route every message of this shape to
+  // Needs Review while looking like a tightening improvement.
+  SmsFixture(
+    id: 'sab-02-pos-purchase-en-no-balance',
+    sender: 'SAB',
+    body:
+        'SAB\n'
+        'Purchase\n'
+        'Card: ****7788;Mada\n'
+        'Amount: SAR 63.00\n'
+        'Merchant: SAMPLE BAKERY\n'
+        'Date: 28/07/2026 07:12:33',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'pos_purchase',
+    ruleId: 'sab-pos-purchase-en',
+    amount: '63',
+    currency: 'SAR',
+    merchant: 'SAMPLE BAKERY',
+    instrumentMasked: '****7788',
+    instrumentKind: 'card',
+    instrumentNetwork: 'mada',
+    occurredAtUtc: '2026-07-28T04:12:33.000Z',
+    direction: 'debit',
+    affectsSpend: true,
+  ),
+
+  // --- 3/4 The SAME purchase type, in Arabic ------------------------------
+  //
+  // Same fields, Arabic labels carrying the definite article, and the network
+  // in parentheses rather than semicolon-joined — a different pattern, not a
+  // widened English one. Note it resolves to the same card ****7788 as the
+  // English fixtures: identity is bank + kind + digits, so a bank switching
+  // language mid-month must not split one card into two.
+  SmsFixture(
+    id: 'sab-03-pos-purchase-ar',
+    sender: 'SAB',
+    body:
+        'SAB\n'
+        'شراء\n'
+        'البطاقة: ****7788 (فيزا)\n'
+        'المبلغ: 318.25 SAR\n'
+        'لدى: SAMPLE FURNITURE HOUSE\n'
+        'الرصيد: 4801.10 SAR\n'
+        'التاريخ: 27/07/2026 20:03:11',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'pos_purchase',
+    ruleId: 'sab-pos-purchase-ar',
+    amount: '318.25',
+    currency: 'SAR',
+    merchant: 'SAMPLE FURNITURE HOUSE',
+    instrumentMasked: '****7788',
+    instrumentKind: 'card',
+    instrumentNetwork: 'فيزا',
+    remainingBalance: '4801.1',
+    occurredAtUtc: '2026-07-27T17:03:11.000Z',
+    direction: 'debit',
+    affectsSpend: true,
+  ),
+
+  // --- 4/4 Arabic incoming-transfer deposit -------------------------------
+  //
+  // The masked account named here is the user's own receiving account, so it
+  // IS the instrument. The sender's IBAN is matched and deliberately not
+  // extracted — there is no field for a counterparty identifier, and putting
+  // it in `instrumentRef` would attribute the user's money to a stranger's
+  // account inside their own bank tree.
+  SmsFixture(
+    id: 'sab-04-transfer-in-ar',
+    sender: 'SAB',
+    body:
+        'SAB\n'
+        'إيداع حوالة واردة\n'
+        'إلى حساب: ****1122\n'
+        'من: SAMPLE SENDER NAME\n'
+        'الايبان: SA**7654\n'
+        'البنك: Sample Bank Two\n'
+        'المبلغ: 3200.00 SAR\n'
+        'التاريخ: 29/07/2026 11:20:35\n'
+        'المرجع: SABX20260729A0099',
+    expect: ExpectedOutcome.parsed,
+    messageType: 'transfer_in',
+    ruleId: 'sab-transfer-in-ar',
+    amount: '3200',
+    currency: 'SAR',
+    instrumentMasked: '****1122',
+    instrumentKind: 'account',
+    counterpartyName: 'SAMPLE SENDER NAME',
+    counterpartyBankName: 'Sample Bank Two',
+    referenceNumber: 'SABX20260729A0099',
+    occurredAtUtc: '2026-07-29T08:20:35.000Z',
+    direction: 'credit',
+    affectsSpend: false,
+  ),
+
+  // --- Biometric / login notification (ignore) ----------------------------
+  //
+  // Security-shaped text from a financial sender. Recognised at priority 900
+  // so that the next loosely-written rule anyone adds to this bank cannot
+  // read one as a movement.
+  SmsFixture(
+    id: 'sab-05-login-notification',
+    sender: 'SAB',
+    body: 'SAB: تم تسجيل الدخول إلى التطبيق باستخدام البصمة على جهاز جديد.',
+    expect: ExpectedOutcome.ignored,
+    messageType: 'security_notification',
+    ruleId: 'sab-login-notification-ar',
+    classification: 'ignored_info',
+  ),
+
+  // --- Safety net ---------------------------------------------------------
+  SmsFixture(
+    id: 'sab-06-unknown-template',
+    sender: 'SAB',
+    body: 'SAB: SAR 75.40 debited. Merchant SAMPLE GROCER 3. Ref ZZ0088.',
+    expect: ExpectedOutcome.unparsed,
+  ),
 ];
 
 /// Senders that match no bank in any pack.
@@ -937,11 +1552,37 @@ const List<SmsFixture> nonFinancialFixtures = <SmsFixture>[
   ),
 ];
 
+/// SAIB — a recognised sender with **no templates at all**, which is a
+/// complete state and not a stub (AC-A6.5). No message of any kind was
+/// observed for this bank in the KHA-136 round, so nothing is guessed.
+///
+/// The fixture exists so the corpus covers all seven configured banks and so
+/// the sender-only path is exercised by the same sweep as everything else:
+/// past gate 1, no rule, review queue, nothing lost.
+const List<SmsFixture> saibFixtures = <SmsFixture>[
+  SmsFixture(
+    id: 'saib-01-no-template-yet',
+    sender: 'SAIB',
+    body: 'SAIB: Payment of SAR 512.00 completed. Reference QQ4410.',
+    expect: ExpectedOutcome.unparsed,
+  ),
+];
+
 /// Everything, in one list, so the "nothing is silently discarded" assertion
 /// can iterate the whole corpus without a test author having to remember to
 /// add each group.
+///
+/// **Add every new group here.** A fixture list that exists but is not in
+/// this list is invisible to the NFR-A7 sweep in `rule_pack_corpus_test.dart`
+/// — which is the one assertion in the suite designed to catch a message
+/// disappearing rather than a message parsing wrongly.
 const List<SmsFixture> allFixtures = <SmsFixture>[
   ...aljaziraFixtures,
   ...d360Fixtures,
+  ...neraFixtures,
+  ...alRajhiFixtures,
+  ...stcBankFixtures,
+  ...saibFixtures,
+  ...sabFixtures,
   ...nonFinancialFixtures,
 ];
